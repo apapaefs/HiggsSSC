@@ -134,6 +134,27 @@ That tells Git to recurse into submodules for many common commands by default.
 
 ## Running Herwig On Timur
 
+Before running Herwig, two useful Linux commands are:
+
+```bash
+cd directory_name
+```
+
+Use `cd` to change into a directory. For example:
+
+```bash
+cd /home/shared/HerwigTesting/
+```
+
+To view a file in the terminal, use:
+
+```bash
+less filename
+```
+
+For example, `less LHC.log` opens the file for reading, and you can press `q`
+to quit.
+
 To log in to Timur, open a terminal and run:
 
 ```bash
