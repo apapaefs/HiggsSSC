@@ -155,6 +155,15 @@ less filename
 For example, `less LHC.log` opens the file for reading, and you can press `q`
 to quit.
 
+Before you start working, copy the shared testing area into your home
+directory and work from there instead of editing files in the shared location:
+
+```bash
+mkdir -p ~/HerwigWork
+cp -r /home/shared/HerwigTesting ~/HerwigWork/
+cd ~/HerwigWork/HerwigTesting
+```
+
 To log in to Timur, open a terminal and run:
 
 ```bash
