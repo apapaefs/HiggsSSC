@@ -132,6 +132,54 @@ git config --global submodule.recurse true
 
 That tells Git to recurse into submodules for many common commands by default.
 
+## Running Herwig On Timur
+
+To log in to Timur, open a terminal and run:
+
+```bash
+ssh -Y YourUsername@timur.kennesaw.edu
+```
+
+Load Herwig after each login:
+
+```bash
+module load herwig/stable
+```
+
+The shared testing directory is:
+
+```text
+/home/shared/HerwigTesting/
+```
+
+### Basic Workflow
+
+Read an input file:
+
+```bash
+Herwig read LHC.in
+```
+
+Run Herwig using the generated run file:
+
+```bash
+Herwig run LHC.run -N1000
+```
+
+This example generates `1000` events.
+
+After the run, inspect:
+
+- `LHC.out` for the processes that were generated.
+- `LHC.log` for run and event information.
+
+### Student Exercise
+
+1. Read and run `LEP.in`.
+2. Check the corresponding `.out` file.
+3. Read the corresponding `.log` file.
+4. Modify `LHC.in` to run a different process.
+
 ## Operational Discipline
 
 - Code changes live in `HiggsSSC`.
