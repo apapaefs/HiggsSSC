@@ -1,6 +1,6 @@
 # HiggsSSC
 
-Higgs Boson production at the SuperConducting SuperCollider.
+What if? Higgs Boson production at the SuperConducting SuperCollider.
 
 This repository is intended to act as the superproject, with the paper tracked
 as a Git submodule in `paper/` using the GitHub repository
