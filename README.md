@@ -141,12 +141,70 @@ After the run, inspect:
 - `LHC.out` for the processes that were generated.
 - `LHC.log` for run and event information.
 
+## Changing The Process In `LHC.in`
+
+In `LHC.in`, the active physics process is controlled in the section called
+`Matrix Elements for hadron-hadron collisions`.
+
+Lines that begin with `#` are comments, so Herwig ignores them. A line without
+`#` is active. The default active process is:
+
+```text
+insert SubProcess:MatrixElements[0] MEqq2gZ2ff
+```
+
+That corresponds to Drell-Yan `Z/gamma` production. To change the process,
+comment out the current active line by adding `#` at the front, then remove
+the `#` from one new process line.
+
+For example, to switch from Drell-Yan `Z/gamma` to Drell-Yan `W` production:
+
+```text
+# insert SubProcess:MatrixElements[0] MEqq2gZ2ff
+insert SubProcess:MatrixElements[0] MEqq2W2ff
+```
+
+Change one process at a time at first. This makes it much easier to understand
+which change caused the output you see in the `.out` and `.log` files.
+
+Some good first processes to try are:
+
+- `MEqq2W2ff` for Drell-Yan `W` production.
+- `MEWJet` or `MEZJet` for a vector boson produced with a jet.
+- `MEQCD2to2` for ordinary QCD two-to-two scattering.
+- `MEHeavyQuark` for top-antitop production.
+- `MEHiggs` for inclusive Higgs production.
+- `MEHiggsJet` for Higgs plus jet production.
+- `MEPP2HiggsVBF` for vector-boson-fusion Higgs production.
+- `MEPP2ttbarH` for Higgs production with a top-antitop pair.
+
+For the Higgs examples, read the comments already in `LHC.in` carefully. Some
+Higgs-associated processes include extra suggested settings, such as setting
+the jet `pT` cut to zero:
+
+```text
+set /Herwig/Cuts/JetKtCut:MinKT 0.0*GeV
+```
+
+After editing `LHC.in`, read the file again before running:
+
+```bash
+Herwig read LHC.in
+Herwig run LHC.run -N1000
+```
+
+Then compare the new `LHC.out` and `LHC.log` files with the previous run.
+Look for the reported cross section in the output, and keep a short record of
+which process you ran and what cross section Herwig reported.
+
 ## Student Exercise
 
 1. Read and run `LEP.in`.
 2. Check the corresponding `.out` file.
 3. Read the corresponding `.log` file.
 4. Modify `LHC.in` to run a different process.
+5. For each process you try, document the process name, the number of events,
+   the reported cross section, and the units.
 
 ## Instructor/Maintainer Notes
 
