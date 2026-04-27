@@ -68,25 +68,37 @@ cp -r /home/shared/HerwigTesting ~/HerwigWork/
 cd ~/HerwigWork/HerwigTesting
 ```
 
-Two useful Linux commands are:
+Useful Linux commands:
 
-```bash
-cd directory_name
-```
-
-Use `cd` to change into a directory. For example:
-
-```bash
-cd ~/HerwigWork/HerwigTesting
-```
-
-To view a file in the terminal, use:
-
-```bash
-less filename
-```
+| Command | What it does | Example |
+| --- | --- | --- |
+| `ls` | Lists files in the current directory. | `ls` |
+| `ls -l` | Lists files with more detail. | `ls -l` |
+| `cd` | Changes into a directory. | `cd ~/HerwigWork/HerwigTesting` |
+| `cp` | Copies a file or directory. | `cp LHC.in LHC_backup.in` |
+| `mv` | Moves or renames a file. | `mv old_name.in new_name.in` |
+| `less` | Opens a file for reading in the terminal. | `less LHC.log` |
 
 For example, `less LHC.log` opens the file for reading. Press `q` to quit.
+
+Before editing an input file, it is a good idea to make a backup copy:
+
+```bash
+cp LHC.in LHC_original.in
+```
+
+If you make a mistake and want to restore the original version from your
+backup, copy it back:
+
+```bash
+cp LHC_original.in LHC.in
+```
+
+You can also restore a fresh original copy from the shared directory:
+
+```bash
+cp /home/shared/HerwigTesting/LHC.in ~/HerwigWork/HerwigTesting/LHC.in
+```
 
 ## Editing Files With Vim On Timur
 
@@ -197,6 +209,45 @@ Then compare the new `LHC.out` and `LHC.log` files with the previous run.
 Look for the reported cross section in the output, and keep a short record of
 which process you ran and what cross section Herwig reported.
 
+## Estimating The Expected Number Of Events
+
+Once you have a cross section, estimate how many events an experiment would
+expect with:
+
+```text
+N = L * sigma
+```
+
+Here `N` is the expected number of events, `sigma` is the cross section, and
+`L` is the integrated luminosity. Integrated luminosity measures the total
+amount of collision data collected: a larger `L` means more chances for a
+process to occur.
+
+For this exercise, assume the experiment collected:
+
+```text
+L = 100 fb^-1
+```
+
+If the cross section is in femtobarns (`fb`), then:
+
+```text
+N = 100 * sigma
+```
+
+If the cross section is in picobarns (`pb`), use:
+
+```text
+100 fb^-1 = 100000 pb^-1
+N = 100000 * sigma
+```
+
+For example, if Herwig reports `sigma = 5 pb`, then:
+
+```text
+N = 100000 * 5 = 500000 events
+```
+
 ## Student Exercise
 
 1. Read and run `LEP.in`.
@@ -205,6 +256,8 @@ which process you ran and what cross section Herwig reported.
 4. Modify `LHC.in` to run a different process.
 5. For each process you try, document the process name, the number of events,
    the reported cross section, and the units.
+6. Using `L = 100 fb^-1`, calculate the expected number of events for each
+   process.
 
 ## Instructor/Maintainer Notes
 
