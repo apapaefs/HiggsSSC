@@ -147,6 +147,8 @@ Herwig run LHC.run -N1000
 ```
 
 This example generates `1000` events.
+If a run is taking too long or you realize you started the wrong command, press
+`Ctrl-C` in the terminal to cancel it.
 
 After the run, inspect:
 
