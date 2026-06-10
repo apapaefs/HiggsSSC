@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/../.." && pwd)"
+mg5_dir="${MG5_DIR:-$repo_root/MG5_aMC_v3_5_15}"
+launcher="$mg5_dir/bin/mg5_aMC"
+
+if [[ ! -f "$launcher" ]]; then
+  echo "patch_mg5_logging: missing MG5 launcher: $launcher" >&2
+  exit 1
+fi
+
+needs_patch="$(
+  awk '
+    /^import logging$/ {
+      seen_logging = 1
+    }
+    /logging[.]warning/ {
+      if (seen_logging) {
+        print "no"
+      } else {
+        print "yes"
+      }
+      exit
+    }
+  ' "$launcher"
+)"
+
+if [[ "$needs_patch" != "yes" ]]; then
+  exit 0
+fi
+
+tmp="$(mktemp "${launcher}.tmp.XXXXXX")"
+if ! awk '
+  { print }
+  $0 == "import sys" && !done {
+    print "import logging"
+    done = 1
+  }
+  END {
+    if (!done) {
+      exit 2
+    }
+  }
+' "$launcher" > "$tmp"; then
+  rm -f "$tmp"
+  echo "patch_mg5_logging: could not find \"import sys\" in $launcher" >&2
+  exit 1
+fi
+
+chmod +x "$tmp"
+mv "$tmp" "$launcher"
+echo "patch_mg5_logging: added import logging to $launcher"

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/../.." && pwd)"
+export MG5_DIR="${MG5_DIR:-$repo_root/MG5_aMC_v3_5_15}"
+
+"$script_dir/patch_mg5_logging"
+
+launcher="$MG5_DIR/bin/mg5_aMC"
+python_bin="${MG5_PYTHON:-python3}"
+exec "$python_bin" "$launcher" "$@"

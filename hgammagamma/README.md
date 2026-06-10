@@ -124,25 +124,36 @@ python3 --version
 
 MG5 `v3.5.15` should be run with Python `3.10` or newer.  If Timur's default
 `python3` is Python `3.9`, the MG5 launcher can stop immediately with
-`NameError: name 'logging' is not defined`.  In that case load or use a newer
-Python module if one is available, for example:
+`NameError: name 'logging' is not defined`.  The repository provides a small
+personal module that patches this MG5 launcher bug once and exposes a safe
+`mg5_aMC` wrapper:
+
+```bash
+module use /home/apapaefs/HiggsSSC/modulefiles
+module load higgsssc/mg5
+mg5_aMC
+```
+
+If the repository was cloned somewhere else, replace
+`/home/apapaefs/HiggsSSC/modulefiles` with the `modulefiles` directory inside
+that clone.  To make this permanent, add the `module use` line to
+`~/.bashrc`.
+
+If a newer Python module exists on Timur, you can still use it.  Module names
+are machine dependent, so first search for the available names:
 
 ```bash
 module avail python
-module load python/3.11
-python3.11 --version
-python3.11 ./bin/mg5_aMC
+module avail Python
 ```
 
-If the module makes `python3` point to Python `3.11`, then
-`python3 ./bin/mg5_aMC` is also fine.  The important point is to run the MG5
-launcher with Python `3.10` or newer.
+If that shows a Python `3.10` or newer module, load the module name that exists
+on Timur.  If no newer Python module is available and you do not want to use
+the repository module, patch the MG5 launcher manually once:
 
-If no newer Python module is available, edit `MG5_aMC_v3_5_15/bin/mg5_aMC` and
-add this line immediately below `import sys`:
-
-```python
-import logging
+```bash
+grep -q '^import logging$' bin/mg5_aMC || sed -i '/^import sys$/a import logging' bin/mg5_aMC
+python3 ./bin/mg5_aMC
 ```
 
 Inside MG5:
@@ -644,36 +655,39 @@ On `timur.kennesaw.edu`, Herwig is available through:
 module load herwig/stable
 ```
 
-If MG5 needs a newer Python than the default `python3`, pass it to the runner:
+Load the repository MG5 helper module before running the campaign:
+
+```bash
+module use /home/apapaefs/HiggsSSC/modulefiles
+module load higgsssc/mg5
+```
+
+This sets `MG5_DIR`, exposes the safe `mg5_aMC` wrapper, and patches the MG5
+launcher if needed.  Then the usual Timur campaign command is:
 
 ```bash
 python3 hgammagamma/run_gammagamma_campaign.py \
-  --mg5-dir /path/to/MG5_aMC_v3_5_15 \
-  --mg5-python python3.11 \
+  --mg5-dir "$MG5_DIR" \
   --nevents 10000
-```
-
-The same setting can be supplied with:
-
-```bash
-export MG5_PYTHON=python3.11
 ```
 
 The runner loads `herwig/stable` automatically on Linux when `--herwig-env` is
-not set, so the usual Timur command is:
+not set.  If you prefer to show the Herwig module choice explicitly, use:
 
 ```bash
 python3 hgammagamma/run_gammagamma_campaign.py \
-  --mg5-dir /path/to/MG5_aMC_v3_5_15 \
+  --mg5-dir "$MG5_DIR" \
+  --herwig-module herwig/stable \
   --nevents 10000
 ```
 
-If you want the command to show the module choice explicitly, use:
+If you do have a newer Python executable and want the runner to use it for MG5,
+pass it explicitly:
 
 ```bash
 python3 hgammagamma/run_gammagamma_campaign.py \
-  --mg5-dir /path/to/MG5_aMC_v3_5_15 \
-  --herwig-module herwig/stable \
+  --mg5-dir "$MG5_DIR" \
+  --mg5-python python3.10 \
   --nevents 10000
 ```
 

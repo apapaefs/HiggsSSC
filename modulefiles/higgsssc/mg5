@@ -1,0 +1,33 @@
+#%Module1.0
+
+proc ModulesHelp { } {
+    puts stderr "Sets up the HiggsSSC MG5 wrapper."
+    puts stderr "The wrapper patches the MG5 v3.5.15 logging import bug once and then runs MG5 with python3."
+}
+
+module-whatis "HiggsSSC MG5 wrapper and MG5 v3.5.15 logging patch"
+
+set module_file [file normalize [info script]]
+set module_dir [file dirname $module_file]
+set repo_root [file normalize [file join $module_dir .. ..]]
+set mg5_dir [file join $repo_root MG5_aMC_v3_5_15]
+set wrapper_dir [file join $repo_root hgammagamma bin]
+set patcher [file join $wrapper_dir patch_mg5_logging]
+
+setenv HIGGSSSC_ROOT $repo_root
+setenv MG5_DIR $mg5_dir
+prepend-path PATH $wrapper_dir
+
+if { [module-info mode load] } {
+    if { [file executable $patcher] } {
+        if { [catch { exec env MG5_DIR=$mg5_dir $patcher } result] } {
+            puts stderr "higgsssc/mg5: warning: could not patch MG5 launcher: $result"
+        } elseif { $result ne "" } {
+            puts stderr $result
+        }
+    } else {
+        puts stderr "higgsssc/mg5: warning: missing patch helper $patcher"
+    }
+    puts stderr "higgsssc/mg5: MG5_DIR=$mg5_dir"
+    puts stderr "higgsssc/mg5: use mg5_aMC, or run the campaign with --mg5-dir \$MG5_DIR"
+}
