@@ -11,8 +11,13 @@ HERWIG="${HERWIG:-Herwig}"
 HERWIG_PDF="${HERWIG_PDF:-NNPDF31_nnlo_as_0118}"
 DEFAULT_HERWIG_ENV="${DEFAULT_HERWIG_ENV:-${HOME}/Projects/Herwig/Herwig-REAL-stable-gcc-full/bin/activate}"
 HERWIG_ENV="${HERWIG_ENV:-}"
-if [[ -z "${HERWIG_ENV}" && -f "${DEFAULT_HERWIG_ENV}" ]]; then
+HERWIG_MODULE="${HERWIG_MODULE:-}"
+NO_HERWIG_MODULE="${NO_HERWIG_MODULE:-0}"
+if [[ -z "${HERWIG_ENV}" && -z "${HERWIG_MODULE}" && -f "${DEFAULT_HERWIG_ENV}" ]]; then
   HERWIG_ENV="${DEFAULT_HERWIG_ENV}"
+fi
+if [[ -z "${HERWIG_ENV}" && -z "${HERWIG_MODULE}" && "${NO_HERWIG_MODULE}" != "1" && "$(uname -s)" == "Linux" ]]; then
+  HERWIG_MODULE="herwig/stable"
 fi
 DEFAULT_COLLIER_DYLIB="${DEFAULT_COLLIER_DYLIB:-${HOME}/Projects/Herwig/Herwig-REAL-stable-gcc-full/opt/OpenLoops-2.1.4/lib/libcollier.2.dylib}"
 COLLIER_DYLIB="${COLLIER_DYLIB:-}"
@@ -104,30 +109,51 @@ require_inputs() {
   [[ -x "${MG5_DIR}/bin/mg5_aMC" ]] || die "missing MG5 executable: ${MG5_DIR}/bin/mg5_aMC"
   if [[ -n "${HERWIG_ENV}" ]]; then
     [[ -f "${HERWIG_ENV}" ]] || die "missing Herwig activation script: ${HERWIG_ENV}"
-  elif ! is_dry_run; then
-    command -v "${HERWIG}" >/dev/null 2>&1 || die "Herwig not found on PATH; set HERWIG_ENV or HERWIG"
+  elif [[ -z "${HERWIG_MODULE}" ]] && ! is_dry_run; then
+    command -v "${HERWIG}" >/dev/null 2>&1 || die "Herwig not found on PATH; set HERWIG_ENV, HERWIG_MODULE, or HERWIG"
   fi
   if [[ -n "${COLLIER_DYLIB}" ]]; then
     [[ -f "${COLLIER_DYLIB}" ]] || die "missing COLLIER dynamic library: ${COLLIER_DYLIB}"
   fi
 }
 
-run_herwig_in_dir() {
+module_setup_snippet() {
+  printf '%s' 'if ! type module >/dev/null 2>&1; then for module_init in /etc/profile.d/modules.sh /usr/share/Modules/init/bash /usr/share/lmod/lmod/init/bash; do [ -r "$module_init" ] && source "$module_init" && break; done; fi'
+}
+
+run_runtime_in_dir() {
   local dir="$1"
   shift
 
-  if [[ -n "${HERWIG_ENV}" ]]; then
+  if [[ -n "${HERWIG_ENV}" || -n "${HERWIG_MODULE}" ]]; then
     local command_string
     local quoted_args=""
     local arg
     for arg in "$@"; do
       quoted_args+=" $(printf '%q' "${arg}")"
     done
-    command_string="source $(printf '%q' "${HERWIG_ENV}"); $(printf '%q' "${HERWIG}")${quoted_args}"
+    command_string="set -e"
+    if [[ -n "${HERWIG_ENV}" ]]; then
+      command_string+="; source $(printf '%q' "${HERWIG_ENV}")"
+    fi
+    if [[ -n "${HERWIG_MODULE}" ]]; then
+      command_string+="; $(module_setup_snippet); module load $(printf '%q' "${HERWIG_MODULE}")"
+    fi
+    command_string+=";${quoted_args}"
     run_in_dir "${dir}" bash -lc "${command_string}"
   else
-    run_in_dir "${dir}" "${HERWIG}" "$@"
+    run_in_dir "${dir}" "$@"
   fi
+}
+
+run_runtime_cmd() {
+  run_runtime_in_dir "${PWD}" "$@"
+}
+
+run_herwig_in_dir() {
+  local dir="$1"
+  shift
+  run_runtime_in_dir "${dir}" "${HERWIG}" "$@"
 }
 
 prepare_collier_runtime() {
@@ -527,14 +553,14 @@ run_sample() {
     write_root_input_list "${herwig_events_dir}" "${root_input}"
   fi
 
-  run_cmd "${ANALYSIS_EXE}" "${root_input}" -t "${RUN_TAG}" -w "${weight_scale}"
+  run_runtime_cmd "${ANALYSIS_EXE}" "${root_input}" -t "${RUN_TAG}" -w "${weight_scale}"
 }
 
 main() {
   require_inputs
 
   log "Building gamma-gamma post-analysis"
-  run_cmd make -C "${ANALYSIS_CODE_DIR}" HwSimPostAnalysis_gammagamma
+  run_runtime_cmd make -C "${ANALYSIS_CODE_DIR}" HwSimPostAnalysis_gammagamma
 
   local sample_index=0
   local entry name category model process madspin_decay weight_scale

@@ -23,6 +23,7 @@ from typing import Iterable, Sequence
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 DEFAULT_HERWIG_PREFIX = Path.home() / "Projects/Herwig/Herwig-REAL-stable-gcc-full"
+DEFAULT_LINUX_HERWIG_MODULE = "herwig/stable"
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,7 @@ class Config:
     mg5_dir: Path
     herwig: str
     herwig_env: Path | None
+    herwig_module: str | None
     herwig_pdf: str
     collier_library: Path | None
     run_tag: str
@@ -114,15 +116,19 @@ def maybe_path(value: str | None) -> Path | None:
     return Path(value).expanduser()
 
 
-def guess_herwig_env() -> Path | None:
-    explicit = maybe_path(os.environ.get("HERWIG_ENV"))
-    if explicit:
-        return explicit
+def guess_default_herwig_env() -> Path | None:
     default = maybe_path(os.environ.get("DEFAULT_HERWIG_ENV"))
     if default and default.exists():
         return default
     candidate = DEFAULT_HERWIG_PREFIX / "bin" / "activate"
     return candidate if candidate.exists() else None
+
+
+def clean_optional_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None
 
 
 def guess_collier_library(herwig_env: Path | None) -> Path | None:
@@ -166,7 +172,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ebeam", type=float, default=env_float("EBEAM", 20000.0))
     parser.add_argument("--mg5-dir", type=Path, default=Path(env_text("MG5_DIR", str(REPO_ROOT / "MG5_aMC_v3_5_15"))))
     parser.add_argument("--herwig", default=env_text("HERWIG", "Herwig"))
-    parser.add_argument("--herwig-env", type=Path, default=guess_herwig_env())
+    parser.add_argument("--herwig-env", type=Path, default=maybe_path(os.environ.get("HERWIG_ENV")))
+    parser.add_argument(
+        "--herwig-module",
+        default=os.environ.get("HERWIG_MODULE"),
+        help="environment module to load before Herwig/HwSim commands; defaults to herwig/stable on Linux when no --herwig-env is used",
+    )
+    parser.add_argument(
+        "--no-herwig-module",
+        action="store_true",
+        default=env_bool("NO_HERWIG_MODULE", False),
+        help="disable the automatic Linux Herwig module default",
+    )
     parser.add_argument("--herwig-pdf", default=env_text("HERWIG_PDF", "NNPDF31_nnlo_as_0118"))
     parser.add_argument("--collier-library", type=Path, default=None)
     parser.add_argument("--run-tag", default=env_text("RUN_TAG", "run_01"))
@@ -190,13 +207,24 @@ def build_parser() -> argparse.ArgumentParser:
 
 def parse_config(argv: Sequence[str]) -> Config:
     args = build_parser().parse_args(argv)
-    collier_library = args.collier_library or guess_collier_library(args.herwig_env)
+    explicit_herwig_env = args.herwig_env.expanduser() if args.herwig_env else None
+    herwig_module = clean_optional_text(args.herwig_module)
+    if herwig_module is None and explicit_herwig_env is None and not args.no_herwig_module and platform.system() == "Linux":
+        herwig_module = DEFAULT_LINUX_HERWIG_MODULE
+    if args.no_herwig_module:
+        herwig_module = None
+    herwig_env = explicit_herwig_env
+    if herwig_env is None and herwig_module is None:
+        herwig_env = guess_default_herwig_env()
+
+    collier_library = args.collier_library or guess_collier_library(herwig_env)
     return Config(
         nevents=args.nevents,
         ebeam=args.ebeam,
         mg5_dir=args.mg5_dir.expanduser(),
         herwig=args.herwig,
-        herwig_env=args.herwig_env.expanduser() if args.herwig_env else None,
+        herwig_env=herwig_env,
+        herwig_module=herwig_module,
         herwig_pdf=args.herwig_pdf,
         collier_library=collier_library.expanduser() if collier_library else None,
         run_tag=args.run_tag,
@@ -253,6 +281,42 @@ def run_shell(command: str, cfg: Config, cwd: Path | None = None, env: dict[str,
     run(["bash", "-lc", command], cfg, cwd=cwd, env=env)
 
 
+def module_setup_snippet() -> str:
+    return (
+        "if ! type module >/dev/null 2>&1; then "
+        "for module_init in "
+        "/etc/profile.d/modules.sh "
+        "/usr/share/Modules/init/bash "
+        "/usr/share/lmod/lmod/init/bash; do "
+        "[ -r \"$module_init\" ] && source \"$module_init\" && break; "
+        "done; "
+        "fi"
+    )
+
+
+def runtime_setup_commands(cfg: Config) -> list[str]:
+    commands = ["set -e"]
+    if cfg.herwig_env:
+        commands.append(f"source {q(cfg.herwig_env)}")
+    if cfg.herwig_module:
+        commands.append(module_setup_snippet())
+        commands.append(f"module load {q(cfg.herwig_module)}")
+    return commands
+
+
+def run_runtime_command(
+    args: Sequence[object],
+    cfg: Config,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+) -> None:
+    if not cfg.herwig_env and not cfg.herwig_module:
+        run(args, cfg, cwd=cwd, env=env)
+        return
+    command = "; ".join([*runtime_setup_commands(cfg), format_command(args)])
+    run_shell(command, cfg, cwd=cwd, env=env)
+
+
 def require_inputs(cfg: Config) -> None:
     if not cfg.template_in.exists():
         die(f"missing Herwig template: {cfg.template_in}")
@@ -260,6 +324,8 @@ def require_inputs(cfg: Config) -> None:
         die(f"missing MG5 executable: {cfg.mg5_dir / 'bin' / 'mg5_aMC'}")
     if cfg.herwig_env and not cfg.herwig_env.exists():
         die(f"missing Herwig activation script: {cfg.herwig_env}")
+    if not cfg.herwig_env and not cfg.herwig_module and shutil.which(cfg.herwig) is None:
+        die(f"Herwig not found on PATH; set --herwig-env, --herwig-module, or --herwig")
     if cfg.collier_library and not cfg.collier_library.exists():
         die(f"missing COLLIER/OpenLoops library: {cfg.collier_library}")
 
@@ -524,12 +590,7 @@ def run_generate_events(process_dir: Path, runtime_lib_dir: Path | None, cfg: Co
 
 
 def run_herwig(cwd: Path, cfg: Config, args: Sequence[object]) -> None:
-    if cfg.herwig_env:
-        quoted_args = " ".join(q(arg) for arg in args)
-        command = f"source {q(cfg.herwig_env)}; {q(cfg.herwig)} {quoted_args}"
-        run_shell(command, cfg, cwd=cwd)
-    else:
-        run([cfg.herwig, *args], cfg, cwd=cwd)
+    run_runtime_command([cfg.herwig, *args], cfg, cwd=cwd)
 
 
 def find_lhe_file(process_dir: Path, prefer_decayed: bool) -> Path:
@@ -604,7 +665,7 @@ def run_sample(index: int, sample: Sample, cfg: Config) -> None:
     run_herwig(herwig_dir, cfg, ["run", f"{sample.name}.run", f"-N{cfg.nevents}"])
 
     write_root_input_list(herwig_events_dir, root_input, cfg)
-    run([cfg.analysis_exe, root_input, "-t", cfg.run_tag, "-w", sample.weight_scale], cfg)
+    run_runtime_command([cfg.analysis_exe, root_input, "-t", cfg.run_tag, "-w", sample.weight_scale], cfg)
 
 
 def main(argv: Sequence[str]) -> int:
@@ -612,7 +673,7 @@ def main(argv: Sequence[str]) -> int:
     require_inputs(cfg)
 
     log("Building gamma-gamma post-analysis")
-    run(["make", "-C", cfg.analysis_code_dir, "HwSimPostAnalysis_gammagamma"], cfg)
+    run_runtime_command(["make", "-C", cfg.analysis_code_dir, "HwSimPostAnalysis_gammagamma"], cfg)
 
     selected = [sample for sample in SAMPLES if sample_requested(sample, cfg)]
     if not selected:

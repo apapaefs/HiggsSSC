@@ -228,12 +228,24 @@ Useful first plots or checks include:
 
 ## LO Campaign Pipeline
 
-This section describes the current automated leading-order workflow.  The
-pipeline is meant to be run from the repository root, i.e.
+This section describes the current automated leading-order workflow.
+
+Start by cloning the repository onto the machine where you will run the
+campaign.  If your GitHub SSH key is set up, use:
 
 ```bash
-cd /path/to/HiggsSSC
+git clone git@github.com:apapaefs/HiggsSSC.git
+cd HiggsSSC
 ```
+
+If SSH is not set up, use the HTTPS URL instead:
+
+```bash
+git clone https://github.com/apapaefs/HiggsSSC.git
+cd HiggsSSC
+```
+
+All commands below assume that you are running from this repository root.
 
 The main scripts are:
 
@@ -276,6 +288,22 @@ You need:
 - ROOT available for the post-analysis executable;
 - Python 3 with `matplotlib` for the report script.
 
+On `timur.kennesaw.edu`, which is the Red Hat development machine for this
+workflow, Herwig is provided by the module:
+
+```bash
+module load herwig/stable
+```
+
+The Python runner will load this module automatically on Linux when no
+`--herwig-env` activation script is supplied.  To be explicit, you can also
+pass:
+
+```bash
+python3 hgammagamma/run_gammagamma_campaign.py \
+  --herwig-module herwig/stable
+```
+
 On the local development machine used to build this workflow, the Herwig
 environment is found automatically at:
 
@@ -283,8 +311,8 @@ environment is found automatically at:
 ~/Projects/Herwig/Herwig-REAL-stable-gcc-full/bin/activate
 ```
 
-On another machine, especially Linux, pass the Herwig environment explicitly if
-needed:
+On another machine with a Herwig activation script rather than modules, pass
+the Herwig environment explicitly if needed:
 
 ```bash
 python3 hgammagamma/run_gammagamma_campaign.py \
@@ -537,15 +565,26 @@ The Python runner is written so it can move to Linux.  On Linux the script uses
 `LD_LIBRARY_PATH` for optional OpenLoops/COLLIER runtime libraries.  The
 macOS-specific `install_name_tool` patching is only used on macOS.
 
-If your Linux machine has Herwig, MG5, ROOT, and the needed libraries already
-configured through modules, you will usually run something like:
+On `timur.kennesaw.edu`, Herwig is available through:
 
 ```bash
-module load herwig root
+module load herwig/stable
+```
+
+The runner loads `herwig/stable` automatically on Linux when `--herwig-env` is
+not set, so the usual Timur command is:
 
 python3 hgammagamma/run_gammagamma_campaign.py \
   --mg5-dir /path/to/MG5_aMC_v3_5_15 \
-  --herwig Herwig \
+  --nevents 10000
+```
+
+If you want the command to show the module choice explicitly, use:
+
+```bash
+python3 hgammagamma/run_gammagamma_campaign.py \
+  --mg5-dir /path/to/MG5_aMC_v3_5_15 \
+  --herwig-module herwig/stable \
   --nevents 10000
 ```
 
