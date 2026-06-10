@@ -162,6 +162,10 @@ output gg_h_gammagamma
 The `[noborn=QCD]` option tells MG5 to use the loop-induced gluon-fusion
 process rather than looking for a QCD Born contribution.
 
+If MG5 asks to install recommended libraries or helper packages while setting
+up this loop-induced process, accept the recommended installs.  Let MG5 manage
+those dependencies unless you already have a known working site installation.
+
 ## Beam Energy
 
 For the SSC setup we are using 20 TeV proton beams colliding with 20 TeV proton
