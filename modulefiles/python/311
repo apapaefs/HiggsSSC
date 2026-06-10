@@ -1,0 +1,39 @@
+#%Module1.0
+##
+## Python 3.11 modulefile for Timur.
+##
+
+proc ModulesHelp { } {
+    puts stderr "Sets up Python 3.11."
+    puts stderr "Also sets MG5_PYTHON for the MG5 launcher."
+}
+
+module-whatis "Python 3.11"
+
+conflict python
+
+set python_root /usr
+set python_bin [file join $python_root bin python3.11]
+
+if { ![file executable $python_bin] } {
+    error "python/311: could not find executable $python_bin. Edit python_root in this modulefile."
+}
+
+setenv PYTHON311_ROOT $python_root
+setenv PYTHON311_BIN $python_bin
+setenv MG5_PYTHON $python_bin
+prepend-path PATH [file join $python_root bin]
+prepend-path MANPATH [file join $python_root share man]
+
+if { $python_root ne "/usr" } {
+    prepend-path LD_LIBRARY_PATH [file join $python_root lib]
+    prepend-path LIBRARY_PATH [file join $python_root lib]
+    prepend-path CPATH [file join $python_root include]
+    prepend-path PKG_CONFIG_PATH [file join $python_root lib pkgconfig]
+}
+
+if { [module-info mode load] } {
+    puts stderr "python/311: using $python_bin"
+    puts stderr "python/311: MG5_PYTHON=$python_bin"
+    puts stderr "python/311: not setting PYTHONHOME, so virtual environments keep working"
+}

@@ -9,7 +9,12 @@ module-whatis "HiggsSSC MG5 wrapper and MG5 v3.5.15 logging patch"
 
 set module_file [file normalize [info script]]
 set module_dir [file dirname $module_file]
-set repo_root [file normalize [file join $module_dir .. ..]]
+set module_repo_root [file normalize [file join $module_dir .. ..]]
+if { [info exists env(HIGGSSSC_REPO_ROOT)] } {
+    set repo_root [file normalize $env(HIGGSSSC_REPO_ROOT)]
+} else {
+    set repo_root $module_repo_root
+}
 set mg5_dir [file join $repo_root MG5_aMC_v3_5_15]
 set wrapper_dir [file join $repo_root hgammagamma bin]
 set patcher [file join $wrapper_dir patch_mg5_logging]

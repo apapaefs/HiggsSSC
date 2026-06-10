@@ -108,52 +108,26 @@ This model contains the effective `h a a` interaction copied from
 
 ## Minimal MG5 Check
 
-From the repository root:
+From the directory containing the repository clone:
 
 ```bash
-cd MG5_aMC_v3_5_15
-python3 --version
-python3 ./bin/mg5_aMC
-```
-
-On `timur.kennesaw.edu`, first check the Python version:
-
-```bash
-python3 --version
-```
-
-MG5 `v3.5.15` should be run with Python `3.10` or newer.  If Timur's default
-`python3` is Python `3.9`, the MG5 launcher can stop immediately with
-`NameError: name 'logging' is not defined`.  The repository provides a small
-personal module that patches this MG5 launcher bug once and exposes a safe
-`mg5_aMC` wrapper:
-
-```bash
-module use /home/apapaefs/HiggsSSC/modulefiles
+cd HiggsSSC
+module use "$PWD/modulefiles"
+module load python/311
 module load higgsssc/mg5
 mg5_aMC
 ```
 
-If the repository was cloned somewhere else, replace
-`/home/apapaefs/HiggsSSC/modulefiles` with the `modulefiles` directory inside
-that clone.  To make this permanent, add the `module use` line to
-`~/.bashrc`.
+The `higgsssc/mg5` module is clone-local: it uses the `HiggsSSC` checkout from
+which you ran `module use "$PWD/modulefiles"`.  This means each student can
+clone the repository into their own home directory and get their own `MG5_DIR`.
 
-If a newer Python module exists on Timur, you can still use it.  Module names
-are machine dependent, so first search for the available names:
-
-```bash
-module avail python
-module avail Python
-```
-
-If that shows a Python `3.10` or newer module, load the module name that exists
-on Timur.  If no newer Python module is available and you do not want to use
-the repository module, patch the MG5 launcher manually once:
+If you want to run MG5 directly from the MG5 directory instead of using the
+wrapper, use:
 
 ```bash
-grep -q '^import logging$' bin/mg5_aMC || sed -i '/^import sys$/a import logging' bin/mg5_aMC
-python3 ./bin/mg5_aMC
+cd MG5_aMC_v3_5_15
+python3.11 ./bin/mg5_aMC
 ```
 
 Inside MG5:
@@ -658,7 +632,8 @@ module load herwig/stable
 Load the repository MG5 helper module before running the campaign:
 
 ```bash
-module use /home/apapaefs/HiggsSSC/modulefiles
+module use "$PWD/modulefiles"
+module load python/311
 module load higgsssc/mg5
 ```
 
@@ -678,16 +653,6 @@ not set.  If you prefer to show the Herwig module choice explicitly, use:
 python3 hgammagamma/run_gammagamma_campaign.py \
   --mg5-dir "$MG5_DIR" \
   --herwig-module herwig/stable \
-  --nevents 10000
-```
-
-If you do have a newer Python executable and want the runner to use it for MG5,
-pass it explicitly:
-
-```bash
-python3 hgammagamma/run_gammagamma_campaign.py \
-  --mg5-dir "$MG5_DIR" \
-  --mg5-python python3.10 \
   --nevents 10000
 ```
 
