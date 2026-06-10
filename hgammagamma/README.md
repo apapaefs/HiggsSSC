@@ -561,6 +561,11 @@ The report contains:
 - a `sample_summary.csv` file;
 - a zip file containing the plot images.
 
+The plots use a compact `SSCwf?` publication style inspired by the
+`H -> gamma gamma` figures in the ATLAS discovery paper,
+<https://arxiv.org/pdf/1207.7214>: white canvas, black axes with inward ticks,
+stepped stacked histograms, and in-plot simulation labels.
+
 By default, the report normalizes each sample to:
 
 ```text

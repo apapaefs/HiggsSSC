@@ -62,20 +62,21 @@ class PlotMeta:
     display_name: str
     x_label: str
     unit: str
+    x_range: tuple[float, float] | None = None
 
 
 PLOT_META: dict[str, PlotMeta] = {
     "number of selected photons": PlotMeta("n_selected_photons", "Selected Photon Multiplicity", r"$N_\gamma$", ""),
-    "pT of selected photons": PlotMeta("pt_photons", "Selected Photon Transverse Momentum", r"$p_T^\gamma$ [GeV]", "GeV"),
+    "pT of selected photons": PlotMeta("pt_photons", "Selected Photon Transverse Momentum", r"$p_T^\gamma$ [GeV]", "GeV", (0.0, 250.0)),
     "eta of selected photons": PlotMeta("eta_photons", "Selected Photon Pseudorapidity", r"$\eta_\gamma$", ""),
-    "pT of leading photon": PlotMeta("pt_gamma1", "Leading Photon Transverse Momentum", r"$p_T^{\gamma_1}$ [GeV]", "GeV"),
+    "pT of leading photon": PlotMeta("pt_gamma1", "Leading Photon Transverse Momentum", r"$p_T^{\gamma_1}$ [GeV]", "GeV", (0.0, 250.0)),
     "eta of leading photon": PlotMeta("eta_gamma1", "Leading Photon Pseudorapidity", r"$\eta_{\gamma_1}$", ""),
-    "pT of subleading photon": PlotMeta("pt_gamma2", "Subleading Photon Transverse Momentum", r"$p_T^{\gamma_2}$ [GeV]", "GeV"),
+    "pT of subleading photon": PlotMeta("pt_gamma2", "Subleading Photon Transverse Momentum", r"$p_T^{\gamma_2}$ [GeV]", "GeV", (0.0, 250.0)),
     "eta of subleading photon": PlotMeta("eta_gamma2", "Subleading Photon Pseudorapidity", r"$\eta_{\gamma_2}$", ""),
-    "diphoton invariant mass": PlotMeta("m_gg", "Diphoton Invariant Mass", r"$m_{\gamma\gamma}$ [GeV]", "GeV"),
+    "diphoton invariant mass": PlotMeta("m_gg", "Diphoton Invariant Mass", r"$m_{\gamma\gamma}$ [GeV]", "GeV", (100.0, 160.0)),
     "DeltaR of two leading photons": PlotMeta("deltaR_gg", "Diphoton Separation", r"$\Delta R_{\gamma\gamma}$", ""),
     "DeltaPhi of two leading photons": PlotMeta("deltaPhi_gg", "Diphoton Azimuthal Separation", r"$\Delta\phi_{\gamma\gamma}$ [rad]", "rad"),
-    "pT of diphoton system": PlotMeta("pt_gg", "Diphoton Transverse Momentum", r"$p_T^{\gamma\gamma}$ [GeV]", "GeV"),
+    "pT of diphoton system": PlotMeta("pt_gg", "Diphoton Transverse Momentum", r"$p_T^{\gamma\gamma}$ [GeV]", "GeV", (0.0, 250.0)),
     "rapidity of diphoton system": PlotMeta("y_gg", "Diphoton Rapidity", r"$y_{\gamma\gamma}$", ""),
 }
 
@@ -317,6 +318,19 @@ def bin_width(histogram: Histogram) -> float:
     return width if width > 0 else 1.0
 
 
+def bin_edges(histogram: Histogram) -> list[float]:
+    width = bin_width(histogram)
+    if not histogram.x:
+        return [histogram.x_min, histogram.x_max]
+    return [histogram.x[0] - 0.5 * width, *[x + 0.5 * width for x in histogram.x]]
+
+
+def step_values(values: Sequence[float]) -> list[float]:
+    if not values:
+        return []
+    return [*values, values[-1]]
+
+
 def scaled_histogram(histogram: Histogram, sample: SampleResult, normalization: str, density: bool) -> list[float]:
     total = sum(histogram.y)
     if total <= 0:
@@ -351,9 +365,49 @@ def ensure_matplotlib(output_dir: Path):
     import matplotlib
 
     matplotlib.use("Agg")
+    matplotlib.rcParams.update(
+        {
+            "figure.facecolor": "white",
+            "axes.facecolor": "white",
+            "axes.edgecolor": "black",
+            "axes.linewidth": 1.15,
+            "axes.grid": False,
+            "axes.labelsize": 13,
+            "axes.titlesize": 13,
+            "font.family": "DejaVu Sans",
+            "font.size": 11,
+            "legend.fontsize": 10,
+            "xtick.direction": "in",
+            "ytick.direction": "in",
+            "xtick.major.size": 6,
+            "ytick.major.size": 6,
+            "xtick.minor.size": 3,
+            "ytick.minor.size": 3,
+            "xtick.top": True,
+            "ytick.right": True,
+            "savefig.facecolor": "white",
+            "savefig.bbox": "tight",
+        }
+    )
     import matplotlib.pyplot as plt
 
     return plt
+
+
+def publication_color(sample: SampleResult, background_index: int) -> str:
+    if sample.category == "Signal":
+        return "#9ecae1"
+    background_colors = ["#e41a1c", "#984ea3", "#ff7f00", "#4daf4a", "#a65628", "#f781bf"]
+    return background_colors[background_index % len(background_colors)]
+
+
+def add_publication_labels(ax, title: str, normalization: str) -> None:
+    ax.text(0.06, 0.94, "SSCwf?", transform=ax.transAxes, ha="left", va="top", fontweight="bold", fontstyle="italic", fontsize=14)
+    ax.text(0.06, 0.875, r"LO simulation, $\sqrt{s}=40$ TeV", transform=ax.transAxes, ha="left", va="top", fontsize=10)
+    if title == "diphoton invariant mass":
+        ax.text(0.06, 0.815, r"$H\rightarrow\gamma\gamma$", transform=ax.transAxes, ha="left", va="top", fontsize=10)
+    if normalization == "selected_xsec":
+        ax.text(0.06, 0.065, r"Norm: $\sigma \times w \times \epsilon_{\gamma\gamma}$", transform=ax.transAxes, ha="left", va="bottom", fontsize=9)
 
 
 def plot_histogram(
@@ -369,34 +423,42 @@ def plot_histogram(
     reference = next(sample.histograms[title] for sample in samples if title in sample.histograms)
     x_values = reference.x
     width = bin_width(reference)
+    edges = bin_edges(reference)
     bottoms = [0.0 for _ in x_values]
-    colors = {
-        "Signal": "#d62728",
-        "Backgrounds": "#4c78a8",
-    }
-    alternate_backgrounds = ["#4c78a8", "#72b7b2", "#f58518", "#54a24b", "#b279a2"]
 
-    fig, ax = plt.subplots(figsize=(8.0, 5.6))
+    fig, ax = plt.subplots(figsize=(6.8, 5.1))
     rows: list[dict[str, str | float]] = []
+    background_index = 0
 
-    for index, sample in enumerate(ordered_samples(samples)):
+    for sample in ordered_samples(samples):
         if title not in sample.histograms:
             continue
         hist = sample.histograms[title]
         y_values = scaled_histogram(hist, sample, normalization, density)
-        color = colors["Signal"] if sample.category == "Signal" else alternate_backgrounds[index % len(alternate_backgrounds)]
-        ax.bar(
-            x_values,
-            y_values,
-            width=width * 0.92,
-            bottom=bottoms,
-            align="center",
+        color = publication_color(sample, background_index)
+        if sample.category != "Signal":
+            background_index += 1
+
+        tops = [bottom + value for bottom, value in zip(bottoms, y_values)]
+        ax.fill_between(
+            edges,
+            step_values(bottoms),
+            step_values(tops),
+            step="post",
             label=sample.label,
             color=color,
-            edgecolor="black",
-            linewidth=0.35,
-            alpha=0.88,
+            alpha=0.92 if sample.category == "Signal" else 0.96,
+            linewidth=0.0,
         )
+        ax.step(
+            edges,
+            step_values(tops),
+            where="post",
+            color="black" if sample.category != "Signal" else "#1f77b4",
+            linewidth=0.7 if sample.category != "Signal" else 1.15,
+            label="_nolegend_",
+        )
+
         for bin_index, x in enumerate(x_values):
             rows.append(
                 {
@@ -412,22 +474,35 @@ def plot_histogram(
                     "selected_cross_section_pb": sample.selected_cross_section_pb,
                 }
             )
-        bottoms = [bottom + value for bottom, value in zip(bottoms, y_values)]
+        bottoms = tops
 
-    ax.set_xlim(reference.x_min, reference.x_max)
+    if any(bottoms):
+        ax.step(edges, step_values(bottoms), where="post", color="black", linewidth=1.05, label="_nolegend_")
+
+    plot_x_min, plot_x_max = meta.x_range if meta.x_range else (reference.x_min, reference.x_max)
+    ax.set_xlim(plot_x_min, plot_x_max)
     ax.set_xlabel(meta.x_label)
     if normalization == "unit_area":
         y_label = "Unit-normalized shape"
     elif density and meta.unit:
-        y_label = rf"$d(\sigma\times\epsilon)/dx$ [pb/{meta.unit}]"
+        y_label = rf"$\mathrm{{d}}\sigma_{{\rm sel}}/\mathrm{{d}}x$ [pb/{meta.unit}]"
     elif density:
-        y_label = r"$d(\sigma\times\epsilon)/dx$ [pb]"
+        y_label = r"$\mathrm{d}\sigma_{\rm sel}/\mathrm{d}x$ [pb]"
     else:
-        y_label = r"Bin yield normalized to $\sigma\times\epsilon$ [pb]"
+        y_label = r"Bin cross section [pb]"
     ax.set_ylabel(y_label)
-    ax.set_title(meta.display_name)
-    ax.grid(True, axis="y", alpha=0.25)
-    ax.legend(frameon=False)
+    ax.minorticks_on()
+    ax.tick_params(which="both", direction="in", top=True, right=True)
+    visible_tops = [
+        value
+        for bin_index, value in enumerate(bottoms)
+        if edges[bin_index] < plot_x_max and edges[bin_index + 1] > plot_x_min
+    ]
+    ymax = max(visible_tops) if visible_tops else (max(bottoms) if bottoms else 0.0)
+    if ymax > 0:
+        ax.set_ylim(0.0, ymax * 1.35)
+    add_publication_labels(ax, title, normalization)
+    ax.legend(frameon=False, loc="upper right", handlelength=1.6, borderaxespad=0.6)
     fig.tight_layout()
 
     plot_dir = output_dir / "plots"
@@ -437,7 +512,7 @@ def plot_histogram(
     png_path = plot_dir / f"{meta.slug}.png"
     svg_path = plot_dir / f"{meta.slug}.svg"
     csv_path = data_dir / f"{meta.slug}.csv"
-    fig.savefig(png_path, dpi=160)
+    fig.savefig(png_path, dpi=220)
     fig.savefig(svg_path)
     plt.close(fig)
 
@@ -452,8 +527,8 @@ def plot_histogram(
         "png": png_path.relative_to(output_dir).as_posix(),
         "svg": svg_path.relative_to(output_dir).as_posix(),
         "csv": csv_path.relative_to(output_dir).as_posix(),
-        "x_min": reference.x_min,
-        "x_max": reference.x_max,
+        "x_min": plot_x_min,
+        "x_max": plot_x_max,
         "unit": meta.unit,
     }
 
