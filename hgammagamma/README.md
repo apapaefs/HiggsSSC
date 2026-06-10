@@ -67,14 +67,84 @@ generate h > a a
 output hgammagamma_decay
 ```
 
-For a production-and-decay study, start from a Higgs production mode and attach
-the decay. For example:
+For a production-and-decay study, generate the Higgs production process first
+and let MadSpin handle the decay. For gluon-fusion Higgs production use:
 
 ```text
 import model loop_sm_haa
-generate g g > h, h > a a
+generate g g > h [noborn=QCD]
 output gg_h_gammagamma
 ```
+
+The `[noborn=QCD]` option tells MG5 to use the loop-induced gluon-fusion
+process rather than looking for a QCD Born contribution.
+
+## Beam Energy
+
+For the SSC setup we are using 20 TeV proton beams colliding with 20 TeV proton
+beams, for a total centre-of-mass energy of 40 TeV. MG5 stores beam energies in
+GeV, so each beam should be set to `20000`.
+
+After generating and outputting the process, launch it:
+
+```text
+launch gg_h_gammagamma
+```
+
+At the launch prompt, set the beam energies before running:
+
+```text
+set ebeam1 20000
+set ebeam2 20000
+```
+
+You can also edit `gg_h_gammagamma/Cards/run_card.dat` directly and set:
+
+```text
+     1        = lpp1    ! beam 1 type
+     1        = lpp2    ! beam 2 type
+ 20000.0      = ebeam1  ! beam 1 total energy in GeV
+ 20000.0      = ebeam2  ! beam 2 total energy in GeV
+```
+
+## MadSpin Decay
+
+Use MadSpin to decay the produced Higgs boson:
+
+```text
+h > a a
+```
+
+After `output gg_h_gammagamma`, edit
+`gg_h_gammagamma/Cards/madspin_card.dat`. If the file does not exist yet, copy
+the default card first:
+
+```bash
+cp gg_h_gammagamma/Cards/madspin_card_default.dat gg_h_gammagamma/Cards/madspin_card.dat
+```
+
+Use this minimal MadSpin card:
+
+```text
+set spinmode none
+
+decay h > a a
+
+launch
+```
+
+To enable MadSpin when launching the run, type:
+
+```text
+launch gg_h_gammagamma
+madspin=ON
+set ebeam1 20000
+set ebeam2 20000
+```
+
+Then continue the launch as usual. MG5 will generate the hard process
+`g g > h [noborn=QCD]` and MadSpin will decay the Higgs according to the
+`decay h > a a` line in `madspin_card.dat`.
 
 ## Notes To Record
 
@@ -82,7 +152,9 @@ When adding results to this directory, record:
 
 - the MG5 version;
 - the exact process card;
+- the exact MadSpin card;
 - the Higgs mass and width used in the param card;
+- `ebeam1 = 20000` and `ebeam2 = 20000` for the 40 TeV setup;
 - any generation cuts;
 - the number of generated events;
 - the random seed;
