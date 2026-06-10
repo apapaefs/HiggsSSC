@@ -1,0 +1,18 @@
+# Local MG5 installs/downloads used by gamma-gamma smoke tests.
+/LTS_MG5aMC_v*.tgz
+/MG5_aMC_v*_*/
+
+# Generated LO gamma-gamma campaign outputs.
+/hgammagamma/LOAnalysis/Signal/events/
+/hgammagamma/LOAnalysis/Backgrounds/events/
+/hgammagamma/LOAnalysis/plots/
+
+# Local analysis build products.
+/hgammagamma/LOAnalysis/Code/*.o
+/hgammagamma/LOAnalysis/Code/HwSimPostAnalysis_gammagamma
+/hgammagamma/LOAnalysis/Code/HwSimPostAnalysis_objects
+/hgammagamma/LOAnalysis/Code/HwSimPostAnalysis_objects_jetfinding
+
+# Python caches.
+__pycache__/
+*.py[cod]

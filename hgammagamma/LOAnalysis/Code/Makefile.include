@@ -1,0 +1,43 @@
+
+#######################################################
+#
+#
+# IF SOME OF THESE ARE NOT IN THE PATH YOU WILL NEED
+# TO ADD THEM MANUALLY
+#
+#######################################################
+
+
+ROOTHOME := $(shell root-config --prefix)
+
+ROOT_LIB_DIR  := $(ROOTHOME)/lib
+ROOT_CPPFLAGS := -I$(shell root-config --incdir)
+ROOT_LDFLAGS  := $(shell root-config --libs)
+
+#Fastjet
+FASTJET_CONFIG := $(shell command -v fastjet-config 2>/dev/null)
+ifneq ($(FASTJET_CONFIG),)
+FASTJET := $(shell fastjet-config --prefix)
+FASTJET_CPPFLAGS := -I$(FASTJET)/include
+#FASTJET_LDFLAGS := -L$(FASTJET)/lib $(shell $(FASTJET)/bin/fastjet-config --libs)
+FASTJET_LDFLAGS := -L$(FASTJET)/lib -Wl,-rpath,$(FASTJET)/lib -lm -L$(FASTJET)/lib -lfastjettools -lfastjet
+else
+FASTJET :=
+FASTJET_CPPFLAGS :=
+FASTJET_LDFLAGS :=
+endif
+CPP:= g++
+F77:= g77
+LD:= g++
+
+CPPCMD = $(CPP) $(INTCPPFLAGS) $(CPPFLAGS) -o $@ -c $< 2>&1
+
+FPPCMD = $(F77) -o $@ -c $< 2>&1
+
+LIBCMD =  $(LD) -shared $(INTLDFLAGS) $(LDFLAGS) $(LDLIBS) -o $@ $^ && echo
+
+BINCMD = $(LD) $(filter %.o,$^) $(INTLDFLAGS) $(LDFLAGS) $(LDLIBS) -o $@ && echo
+
+DEPENDCMD = $(SHELL) -ec '$(CC) -M $(CPPFLAGS) $< | sed '\''s%\($(*F)\)\.o[ :]*%$(*D)/\1.o $@ : %g'\'' > $@; [ -s $@ ] || rm -f $@' && echo
+
+CPPFLAGS+=-Wall -g -fPIC -std=c++17 -Wunused-variable -Wdeprecated-declarations -Wreorder

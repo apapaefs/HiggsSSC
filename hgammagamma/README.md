@@ -225,3 +225,359 @@ Useful first plots or checks include:
 - photon pseudorapidity;
 - diphoton invariant mass;
 - photon separation;
+
+## LO Campaign Pipeline
+
+This section describes the current automated leading-order workflow.  The
+pipeline is meant to be run from the repository root, i.e.
+
+```bash
+cd /path/to/HiggsSSC
+```
+
+The main scripts are:
+
+```text
+hgammagamma/run_gammagamma_campaign.py
+hgammagamma/make_gammagamma_report.py
+```
+
+The first script generates and analyzes samples.  The second script combines
+the analysis outputs into stacked plots and a small HTML webpage.
+
+### What The Campaign Does
+
+For each enabled sample, the campaign script:
+
+1. writes an MG5 process card;
+2. generates an MG5 process directory;
+3. sets the beam energies to 20 TeV per beam;
+4. sets the number of events, random seed, and basic generation cuts;
+5. runs MG5 event generation;
+6. runs MadSpin if the sample has a decay, for example `h > a a`;
+7. finds the generated LHE file;
+8. writes a Herwig input file from `HW-template.in`;
+9. runs `Herwig read` and `Herwig run`;
+10. runs `HwSimPostAnalysis_gammagamma`;
+11. writes `.top`, `.dat`, `.evp`, and `_var.root` analysis outputs.
+
+At this stage there is no smearing and no internal fake-photon construction.
+Reducible backgrounds can be generated as samples, but jet-to-photon and
+lepton-to-photon fake shapes still need the later fake-photon analysis code.
+
+### Setup Checklist
+
+You need:
+
+- MG5_aMC installed and available at `MG5_aMC_v3_5_15` in the repository, or
+  another path supplied with `--mg5-dir`;
+- the `loop_sm_haa` model inside the MG5 `models/` directory;
+- Herwig and HwSim available through the Herwig environment;
+- ROOT available for the post-analysis executable;
+- Python 3 with `matplotlib` for the report script.
+
+On the local development machine used to build this workflow, the Herwig
+environment is found automatically at:
+
+```text
+~/Projects/Herwig/Herwig-REAL-stable-gcc-full/bin/activate
+```
+
+On another machine, especially Linux, pass the Herwig environment explicitly if
+needed:
+
+```bash
+python3 hgammagamma/run_gammagamma_campaign.py \
+  --herwig-env /path/to/herwig/bin/activate
+```
+
+If MG5 is not inside this repository, pass its path:
+
+```bash
+python3 hgammagamma/run_gammagamma_campaign.py \
+  --mg5-dir /path/to/MG5_aMC_v3_5_15
+```
+
+### First Dry Run
+
+Before generating events, always do a dry run.  This prints the commands and
+paths without running MG5 or Herwig:
+
+```bash
+python3 hgammagamma/run_gammagamma_campaign.py \
+  --dry-run \
+  --nevents 10 \
+  --run-samples signal_gg_h_aa
+```
+
+To check both default samples:
+
+```bash
+python3 hgammagamma/run_gammagamma_campaign.py \
+  --dry-run \
+  --nevents 10
+```
+
+The default enabled samples are:
+
+```text
+signal_gg_h_aa  : g g > h [noborn=QCD], then h > a a
+bkg_prompt_aa   : p p > a a
+```
+
+### Run A Tiny Smoke Test
+
+Start with 10 events.  This is only a technical test, not a physics result:
+
+```bash
+python3 hgammagamma/run_gammagamma_campaign.py \
+  --nevents 10 \
+  --run-samples signal_gg_h_aa
+```
+
+Then test the prompt diphoton background:
+
+```bash
+python3 hgammagamma/run_gammagamma_campaign.py \
+  --nevents 10 \
+  --run-samples bkg_prompt_aa
+```
+
+If both commands finish, the full chain is working.
+
+### Run The Default Campaign
+
+To run both the Higgs signal and the prompt diphoton background:
+
+```bash
+python3 hgammagamma/run_gammagamma_campaign.py \
+  --nevents 10000
+```
+
+The default beam energy is already:
+
+```text
+ebeam1 = 20000 GeV
+ebeam2 = 20000 GeV
+```
+
+The default run tag is:
+
+```text
+run_01
+```
+
+You can change these:
+
+```bash
+python3 hgammagamma/run_gammagamma_campaign.py \
+  --nevents 50000 \
+  --run-tag run_02 \
+  --ebeam 20000
+```
+
+### Where Outputs Go
+
+Signal samples are written under:
+
+```text
+hgammagamma/LOAnalysis/Signal/events/<sample>/
+```
+
+Background samples are written under:
+
+```text
+hgammagamma/LOAnalysis/Backgrounds/events/<sample>/
+```
+
+For example, after running `signal_gg_h_aa`, look for:
+
+```text
+hgammagamma/LOAnalysis/Signal/events/signal_gg_h_aa/
+```
+
+Important outputs include:
+
+```text
+mg5_process/Events/<run>/unweighted_events.lhe.gz
+herwig/events/<sample>.root
+<sample>_hwsim_roots.input
+<sample>_hwsim_roots-<run_tag>.top
+<sample>_hwsim_roots-<run_tag>.dat
+<sample>_hwsim_roots-<run_tag>.evp
+<sample>_hwsim_roots-<run_tag>_var.root
+```
+
+The `.top` files contain the histograms.  The `.dat` files contain the analysis
+summary, including the number of events read and the number of events with two
+selected photons.  The `_var.root` files contain the analysis tree.
+
+### Gamma Gamma Variables
+
+The `_var.root` tree stores:
+
+```text
+variables[0] = m_gg
+variables[1] = pt_gamma1
+variables[2] = eta_gamma1
+variables[3] = pt_gamma2
+variables[4] = eta_gamma2
+variables[5] = deltaR_gg
+variables[6] = deltaPhi_gg
+variables[7] = pt_gg
+variables[8] = y_gg
+variables[9] = n_selected_photons
+eventweight[0] = evweight * weight_scale
+```
+
+All transverse momenta and invariant masses are in GeV.
+
+### Editing Samples
+
+Open:
+
+```text
+hgammagamma/run_gammagamma_campaign.py
+```
+
+Near the top there is a list called `SAMPLES`.  Each entry has the form:
+
+```python
+Sample(name, category, model, process, madspin_decay, weight_scale)
+```
+
+The default entries are:
+
+```python
+Sample("signal_gg_h_aa", "Signal", "loop_sm_haa",
+       "g g > h [noborn=QCD]", "h > a a", 1.0)
+
+Sample("bkg_prompt_aa", "Backgrounds", "sm",
+       "p p > a a", "", 1.0)
+```
+
+There are also commented entries for:
+
+```text
+g g > a a [noborn=QCD]   loop-induced prompt continuum
+p p > a j                photon + jet reducible background
+p p > j j                dijet reducible background
+p p > e+ e-              electron fake background
+```
+
+To enable a commented sample, remove the leading `#` and rerun the campaign.
+
+The last number, `weight_scale`, multiplies the event weights in the
+post-analysis.  For now this is the place to apply simple total normalization
+factors, fake-rate factors, or cross-section rescalings sample by sample.
+
+### Making The HTML Plot Report
+
+After the samples have been analyzed, build the report:
+
+```bash
+python3 hgammagamma/make_gammagamma_report.py \
+  --run-tag run_01
+```
+
+The report is written to:
+
+```text
+hgammagamma/LOAnalysis/plots/gammagamma_run_01/index.html
+```
+
+Open this file in a browser.  It contains:
+
+- stacked histograms;
+- backgrounds first, Higgs signal stacked on top;
+- one PNG and one SVG per plot;
+- one CSV per plot;
+- a `sample_summary.csv` file;
+- a zip file containing the plot images.
+
+By default, the report normalizes each sample to:
+
+```text
+cross section * analysis efficiency
+```
+
+where the cross section is read from the MG5 banner and the analysis efficiency
+is read from the `.dat` file:
+
+```text
+analysis efficiency = sum_diphoton_weight / sum_weight
+```
+
+The report divides by bin width by default, so a mass distribution such as
+`m_gg` is plotted in:
+
+```text
+pb / GeV
+```
+
+To make non-density plots instead, use:
+
+```bash
+python3 hgammagamma/make_gammagamma_report.py \
+  --run-tag run_01 \
+  --no-density
+```
+
+To make a report from selected samples only:
+
+```bash
+python3 hgammagamma/make_gammagamma_report.py \
+  --run-tag run_01 \
+  --samples signal_gg_h_aa,bkg_prompt_aa
+```
+
+### Linux Notes
+
+The Python runner is written so it can move to Linux.  On Linux the script uses
+`LD_LIBRARY_PATH` for optional OpenLoops/COLLIER runtime libraries.  The
+macOS-specific `install_name_tool` patching is only used on macOS.
+
+If your Linux machine has Herwig, MG5, ROOT, and the needed libraries already
+configured through modules, you will usually run something like:
+
+```bash
+module load herwig root
+
+python3 hgammagamma/run_gammagamma_campaign.py \
+  --mg5-dir /path/to/MG5_aMC_v3_5_15 \
+  --herwig Herwig \
+  --nevents 10000
+```
+
+If OpenLoops/COLLIER is needed for a loop-induced sample and is not found
+automatically, pass it explicitly:
+
+```bash
+python3 hgammagamma/run_gammagamma_campaign.py \
+  --collier-library /path/to/libcollier.so \
+  --nevents 10000
+```
+
+### Quick Troubleshooting
+
+If MG5 cannot find the model, check that the model directory exists:
+
+```text
+MG5_aMC_v3_5_15/models/loop_sm_haa
+```
+
+If Herwig cannot find the PDF set, either install the PDF set or choose one
+that is installed:
+
+```bash
+python3 hgammagamma/run_gammagamma_campaign.py \
+  --herwig-pdf NNPDF31_nnlo_as_0118
+```
+
+If the report script says it found no samples, check that the campaign produced
+matching `.top` and `.dat` files for the requested run tag.
+
+If a reducible background has zero diphoton events, remember that fake-photon
+construction is not implemented yet.  That is expected for `j j` and
+`e+ e-` until the analysis code learns how to reinterpret jets or leptons as
+photons.
