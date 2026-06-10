@@ -112,7 +112,37 @@ From the repository root:
 
 ```bash
 cd MG5_aMC_v3_5_15
-./bin/mg5_aMC
+python3 --version
+python3 ./bin/mg5_aMC
+```
+
+On `timur.kennesaw.edu`, first check the Python version:
+
+```bash
+python3 --version
+```
+
+MG5 `v3.5.15` should be run with Python `3.10` or newer.  If Timur's default
+`python3` is Python `3.9`, the MG5 launcher can stop immediately with
+`NameError: name 'logging' is not defined`.  In that case load or use a newer
+Python module if one is available, for example:
+
+```bash
+module avail python
+module load python/3.11
+python3.11 --version
+python3.11 ./bin/mg5_aMC
+```
+
+If the module makes `python3` point to Python `3.11`, then
+`python3 ./bin/mg5_aMC` is also fine.  The important point is to run the MG5
+launcher with Python `3.10` or newer.
+
+If no newer Python module is available, edit `MG5_aMC_v3_5_15/bin/mg5_aMC` and
+add this line immediately below `import sys`:
+
+```python
+import logging
 ```
 
 Inside MG5:
@@ -612,6 +642,21 @@ On `timur.kennesaw.edu`, Herwig is available through:
 
 ```bash
 module load herwig/stable
+```
+
+If MG5 needs a newer Python than the default `python3`, pass it to the runner:
+
+```bash
+python3 hgammagamma/run_gammagamma_campaign.py \
+  --mg5-dir /path/to/MG5_aMC_v3_5_15 \
+  --mg5-python python3.11 \
+  --nevents 10000
+```
+
+The same setting can be supplied with:
+
+```bash
+export MG5_PYTHON=python3.11
 ```
 
 The runner loads `herwig/stable` automatically on Linux when `--herwig-env` is

@@ -69,6 +69,7 @@ class Config:
     nevents: int
     ebeam: float
     mg5_dir: Path
+    mg5_python: str | None
     herwig: str
     herwig_env: Path | None
     herwig_module: str | None
@@ -184,6 +185,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--nevents", type=int, default=env_int("NEVENTS", 10000))
     parser.add_argument("--ebeam", type=float, default=env_float("EBEAM", 20000.0))
     parser.add_argument("--mg5-dir", type=Path, default=Path(env_text("MG5_DIR", str(REPO_ROOT / "MG5_aMC_v3_5_15"))))
+    parser.add_argument(
+        "--mg5-python",
+        default=clean_optional_text(os.environ.get("MG5_PYTHON")),
+        help="optional Python executable used to run MG5, e.g. python3.11 on systems whose default python3 is too old",
+    )
     parser.add_argument("--herwig", default=env_text("HERWIG", "Herwig"))
     parser.add_argument("--herwig-env", type=Path, default=maybe_path(os.environ.get("HERWIG_ENV")))
     parser.add_argument(
@@ -235,6 +241,7 @@ def parse_config(argv: Sequence[str]) -> Config:
         nevents=args.nevents,
         ebeam=args.ebeam,
         mg5_dir=args.mg5_dir.expanduser(),
+        mg5_python=clean_optional_text(args.mg5_python),
         herwig=args.herwig,
         herwig_env=herwig_env,
         herwig_module=herwig_module,
@@ -265,6 +272,13 @@ def q(value: object) -> str:
 
 def format_command(args: Sequence[object]) -> str:
     return " ".join(q(arg) for arg in args)
+
+
+def mg5_command(cfg: Config, *extra_args: object) -> list[object]:
+    launcher = cfg.mg5_dir / "bin" / "mg5_aMC"
+    if cfg.mg5_python:
+        return [cfg.mg5_python, launcher, *extra_args]
+    return [launcher, *extra_args]
 
 
 def log(message: str) -> None:
@@ -335,6 +349,8 @@ def require_inputs(cfg: Config) -> None:
         die(f"missing Herwig template: {cfg.template_in}")
     if not (cfg.mg5_dir / "bin" / "mg5_aMC").exists():
         die(f"missing MG5 executable: {cfg.mg5_dir / 'bin' / 'mg5_aMC'}")
+    if cfg.mg5_python and shutil.which(cfg.mg5_python) is None:
+        die(f"MG5 Python executable not found on PATH: {cfg.mg5_python}")
     if cfg.herwig_env and not cfg.herwig_env.exists():
         die(f"missing Herwig activation script: {cfg.herwig_env}")
     if not cfg.herwig_env and not cfg.herwig_module and shutil.which(cfg.herwig) is None:
@@ -653,7 +669,7 @@ def run_sample(index: int, sample: Sample, cfg: Config) -> None:
         prepare_collier_runtime(runtime_lib_dir, cfg)
 
     write_mg5_process_card(mg5_card, sample, mg5_process_dir, cfg)
-    run([cfg.mg5_dir / "bin" / "mg5_aMC", mg5_card], cfg)
+    run(mg5_command(cfg, mg5_card), cfg)
 
     inject_mg5_runtime_rpath(mg5_process_dir, runtime_lib_dir, cfg)
     link_madloop_runtime_dirs(mg5_process_dir, runtime_lib_dir, cfg)
