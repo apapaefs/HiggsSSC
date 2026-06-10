@@ -21,6 +21,50 @@ h > a a
 
 where `h` is the Higgs boson and `a` is the photon.
 
+## Download MadGraph
+
+Work in your home directory and download MadGraph5_aMC@NLO version `v3.5.15`
+from
+
+```text
+https://launchpad.net/mg5amcnlo
+```
+
+For example:
+
+```bash
+cd ~
+wget https://launchpad.net/mg5amcnlo/3.0/3.7.x/+download/LTS_MG5aMC_v3.5.15.tgz
+```
+
+This downloads the tarball
+
+```text
+LTS_MG5aMC_v3.5.15.tgz
+```
+
+in your home directory. Unpack it with:
+
+```bash
+tar -xzf LTS_MG5aMC_v3.5.15.tgz
+```
+
+You should now have:
+
+```text
+~/MG5_aMC_v3_5_15
+```
+
+If your copy of this repository is also in your home directory, copy the
+`loop_sm_haa` model into the MadGraph model directory:
+
+```bash
+cp -r ~/HiggsSSC/MG5_aMC_v3_5_15/models/loop_sm_haa ~/MG5_aMC_v3_5_15/models/
+```
+
+If you cloned this repository somewhere else, change the first path to point to
+your `HiggsSSC` checkout.
+
 ## Model
 
 Use the model
