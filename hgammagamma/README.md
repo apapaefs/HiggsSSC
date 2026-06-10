@@ -514,7 +514,11 @@ The report is written to:
 hgammagamma/LOAnalysis/plots/gammagamma_run_01/index.html
 ```
 
-Open this file in a browser.  It contains:
+Open this file in a browser.  If the report was produced on
+`timur.kennesaw.edu` and you want to view it from a local Linux machine, see
+[Viewing Remote Results With SSHFS](../SSHFS_REMOTE_MOUNT.md).
+
+The report contains:
 
 - stacked histograms;
 - backgrounds first, Higgs signal stacked on top;
@@ -574,6 +578,7 @@ module load herwig/stable
 The runner loads `herwig/stable` automatically on Linux when `--herwig-env` is
 not set, so the usual Timur command is:
 
+```bash
 python3 hgammagamma/run_gammagamma_campaign.py \
   --mg5-dir /path/to/MG5_aMC_v3_5_15 \
   --nevents 10000
