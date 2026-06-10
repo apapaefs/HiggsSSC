@@ -204,6 +204,19 @@ When adding results to this directory, record:
 - the random seed;
 - whether events are parton-level only or showered/hadronized.
 
+For final normalization, do not use this simple MG5+MadSpin setup as the only
+source of the inclusive rate or branching ratio. We will calculate the total
+cross section with other tools, for example `iHixs 2`, and take the
+`h -> gamma gamma` branching ratio from the CERN Yellow Report branching-ratio
+page:
+
+```text
+https://twiki.cern.ch/twiki/bin/view/LHCPhysics/CERNYellowReportPageBR
+```
+
+We will also use higher-order Monte Carlo generators later as additional
+inputs and cross-checks.
+
 ## Suggested Outputs
 
 Useful first plots or checks include:
@@ -212,4 +225,3 @@ Useful first plots or checks include:
 - photon pseudorapidity;
 - diphoton invariant mass;
 - photon separation;
-- total generated rate or partial width, depending on the setup.
