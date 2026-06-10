@@ -2,8 +2,9 @@
 """Build an HTML report from LO h -> gamma gamma analysis .top files.
 
 The report stacks backgrounds first and the Higgs signal on top.  By default
-each histogram shape is normalized so its area is sigma * analysis efficiency
-for that sample.  The analysis efficiency is read from the matching .dat file.
+each histogram shape is normalized so its area is sigma * weight_scale *
+analysis efficiency for that sample.  The analysis efficiency and weight scale
+are read from the matching .dat file.
 """
 
 from __future__ import annotations
@@ -99,7 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--normalization",
         choices=("selected_xsec", "event_xsec", "unit_area"),
         default="selected_xsec",
-        help="selected_xsec gives each plotted histogram area sigma*efficiency.",
+        help="selected_xsec gives each plotted histogram area sigma*weight_scale*efficiency.",
     )
     parser.add_argument(
         "--no-density",
@@ -554,8 +555,8 @@ def write_html(
     )
 
     normalization_text = {
-        "selected_xsec": "Each plotted histogram area is normalized to cross section times diphoton analysis efficiency for its sample.",
-        "event_xsec": "Histogram bins are scaled by the event cross section; selected-only histograms integrate to cross section times efficiency.",
+        "selected_xsec": "Each plotted histogram area is normalized to cross section times weight scale times diphoton analysis efficiency for its sample.",
+        "event_xsec": "Histogram bins are scaled by the event cross section and weight scale; selected-only histograms integrate to cross section times weight scale times efficiency.",
         "unit_area": "Each sample histogram is unit-area normalized before stacking.",
     }[normalization]
     if density:
@@ -732,8 +733,8 @@ def main(argv: Sequence[str]) -> int:
     for sample in ordered_samples(samples):
         print(
             f"  {sample.name:18s} {sample.category:11s} "
-            f"xsec={sample.cross_section_pb:.6g} pb eff={sample.efficiency:.6g} "
-            f"xsec*eff={sample.selected_cross_section_pb:.6g} pb"
+            f"xsec={sample.cross_section_pb:.6g} pb weight={sample.weight_scale:.6g} "
+            f"eff={sample.efficiency:.6g} xsec*weight*eff={sample.selected_cross_section_pb:.6g} pb"
         )
 
     titles = common_histogram_titles(samples)

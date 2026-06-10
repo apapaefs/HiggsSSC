@@ -8,6 +8,25 @@ h -> gamma gamma
 
 using the `loop_sm_haa` MadGraph5_aMC@NLO model in this repository.
 
+## Get The Repository
+
+Start by cloning the repository onto the machine where you will run the
+campaign.  If your GitHub SSH key is set up, use:
+
+```bash
+git clone git@github.com:apapaefs/HiggsSSC.git
+cd HiggsSSC
+```
+
+If SSH is not set up, use the HTTPS URL instead:
+
+```bash
+git clone https://github.com/apapaefs/HiggsSSC.git
+cd HiggsSSC
+```
+
+All commands below assume that you are running from this repository root.
+
 ## Physics Target
 
 The goal is to generate and study Higgs boson decays to two photons, using an
@@ -23,8 +42,7 @@ where `h` is the Higgs boson and `a` is the photon.
 
 ## Download MadGraph
 
-Work in your home directory and download MadGraph5_aMC@NLO version `v3.5.15`
-from
+From the repository root, download MadGraph5_aMC@NLO version `v3.5.15` from
 
 ```text
 https://launchpad.net/mg5amcnlo
@@ -33,17 +51,16 @@ https://launchpad.net/mg5amcnlo
 For example:
 
 ```bash
-cd ~
 wget https://launchpad.net/mg5amcnlo/3.0/3.7.x/+download/LTS_MG5aMC_v3.5.15.tgz
 ```
 
 This downloads the tarball
 
 ```text
-LTS_MG5aMC_v3.5.15.tgz
+HiggsSSC/LTS_MG5aMC_v3.5.15.tgz
 ```
 
-in your home directory. Unpack it with:
+Unpack it with:
 
 ```bash
 tar -xzf LTS_MG5aMC_v3.5.15.tgz
@@ -52,18 +69,25 @@ tar -xzf LTS_MG5aMC_v3.5.15.tgz
 You should now have:
 
 ```text
-~/MG5_aMC_v3_5_15
+HiggsSSC/MG5_aMC_v3_5_15
 ```
 
-If your copy of this repository is also in your home directory, copy the
-`loop_sm_haa` model into the MadGraph model directory:
+The repository already contains the custom model at:
+
+```text
+MG5_aMC_v3_5_15/models/loop_sm_haa
+```
+
+If you use a separate MG5 installation outside this repository, copy the model
+there and pass that MG5 path to the campaign runner:
 
 ```bash
-cp -r ~/HiggsSSC/MG5_aMC_v3_5_15/models/loop_sm_haa ~/MG5_aMC_v3_5_15/models/
+cp -r MG5_aMC_v3_5_15/models/loop_sm_haa /path/to/MG5_aMC_v3_5_15/models/
+python3 hgammagamma/run_gammagamma_campaign.py \
+  --mg5-dir /path/to/MG5_aMC_v3_5_15 \
+  --dry-run \
+  --nevents 10
 ```
-
-If you cloned this repository somewhere else, change the first path to point to
-your `HiggsSSC` checkout.
 
 ## Model
 
@@ -228,24 +252,9 @@ Useful first plots or checks include:
 
 ## LO Campaign Pipeline
 
-This section describes the current automated leading-order workflow.
-
-Start by cloning the repository onto the machine where you will run the
-campaign.  If your GitHub SSH key is set up, use:
-
-```bash
-git clone git@github.com:apapaefs/HiggsSSC.git
-cd HiggsSSC
-```
-
-If SSH is not set up, use the HTTPS URL instead:
-
-```bash
-git clone https://github.com/apapaefs/HiggsSSC.git
-cd HiggsSSC
-```
-
-All commands below assume that you are running from this repository root.
+This section describes the current automated leading-order workflow.  Before
+starting, follow the repository and MG5 setup steps above.  All commands below
+assume that you are running from the `HiggsSSC` repository root.
 
 The main scripts are:
 
@@ -477,12 +486,33 @@ Sample(name, category, model, process, madspin_decay, weight_scale)
 The default entries are:
 
 ```python
+YR4_BR_H_TO_GAMMAGAMMA = 2.27e-3
+SIGNAL_GGH_K_FACTOR = 2.0
+SIGNAL_GGH_TO_GAMMAGAMMA_WEIGHT = SIGNAL_GGH_K_FACTOR * YR4_BR_H_TO_GAMMAGAMMA
+
 Sample("signal_gg_h_aa", "Signal", "loop_sm_haa",
-       "g g > h [noborn=QCD]", "h > a a", 1.0)
+       "g g > h [noborn=QCD]", "h > a a",
+       SIGNAL_GGH_TO_GAMMAGAMMA_WEIGHT)
 
 Sample("bkg_prompt_aa", "Backgrounds", "sm",
        "p p > a a", "", 1.0)
 ```
+
+For the signal, MadSpin decays every generated Higgs boson to photons.  The MG5
+cross section is therefore treated as the inclusive LO `g g > h` production
+rate, and the default signal weight applies:
+
+```text
+weight_scale = K_ggH * BR(H -> gamma gamma)
+             = 2.0 * 2.27e-3
+             = 4.54e-3
+```
+
+The branching ratio is the Standard Model value at `mH = 125.09 GeV` used in
+the LHC Higgs Cross Section Working Group
+[Yellow Report 4](https://arxiv.org/abs/1610.07922) tables.  The `K_ggH`
+factor is a first-pass total cross-section correction; replace it later with a
+more precise prediction if needed.
 
 There are also commented entries for:
 
@@ -498,6 +528,10 @@ To enable a commented sample, remove the leading `#` and rerun the campaign.
 The last number, `weight_scale`, multiplies the event weights in the
 post-analysis.  For now this is the place to apply simple total normalization
 factors, fake-rate factors, or cross-section rescalings sample by sample.
+
+If you already produced signal `.top` and `.dat` files with `weight_scale = 1`,
+rerun the post-analysis or rerun the campaign so the `.dat` file records the
+new signal weight.
 
 ### Making The HTML Plot Report
 
@@ -530,11 +564,11 @@ The report contains:
 By default, the report normalizes each sample to:
 
 ```text
-cross section * analysis efficiency
+cross section * weight_scale * analysis efficiency
 ```
 
-where the cross section is read from the MG5 banner and the analysis efficiency
-is read from the `.dat` file:
+where the cross section is read from the MG5 banner, and `weight_scale` and the
+analysis efficiency are read from the `.dat` file:
 
 ```text
 analysis efficiency = sum_diphoton_weight / sum_weight

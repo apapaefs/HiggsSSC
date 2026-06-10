@@ -9,6 +9,8 @@ EBEAM="${EBEAM:-20000}"
 MG5_DIR="${MG5_DIR:-${REPO_ROOT}/MG5_aMC_v3_5_15}"
 HERWIG="${HERWIG:-Herwig}"
 HERWIG_PDF="${HERWIG_PDF:-NNPDF31_nnlo_as_0118}"
+# 2.0 * YR4 BR(H -> gamma gamma) at mH = 125.09 GeV.
+SIGNAL_GGH_TO_GAMMAGAMMA_WEIGHT="${SIGNAL_GGH_TO_GAMMAGAMMA_WEIGHT:-0.00454}"
 DEFAULT_HERWIG_ENV="${DEFAULT_HERWIG_ENV:-${HOME}/Projects/Herwig/Herwig-REAL-stable-gcc-full/bin/activate}"
 HERWIG_ENV="${HERWIG_ENV:-}"
 HERWIG_MODULE="${HERWIG_MODULE:-}"
@@ -48,7 +50,7 @@ ANALYSIS_EXE="${ANALYSIS_CODE_DIR}/HwSimPostAnalysis_gammagamma"
 
 # name | category | model | process | madspin_decay | weight_scale
 SAMPLES=(
-  "signal_gg_h_aa|Signal|loop_sm_haa|g g > h [noborn=QCD]|h > a a|1.0"
+  "signal_gg_h_aa|Signal|loop_sm_haa|g g > h [noborn=QCD]|h > a a|${SIGNAL_GGH_TO_GAMMAGAMMA_WEIGHT}"
   "bkg_prompt_aa|Backgrounds|sm|p p > a a||1.0"
   # Reducible fake-background starting points. Set the weight scale to the
   # desired total fake cross-section factor before enabling them.
