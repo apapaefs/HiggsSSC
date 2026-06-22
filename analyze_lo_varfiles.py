@@ -33,6 +33,12 @@ REPO_ROOT = Path(__file__).resolve().parent
 DEFAULT_ANALYSIS_ROOT = REPO_ROOT / "hgammagamma" / "LOAnalysis"
 DEFAULT_LUMINOSITY_FB = 100.0
 SENTINEL_VALUE = -900.0
+YR4_BR_H_TO_GAMMAGAMMA = 2.27e-3
+SIGNAL_GGH_K_FACTOR = 2.0
+SIGNAL_GGH_TO_GAMMAGAMMA_WEIGHT = SIGNAL_GGH_K_FACTOR * YR4_BR_H_TO_GAMMAGAMMA
+DEFAULT_SAMPLE_RATE_FACTORS = {
+    "signal_gg_h_aa": SIGNAL_GGH_TO_GAMMAGAMMA_WEIGHT,
+}
 
 
 @dataclass(frozen=True)
@@ -249,6 +255,37 @@ def parse_key_value_dat(path: Path) -> dict[str, float | str]:
     return values
 
 
+def parse_rate_factors(value: Any) -> dict[str, float]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("analysis.rate_factors must be a mapping of sample or category names to numeric factors")
+    return {str(key): float(factor) for key, factor in value.items() if factor is not None}
+
+
+def resolve_weight_scale(
+    sample_name: str,
+    category: str,
+    dat_weight_scale: float,
+    configured_rate_factors: dict[str, float] | None,
+) -> float:
+    """Choose the total rate factor used above the LO campaign files.
+
+    Precedence is sample-specific YAML, category YAML, nontrivial `.dat`
+    metadata, then the known gamma-gamma signal default for legacy files.
+    """
+
+    configured_rate_factors = configured_rate_factors or {}
+    if sample_name in configured_rate_factors:
+        return float(configured_rate_factors[sample_name])
+    if category in configured_rate_factors:
+        return float(configured_rate_factors[category])
+    dat_weight_scale = float(dat_weight_scale)
+    if not math.isclose(dat_weight_scale, 1.0, rel_tol=0.0, abs_tol=1e-12):
+        return dat_weight_scale
+    return float(DEFAULT_SAMPLE_RATE_FACTORS.get(sample_name, dat_weight_scale))
+
+
 def parse_cross_section(sample_dir: Path, run_tag: str) -> tuple[float, float | None]:
     banner = sample_dir / "mg5_process" / "Events" / run_tag / f"{run_tag}_tag_1_banner.txt"
     if banner.exists():
@@ -275,7 +312,12 @@ def parse_cross_section(sample_dir: Path, run_tag: str) -> tuple[float, float | 
     raise FileNotFoundError(f"could not find MG5 cross section for {sample_dir}")
 
 
-def discover_samples(analysis_root: Path, run_tag: str, requested: set[str] | None = None) -> list[SampleInfo]:
+def discover_samples(
+    analysis_root: Path,
+    run_tag: str,
+    requested: set[str] | None = None,
+    rate_factors: dict[str, float] | None = None,
+) -> list[SampleInfo]:
     samples: list[SampleInfo] = []
     for category in ("Backgrounds", "Signal"):
         events_dir = analysis_root / category / "events"
@@ -293,6 +335,7 @@ def discover_samples(analysis_root: Path, run_tag: str, requested: set[str] | No
                 raise FileNotFoundError(f"missing .dat summary for {var_file}")
             dat = parse_key_value_dat(dat_file)
             cross_section_pb, cross_section_error_pb = parse_cross_section(sample_dir, run_tag)
+            dat_weight_scale = float(dat.get("weight_scale", 1.0))
             samples.append(
                 SampleInfo(
                     name=sample_dir.name,
@@ -302,7 +345,7 @@ def discover_samples(analysis_root: Path, run_tag: str, requested: set[str] | No
                     dat_file=dat_file,
                     cross_section_pb=cross_section_pb,
                     cross_section_error_pb=cross_section_error_pb,
-                    weight_scale=float(dat.get("weight_scale", 1.0)),
+                    weight_scale=resolve_weight_scale(sample_dir.name, category, dat_weight_scale, rate_factors),
                     events_read=float(dat.get("events_read", 0.0)),
                     sum_weight=float(dat.get("sum_weight", 0.0)),
                 )
@@ -449,7 +492,8 @@ def load_analysis_inputs(config_path: Path) -> tuple[dict[str, Any], Path, str, 
     run_tag = str(analysis.get("run_tag", os.environ.get("RUN_TAG", "run_01")))
     luminosity_fb = float(analysis.get("luminosity_fb", DEFAULT_LUMINOSITY_FB))
     analysis_root = Path(analysis.get("analysis_root", DEFAULT_ANALYSIS_ROOT)).expanduser()
-    samples = discover_samples(analysis_root, run_tag, requested_samples(analysis.get("samples")))
+    rate_factors = parse_rate_factors(analysis.get("rate_factors"))
+    samples = discover_samples(analysis_root, run_tag, requested_samples(analysis.get("samples")), rate_factors)
     if not samples:
         raise RuntimeError(f"no gamma-gamma _var.root samples found under {analysis_root} for run tag {run_tag}")
     output_dir = output_dir_for(analysis_root, run_tag, name, analysis.get("output_dir"))

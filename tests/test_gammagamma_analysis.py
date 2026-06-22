@@ -130,6 +130,29 @@ class CutFlowTests(unittest.TestCase):
         self.assertEqual(row["selected_cross_section_pb"], 0.5)
         self.assertEqual(row["expected_events"], 5000.0)
 
+    def test_legacy_signal_uses_default_branching_and_k_factor(self) -> None:
+        from analyze_lo_varfiles import SIGNAL_GGH_TO_GAMMAGAMMA_WEIGHT, resolve_weight_scale
+
+        weight_scale = resolve_weight_scale("signal_gg_h_aa", "Signal", dat_weight_scale=1.0, configured_rate_factors=None)
+
+        self.assertEqual(weight_scale, SIGNAL_GGH_TO_GAMMAGAMMA_WEIGHT)
+
+    def test_configured_rate_factors_override_defaults_and_dat_values(self) -> None:
+        from analyze_lo_varfiles import resolve_weight_scale
+
+        configured = {
+            "Signal": 0.01,
+            "Backgrounds": 1.4,
+            "signal_gg_h_aa": 0.00454,
+            "bkg_prompt_aa": 1.2,
+        }
+
+        self.assertEqual(resolve_weight_scale("signal_gg_h_aa", "Signal", 1.0, configured), 0.00454)
+        self.assertEqual(resolve_weight_scale("new_signal", "Signal", 1.0, configured), 0.01)
+        self.assertEqual(resolve_weight_scale("bkg_prompt_aa", "Backgrounds", 1.0, configured), 1.2)
+        self.assertEqual(resolve_weight_scale("bkg_gamma_j", "Backgrounds", 1.0, configured), 1.4)
+        self.assertEqual(resolve_weight_scale("unconfigured_bkg", "Backgrounds", 2.0, {}), 2.0)
+
     def test_xgboost_summary_cross_section_includes_rate_factor(self) -> None:
         from xgboost_root_varfiles_module import _summarize_full_sample
 

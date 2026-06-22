@@ -625,8 +625,8 @@ python3 hgammagamma/make_gammagamma_report.py \
 
 The repo-root analysis CLI reads the `_var.root` files written by the LO
 campaign and produces a small analysis report above the campaign outputs.  It
-uses the same MG5 cross sections and `.dat` weight scales used by the plot
-report.
+uses the same MG5 cross sections as the plot report, with rate factors supplied
+by the YAML card or, if omitted, by the campaign `.dat` weight scales.
 
 Install the Python analysis dependencies in the environment where PyROOT is
 available:
@@ -651,6 +651,9 @@ analysis:
   name: baseline_cuts
   run_tag: run_01
   luminosity_fb: 100.0
+  rate_factors:
+    signal_gg_h_aa: 0.00454
+    bkg_prompt_aa: 1.0
   cuts:
     - variable: n_selected_photons
       min: 2
@@ -689,10 +692,15 @@ The output directory contains:
 The summary includes the number of selected Monte Carlo events, the analysis
 efficiency, the selected cross section, and the expected event yield at the
 luminosity in the YAML card.  The `cross_section_pb` column is the physics
-normalization used for rates: the raw MG5 cross section multiplied by the
-sample `weight_scale`, so signal branching ratios, signal/background
-`K`-factors, and fake-rate factors belong there through `weight_scale`.
-The original MG5 value is kept separately in `raw_cross_section_pb`.
+normalization used for rates: the raw MG5 cross section multiplied by the total
+sample rate factor.  Put signal branching ratios, signal/background
+`K`-factors, and fake-rate factors in the YAML `rate_factors` block or in the
+campaign `.dat` `weight_scale`.  A YAML entry with a sample name overrides the
+`.dat` value; a YAML entry with `Signal` or `Backgrounds` applies to that whole
+category; otherwise the `.dat` `weight_scale` is used.  For legacy
+`signal_gg_h_aa` files with `weight_scale = 1`, the analysis uses the default
+`K_ggH * BR(H -> gamma gamma) = 0.00454`.  The original MG5 value is kept
+separately in `raw_cross_section_pb`.
 
 The expected event count is calculated as:
 
@@ -714,6 +722,17 @@ To write somewhere else, add:
   output_dir: /path/to/output
 ```
 
+To add or override normalization factors for additional samples, add their
+sample-directory names under `rate_factors`:
+
+```yaml
+  rate_factors:
+    signal_gg_h_aa: 0.00454
+    bkg_prompt_aa: 1.0
+    bkg_gamma_j: 1.0
+    bkg_jj: 1.0
+```
+
 The XGBoost mode uses the same sample discovery and normalization, but trains a
 binary signal-versus-background classifier and chooses a score threshold that
 maximizes the expected significance on the test split.  The example card is:
@@ -729,6 +748,9 @@ analysis:
   name: xgboost_baseline
   run_tag: run_01
   luminosity_fb: 100.0
+  rate_factors:
+    signal_gg_h_aa: 0.00454
+    bkg_prompt_aa: 1.0
   xgboost:
     test_size: 0.35
     seed: 12345
