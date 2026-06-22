@@ -274,6 +274,15 @@ https://twiki.cern.ch/twiki/bin/view/LHCPhysics/CERNYellowReportPageBR
 We will also use higher-order Monte Carlo generators later as additional
 inputs and cross-checks.
 
+The first higher-order signal setup is documented in:
+
+```text
+hgammagamma/HOAnalysis/README.md
+```
+
+It describes how to get and compile `POWHEG-BOX-V2/HJ/HJMiNNLO` for an
+inclusive `gg -> H` NNLO+PS signal sample to be showered later with Herwig 7.
+
 ## Suggested Outputs
 
 Useful first plots or checks include:
