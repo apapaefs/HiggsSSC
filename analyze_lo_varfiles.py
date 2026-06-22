@@ -450,12 +450,37 @@ def write_summary_json(metadata: dict[str, Any], rows: Sequence[dict[str, Any]],
     return path
 
 
+def compute_analysis_totals(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    signal_rows = [row for row in rows if row.get("category") == "Signal"]
+    background_rows = [row for row in rows if row.get("category") != "Signal"]
+    signal_expected = sum(float(row.get("expected_events", 0.0)) for row in signal_rows)
+    background_expected = sum(float(row.get("expected_events", 0.0)) for row in background_rows)
+    significance = signal_expected / math.sqrt(background_expected) if background_expected > 0.0 else None
+    return {
+        "signal_selected_cross_section_pb": sum(float(row.get("selected_cross_section_pb", 0.0)) for row in signal_rows),
+        "background_selected_cross_section_pb": sum(float(row.get("selected_cross_section_pb", 0.0)) for row in background_rows),
+        "signal_expected_events": signal_expected,
+        "background_expected_events": background_expected,
+        "signal_mc_events_after_analysis": sum(int(row.get("mc_events_after_analysis", 0)) for row in signal_rows),
+        "background_mc_events_after_analysis": sum(int(row.get("mc_events_after_analysis", 0)) for row in background_rows),
+        "approx_significance_s_over_sqrt_b": significance,
+    }
+
+
 def write_html_report(metadata: dict[str, Any], rows: Sequence[dict[str, Any]], output_dir: Path, assets: Sequence[Path] = ()) -> Path:
     def fmt(value: Any) -> str:
         if isinstance(value, float):
             return f"{value:.6g}"
         return str(value)
 
+    def fmt_optional(value: Any) -> str:
+        if value is None:
+            return "undefined (B <= 0)"
+        return fmt(value)
+
+    totals = metadata.get("totals")
+    if not isinstance(totals, dict):
+        totals = compute_analysis_totals(rows)
     row_html = "\n".join(
         "<tr>"
         + "".join(f"<td>{html.escape(fmt(row.get(field, '')))}</td>" for field in SUMMARY_FIELDS)
@@ -503,6 +528,14 @@ def write_html_report(metadata: dict[str, Any], rows: Sequence[dict[str, Any]], 
   <table>
     <thead><tr>{"".join(f"<th>{html.escape(field)}</th>" for field in SUMMARY_FIELDS)}</tr></thead>
     <tbody>{row_html}</tbody>
+  </table>
+  <h2>Totals</h2>
+  <table>
+    <tbody>
+      <tr><th>signal_expected_events</th><td>{html.escape(fmt(totals['signal_expected_events']))}</td></tr>
+      <tr><th>background_expected_events</th><td>{html.escape(fmt(totals['background_expected_events']))}</td></tr>
+      <tr><th>approx_significance_s_over_sqrt_b</th><td>{html.escape(fmt_optional(totals['approx_significance_s_over_sqrt_b']))}</td></tr>
+    </tbody>
   </table>
   <h2>Additional outputs</h2>
   <ul>{asset_links}</ul>
@@ -554,6 +587,11 @@ def build_terminal_summary(
             f"mc_events={mc_events}"
         )
 
+    totals = metadata.get("totals")
+    if not isinstance(totals, dict):
+        totals = compute_analysis_totals(rows)
+    significance = totals["approx_significance_s_over_sqrt_b"]
+    significance_text = fmt(significance) if significance is not None else "undefined (B <= 0)"
     signal_rows = [row for row in rows if row.get("category") == "Signal"]
     background_rows = [row for row in rows if row.get("category") != "Signal"]
     output_dir = Path(output_dir)
@@ -567,6 +605,7 @@ def build_terminal_summary(
         f"  samples: {len(rows)}",
         category_line("Signal", signal_rows),
         category_line("Backgrounds", background_rows),
+        f"  approx_significance_s_over_sqrt_b={significance_text}",
         "  output files:",
         f"    {output_dir / 'summary.csv'}",
         f"    {output_dir / 'summary.json'}",
@@ -618,6 +657,7 @@ def run_cuts(config_path: Path, run_tag_override: str | None = None, progress_en
         "luminosity_fb": luminosity_fb,
         "cuts": cut_metadata,
     }
+    metadata["totals"] = compute_analysis_totals(rows)
     index = write_outputs(metadata, rows, output_dir)
     return AnalysisRunResult(index_html=index, output_dir=output_dir, metadata=metadata, rows=rows, assets=[])
 
@@ -673,6 +713,7 @@ def run_xgboost(config_path: Path, run_tag_override: str | None = None, progress
             "xgboost": result["metadata"],
         }
         rows = result["summary_rows"]
+        metadata["totals"] = compute_analysis_totals(rows)
         assets = [Path(path) for path in result["metadata"].get("outputs", {}).values() if str(path).endswith((".png", ".json", ".csv"))]
         index = write_outputs(metadata, rows, output_dir, assets)
         progress.update(3, "wrote outputs")

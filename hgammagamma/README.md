@@ -732,6 +732,16 @@ The expected event count is calculated as:
 expected events = selected cross section [pb] * luminosity [fb^-1] * 1000
 ```
 
+The JSON, HTML, and terminal summaries also include an aggregate approximate
+significance:
+
+```text
+approx_significance_s_over_sqrt_b = S / sqrt(B)
+```
+
+where `S` and `B` are the total expected selected signal and background event
+yields.  If `B` is zero, the value is reported as undefined.
+
 To analyze only selected samples, add:
 
 ```yaml

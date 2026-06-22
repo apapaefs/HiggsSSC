@@ -108,7 +108,44 @@ class CutFlowTests(unittest.TestCase):
         self.assertIn("Signal", summary)
         self.assertIn("Backgrounds", summary)
         self.assertIn("expected events=40000", summary)
+        self.assertIn("approx_significance_s_over_sqrt_b=13.3333", summary)
         self.assertIn("/tmp/out/summary.csv", summary)
+
+    def test_analysis_totals_include_s_over_sqrt_b(self) -> None:
+        from analyze_lo_varfiles import compute_analysis_totals
+
+        totals = compute_analysis_totals(
+            [
+                {
+                    "category": "Signal",
+                    "selected_cross_section_pb": 0.25,
+                    "expected_events": 25.0,
+                    "mc_events_after_analysis": 3,
+                },
+                {
+                    "category": "Backgrounds",
+                    "selected_cross_section_pb": 1.0,
+                    "expected_events": 100.0,
+                    "mc_events_after_analysis": 7,
+                },
+            ]
+        )
+
+        self.assertEqual(totals["signal_expected_events"], 25.0)
+        self.assertEqual(totals["background_expected_events"], 100.0)
+        self.assertEqual(totals["approx_significance_s_over_sqrt_b"], 2.5)
+
+    def test_zero_background_significance_is_none(self) -> None:
+        from analyze_lo_varfiles import compute_analysis_totals
+
+        totals = compute_analysis_totals(
+            [
+                {"category": "Signal", "expected_events": 25.0},
+                {"category": "Backgrounds", "expected_events": 0.0},
+            ]
+        )
+
+        self.assertIsNone(totals["approx_significance_s_over_sqrt_b"])
 
     def test_cli_run_tag_override_is_parsed(self) -> None:
         from analyze_lo_varfiles import build_parser
