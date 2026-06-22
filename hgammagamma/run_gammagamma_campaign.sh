@@ -8,18 +8,27 @@ NEVENTS="${NEVENTS:-10000}"
 EBEAM="${EBEAM:-20000}"
 MG5_DIR="${MG5_DIR:-${REPO_ROOT}/MG5_aMC_v3_5_15}"
 HERWIG="${HERWIG:-Herwig}"
-HERWIG_PDF="${HERWIG_PDF:-NNPDF31_nnlo_as_0118}"
+LO_PDF_NAME="NNPDF40_lo_as_01180"
+LO_LHAPDF_ID="331900"
+NLO_PDF_NAME="NNPDF40_nlo_as_01180_qed"
+NLO_LHAPDF_ID="335900"
+NNLO_PDF_NAME="NNPDF40_nnlo_as_01180_qed"
+NNLO_LHAPDF_ID="336100"
+HERWIG_PDF="${HERWIG_PDF:-${LO_PDF_NAME}}"
 # 2.0 * YR4 BR(H -> gamma gamma) at mH = 125.09 GeV.
 SIGNAL_GGH_TO_GAMMAGAMMA_WEIGHT="${SIGNAL_GGH_TO_GAMMAGAMMA_WEIGHT:-0.00454}"
 DEFAULT_HERWIG_ENV="${DEFAULT_HERWIG_ENV:-${HOME}/Projects/Herwig/Herwig-REAL-stable-gcc-full/bin/activate}"
 HERWIG_ENV="${HERWIG_ENV:-}"
 HERWIG_MODULE="${HERWIG_MODULE:-}"
 NO_HERWIG_MODULE="${NO_HERWIG_MODULE:-0}"
-if [[ -z "${HERWIG_ENV}" && -z "${HERWIG_MODULE}" && -f "${DEFAULT_HERWIG_ENV}" ]]; then
-  HERWIG_ENV="${DEFAULT_HERWIG_ENV}"
-fi
 if [[ -z "${HERWIG_ENV}" && -z "${HERWIG_MODULE}" && "${NO_HERWIG_MODULE}" != "1" && "$(uname -s)" == "Linux" ]]; then
   HERWIG_MODULE="herwig/stable"
+fi
+if [[ -z "${HERWIG_ENV}" && -z "${HERWIG_MODULE}" && "${NO_HERWIG_MODULE}" != "1" && "$(uname -s)" == "Darwin" ]]; then
+  HERWIG_MODULE="herwig/730"
+fi
+if [[ -z "${HERWIG_ENV}" && -z "${HERWIG_MODULE}" && -f "${DEFAULT_HERWIG_ENV}" ]]; then
+  HERWIG_ENV="${DEFAULT_HERWIG_ENV}"
 fi
 DEFAULT_COLLIER_DYLIB="${DEFAULT_COLLIER_DYLIB:-${HOME}/Projects/Herwig/Herwig-REAL-stable-gcc-full/opt/OpenLoops-2.1.4/lib/libcollier.2.dylib}"
 COLLIER_DYLIB="${COLLIER_DYLIB:-}"
@@ -120,7 +129,7 @@ require_inputs() {
 }
 
 module_setup_snippet() {
-  printf '%s' 'if ! type module >/dev/null 2>&1; then for module_init in /etc/profile.d/modules.sh /usr/share/Modules/init/bash /usr/share/lmod/lmod/init/bash; do [ -r "$module_init" ] && source "$module_init" && break; done; fi'
+  printf '%s' 'if ! type module >/dev/null 2>&1; then for module_init in /opt/homebrew/opt/modules/init/bash /etc/profile.d/modules.sh /usr/share/Modules/init/bash /usr/share/lmod/lmod/init/bash; do [ -r "$module_init" ] && source "$module_init" && break; done; fi'
 }
 
 run_runtime_in_dir() {
@@ -364,6 +373,7 @@ patch_run_card() {
     cat <<EOF
 + patch run card ${card}
 nevents=${NEVENTS}, ebeam1=${EBEAM}, ebeam2=${EBEAM}, iseed=${seed}
+pdlabel=lhapdf, lhaid=${LO_LHAPDF_ID}
 pta=${GEN_PHOTON_PT_MIN}, etaa=${GEN_PHOTON_ETA_MAX}, ptj=${GEN_JET_PT_MIN}, etaj=${GEN_JET_ETA_MAX}
 ptl=${GEN_LEPTON_PT_MIN}, etal=${GEN_LEPTON_ETA_MAX}, draa=${GEN_DRAA_MIN}, draj=${GEN_DRAJ_MIN}, dral=${GEN_DRAL_MIN}
 drjj=${GEN_DRJJ_MIN}, drll=${GEN_DRLL_MIN}
@@ -375,7 +385,8 @@ EOF
     "$GEN_PHOTON_PT_MIN" "$GEN_PHOTON_ETA_MAX" \
     "$GEN_JET_PT_MIN" "$GEN_JET_ETA_MAX" \
     "$GEN_LEPTON_PT_MIN" "$GEN_LEPTON_ETA_MAX" \
-    "$GEN_DRAA_MIN" "$GEN_DRAJ_MIN" "$GEN_DRAL_MIN" "$GEN_DRJJ_MIN" "$GEN_DRLL_MIN" <<'PY'
+    "$GEN_DRAA_MIN" "$GEN_DRAJ_MIN" "$GEN_DRAL_MIN" "$GEN_DRJJ_MIN" "$GEN_DRLL_MIN" \
+    "$LO_LHAPDF_ID" <<'PY'
 import re
 import sys
 from pathlib import Path
@@ -386,6 +397,8 @@ updates = {
     "ebeam1": sys.argv[3],
     "ebeam2": sys.argv[3],
     "iseed": sys.argv[4],
+    "pdlabel": "lhapdf",
+    "lhaid": sys.argv[16],
     "pta": sys.argv[5],
     "etaa": sys.argv[6],
     "ptj": sys.argv[7],

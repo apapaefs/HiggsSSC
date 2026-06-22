@@ -40,6 +40,20 @@ h > a a
 
 where `h` is the Higgs boson and `a` is the photon.
 
+## PDF Policy
+
+Use the same PDF order as the hard-process accuracy:
+
+```text
+LO:   NNPDF40_lo_as_01180           LHAPDF ID 331900
+NLO:  NNPDF40_nlo_as_01180_qed      LHAPDF ID 335900
+NNLO: NNPDF40_nnlo_as_01180_qed     LHAPDF ID 336100
+```
+
+The LO gamma-gamma campaign enforces `pdlabel = lhapdf`, `lhaid = 331900` in
+MadGraph5 run cards and uses `NNPDF40_lo_as_01180` for Herwig. The higher-order
+`HJMiNNLO` card uses the NNLO QED set.
+
 ## Download MadGraph
 
 From the repository root, download MadGraph5_aMC@NLO version `v3.5.15` from
@@ -355,12 +369,15 @@ python3 hgammagamma/run_gammagamma_campaign.py \
   --herwig-module herwig/stable
 ```
 
-On the local development machine used to build this workflow, the Herwig
-environment is found automatically at:
+On the laptop, use the local Herwig module:
 
-```text
-~/Projects/Herwig/Herwig-REAL-stable-gcc-full/bin/activate
+```bash
+python3 hgammagamma/run_gammagamma_campaign.py \
+  --herwig-module herwig/730
 ```
+
+The Python runner defaults to `herwig/730` on macOS and `herwig/stable` on
+Linux when no activation script or explicit module is supplied.
 
 On another machine with a Herwig activation script rather than modules, pass
 the Herwig environment explicitly if needed:
@@ -368,6 +385,14 @@ the Herwig environment explicitly if needed:
 ```bash
 python3 hgammagamma/run_gammagamma_campaign.py \
   --herwig-env /path/to/herwig/bin/activate
+```
+
+The activation option also accepts a Herwig stack prefix containing
+`bin/activate`:
+
+```bash
+python3 hgammagamma/run_gammagamma_campaign.py \
+  --herwig-env /path/to/Herwig-REAL-stable-gcc-full
 ```
 
 If MG5 is not inside this repository, pass its path:
@@ -844,8 +869,9 @@ python3 hgammagamma/run_gammagamma_campaign.py \
   --nevents 10000
 ```
 
-The runner loads `herwig/stable` automatically on Linux when `--herwig-env` is
-not set.  If you prefer to show the Herwig module choice explicitly, use:
+The runner loads `herwig/stable` automatically on Linux and `herwig/730` on
+macOS when `--herwig-env` is not set.  If you prefer to show the Herwig module
+choice explicitly, use:
 
 ```bash
 python3 hgammagamma/run_gammagamma_campaign.py \
@@ -876,7 +902,7 @@ that is installed:
 
 ```bash
 python3 hgammagamma/run_gammagamma_campaign.py \
-  --herwig-pdf NNPDF31_nnlo_as_0118
+  --herwig-pdf NNPDF40_lo_as_01180
 ```
 
 If the report script says it found no samples, check that the campaign produced

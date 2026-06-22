@@ -59,11 +59,11 @@ set /Herwig/Shower/ShowerHandler:RestrictPhasespace Yes
 
 #############################################################
 # Set up the LHAPDF
-# NNPDF23_nlo_as_0119 is the default PDF for MG5_aMC
+# LO samples use NNPDF40_lo_as_01180 by policy.
 #############################################################
 cd /Herwig/Partons
 
-set /Herwig/Partons/thePDFset:PDFName NNPDF23_nlo_as_0119
+set /Herwig/Partons/thePDFset:PDFName NNPDF40_lo_as_01180
 set /Herwig/Partons/RemnantDecayer:AllowTop Yes
 set /Herwig/EventHandlers/theLHReader:PDFA /Herwig/Partons/thePDFset
 set /Herwig/EventHandlers/theLHReader:PDFB /Herwig/Partons/thePDFset

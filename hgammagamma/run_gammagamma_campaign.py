@@ -24,6 +24,13 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 DEFAULT_HERWIG_PREFIX = Path.home() / "Projects/Herwig/Herwig-REAL-stable-gcc-full"
 DEFAULT_LINUX_HERWIG_MODULE = "herwig/stable"
+DEFAULT_DARWIN_HERWIG_MODULE = "herwig/730"
+LO_PDF_NAME = "NNPDF40_lo_as_01180"
+LO_PDF_LHAID = 331900
+NLO_PDF_NAME = "NNPDF40_nlo_as_01180_qed"
+NLO_PDF_LHAID = 335900
+NNLO_PDF_NAME = "NNPDF40_nnlo_as_01180_qed"
+NNLO_PDF_LHAID = 336100
 YR4_BR_H_TO_GAMMAGAMMA = 2.27e-3
 SIGNAL_GGH_K_FACTOR = 2.0
 SIGNAL_GGH_TO_GAMMAGAMMA_WEIGHT = SIGNAL_GGH_K_FACTOR * YR4_BR_H_TO_GAMMAGAMMA
@@ -195,15 +202,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--herwig-module",
         default=os.environ.get("HERWIG_MODULE"),
-        help="environment module to load before Herwig/HwSim commands; defaults to herwig/stable on Linux when no --herwig-env is used",
+        help=(
+            "environment module to load before Herwig/HwSim commands, e.g. herwig/730 "
+            "on the laptop or herwig/stable on timur"
+        ),
     )
     parser.add_argument(
         "--no-herwig-module",
         action="store_true",
         default=env_bool("NO_HERWIG_MODULE", False),
-        help="disable the automatic Linux Herwig module default",
+        help="disable the automatic platform Herwig module default",
     )
-    parser.add_argument("--herwig-pdf", default=env_text("HERWIG_PDF", "NNPDF31_nnlo_as_0118"))
+    parser.add_argument("--herwig-pdf", default=env_text("HERWIG_PDF", LO_PDF_NAME))
     parser.add_argument("--collier-library", type=Path, default=None)
     parser.add_argument("--run-tag", default=env_text("RUN_TAG", "run_01"))
     parser.add_argument("--run-samples", default=env_text("RUN_SAMPLES", "signal_gg_h_aa,bkg_prompt_aa"))
@@ -228,8 +238,12 @@ def parse_config(argv: Sequence[str]) -> Config:
     args = build_parser().parse_args(argv)
     explicit_herwig_env = args.herwig_env.expanduser() if args.herwig_env else None
     herwig_module = clean_optional_text(args.herwig_module)
-    if herwig_module is None and explicit_herwig_env is None and not args.no_herwig_module and platform.system() == "Linux":
-        herwig_module = DEFAULT_LINUX_HERWIG_MODULE
+    if herwig_module is None and explicit_herwig_env is None and not args.no_herwig_module:
+        system = platform.system()
+        if system == "Linux":
+            herwig_module = DEFAULT_LINUX_HERWIG_MODULE
+        elif system == "Darwin":
+            herwig_module = DEFAULT_DARWIN_HERWIG_MODULE
     if args.no_herwig_module:
         herwig_module = None
     herwig_env = explicit_herwig_env
@@ -270,6 +284,14 @@ def q(value: object) -> str:
     return shlex.quote(str(value))
 
 
+def clean_shell_env(env: dict[str, str] | None = None) -> dict[str, str]:
+    shell_env = dict(os.environ if env is None else env)
+    for key in list(shell_env):
+        if key.startswith("BASH_FUNC_") and key.endswith("%%"):
+            shell_env.pop(key, None)
+    return shell_env
+
+
 def format_command(args: Sequence[object]) -> str:
     return " ".join(q(arg) for arg in args)
 
@@ -305,13 +327,14 @@ def run(args: Sequence[object], cfg: Config, cwd: Path | None = None, env: dict[
 
 
 def run_shell(command: str, cfg: Config, cwd: Path | None = None, env: dict[str, str] | None = None) -> None:
-    run(["bash", "-lc", command], cfg, cwd=cwd, env=env)
+    run(["bash", "-lc", command], cfg, cwd=cwd, env=clean_shell_env(env))
 
 
 def module_setup_snippet() -> str:
     return (
         "if ! type module >/dev/null 2>&1; then "
         "for module_init in "
+        "/opt/homebrew/opt/modules/init/bash "
         "/etc/profile.d/modules.sh "
         "/usr/share/Modules/init/bash "
         "/usr/share/lmod/lmod/init/bash; do "
@@ -402,6 +425,8 @@ def patch_run_card(card: Path, seed: int, cfg: Config) -> None:
         "ebeam1": str(cfg.ebeam),
         "ebeam2": str(cfg.ebeam),
         "iseed": str(seed),
+        "pdlabel": "lhapdf",
+        "lhaid": str(LO_PDF_LHAID),
         "pta": str(cfg.gen_photon_pt_min),
         "etaa": str(cfg.gen_photon_eta_max),
         "ptj": str(cfg.gen_jet_pt_min),
@@ -419,6 +444,7 @@ def patch_run_card(card: Path, seed: int, cfg: Config) -> None:
         print(
             "nevents={nevents}, ebeam1={ebeam1}, ebeam2={ebeam2}, iseed={iseed}".format(**updates)
         )
+        print("pdlabel={pdlabel}, lhaid={lhaid}".format(**updates))
         print(
             "pta={pta}, etaa={etaa}, ptj={ptj}, etaj={etaj}, "
             "ptl={ptl}, etal={etal}, draa={draa}, draj={draj}, dral={dral}, "

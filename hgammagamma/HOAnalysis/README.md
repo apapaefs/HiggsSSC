@@ -182,15 +182,97 @@ fastjet-config --libs --plugins
 
 ## Minimal SSC Test Run
 
+The pipeline wrapper for `HJMiNNLO` is:
+
+```bash
+python3 /path/to/HiggsSSC/hgammagamma/run_powheg_hjminnlo.py \
+  --nevents 10000
+```
+
+By default this creates a run directory under
+`POWHEG-BOX-V2/HJ/HJMiNNLO`, patches `numevts` from `--nevents`, enforces
+`ebeam1 = ebeam2 = 20000d0` for `pp` collisions at 40 TeV, runs the POWHEG
+stages, merges the per-seed `pwgevents-*.lhe` files into
+`powheg-hjminnlo-merged.lhe`, and writes that merged path to
+`powheg-lhe-files.txt`. The individual seed files are still listed in
+`powheg-lhe-seed-files.txt`. Use `--jobs N` to split the requested total event
+count over `N` POWHEG seed jobs. If `--nevents` is not divisible by `--jobs`,
+the wrapper uses two stage-4 groups so the requested total is still exact. Use
+`--ebeam` only for deliberate non-SSC studies, and `--no-merge-lhe` only if
+you want downstream tools to consume the per-seed files directly.
+
+To check progress from another terminal while the production command is
+running, use the same run-defining options with `--status`:
+
+```bash
+python3 /path/to/HiggsSSC/hgammagamma/run_powheg_hjminnlo.py \
+  --nevents 100000 \
+  --jobs 8 \
+  --herwig-module herwig/730 \
+  --status
+```
+
+For an auto-refreshing view, use:
+
+```bash
+python3 /path/to/HiggsSSC/hgammagamma/run_powheg_hjminnlo.py \
+  --nevents 100000 \
+  --jobs 8 \
+  --herwig-module herwig/730 \
+  --watch-status 60
+```
+
+The status view reports completed POWHEG stages, latest log activity,
+per-seed LHE files, event blocks written so far, and the merged LHE/manifest
+once the run has finished.
+
+For example:
+
+```bash
+python3 /path/to/HiggsSSC/hgammagamma/run_powheg_hjminnlo.py \
+  --nevents 100000 \
+  --jobs 8 \
+  --run-dir /path/to/HiggsSSC/POWHEG-BOX-V2/HJ/HJMiNNLO/run-ssc40-hjminnlo-100k
+```
+
+The wrapper can configure the Herwig/LHAPDF runtime either through an
+activation script/prefix or through environment modules. On the laptop, use:
+
+```bash
+python3 /path/to/HiggsSSC/hgammagamma/run_powheg_hjminnlo.py \
+  --nevents 100000 \
+  --jobs 8 \
+  --herwig-module herwig/730
+```
+
+On `timur`, use:
+
+```bash
+python3 /path/to/HiggsSSC/hgammagamma/run_powheg_hjminnlo.py \
+  --nevents 100000 \
+  --jobs 8 \
+  --herwig-module herwig/stable
+```
+
+Equivalently, set `HERWIG_MODULE=herwig/730` or
+`HERWIG_MODULE=herwig/stable` before running the wrapper. If `HERWIG_ENV` is
+set instead, it may point either to the Herwig stack prefix or to the activation
+script itself; the wrapper normalizes a prefix such as
+`/path/to/Herwig-REAL-stable-gcc-full` to
+`/path/to/Herwig-REAL-stable-gcc-full/bin/activate`. By default, the wrapper
+uses `herwig/730` on macOS and `herwig/stable` on Linux when no explicit
+Herwig environment is supplied. After a failed setup-stage attempt, rerun the
+same directory with `--resume`.
+
 The recommended starting card for SSC 40 TeV `HJMiNNLO` production is:
 
 ```text
-hgammagamma/HOAnalysis/powheg-hjminnlo-ssc40-nnpdf31.input
+hgammagamma/HOAnalysis/powheg-hjminnlo-ssc40-nnpdf40nnloqed.input
 ```
 
-It uses `NNPDF31_nnlo_as_0118` through LHAPDF ID `303600`, regenerates grids by
-default, keeps negative weights, and sets the central HJMiNNLO options for an
-inclusive `gg -> H` NNLO+PS signal. Copy it into a run directory as
+It uses `NNPDF40_nnlo_as_01180_qed` through LHAPDF ID `336100`, regenerates
+grids by default, keeps negative weights, and sets the central HJMiNNLO options
+for an inclusive `gg -> H` NNLO+PS signal. Copy it into a run directory as
 `powheg.input`.
 
 After `pwhg_main` is built, make a small 40 TeV test run directory:
@@ -201,7 +283,7 @@ cd /path/to/HiggsSSC/POWHEG-BOX-V2/HJ/HJMiNNLO
 mkdir -p run-ssc-hjminnlo-test
 cp suggested_run/pwgseeds.dat \
   run-ssc-hjminnlo-test/
-cp /path/to/HiggsSSC/hgammagamma/HOAnalysis/powheg-hjminnlo-ssc40-nnpdf31.input \
+cp /path/to/HiggsSSC/hgammagamma/HOAnalysis/powheg-hjminnlo-ssc40-nnpdf40nnloqed.input \
   run-ssc-hjminnlo-test/powheg.input
 
 cd run-ssc-hjminnlo-test
