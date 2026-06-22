@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/../.." && pwd)"
+export MG5_DIR="${MG5_DIR:-$repo_root/MG5_aMC_v3_5_15}"
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") [--check]
+
+Install MG5 loop-reduction libraries needed by loop-induced processes.
+This runs MG5's own:
+
+  install ninja
+  install collier
+
+The libraries are installed under:
+
+  \$MG5_DIR/HEPTools/lib
+EOF
+}
+
+check_only=0
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  usage
+  exit 0
+elif [[ "${1:-}" == "--check" ]]; then
+  check_only=1
+elif [[ $# -gt 0 ]]; then
+  usage >&2
+  exit 2
+fi
+
+launcher="$MG5_DIR/bin/mg5_aMC"
+if [[ ! -f "$launcher" ]]; then
+  echo "setup_mg5_loop_tools: missing MG5 launcher: $launcher" >&2
+  exit 1
+fi
+
+have_loop_tools() {
+  [[ -f "$MG5_DIR/HEPTools/lib/libninja.a" ]] && [[ -f "$MG5_DIR/HEPTools/lib/libcollier.a" ]]
+}
+
+if have_loop_tools; then
+  echo "MG5 loop tools are installed in $MG5_DIR/HEPTools/lib"
+  exit 0
+fi
+
+if [[ "$check_only" -eq 1 ]]; then
+  echo "MG5 loop tools are missing from $MG5_DIR/HEPTools/lib" >&2
+  echo "Run: hgammagamma/bin/setup_mg5_loop_tools" >&2
+  exit 1
+fi
+
+"$script_dir/patch_mg5_logging"
+
+python_candidates=()
+if [[ -n "${MG5_PYTHON:-}" ]]; then
+  python_candidates+=("$MG5_PYTHON")
+fi
+python_candidates+=("python3.11" "python3")
+
+python_bin=""
+for candidate in "${python_candidates[@]}"; do
+  if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c 'import six' >/dev/null 2>&1; then
+    python_bin="$candidate"
+    break
+  fi
+done
+
+if [[ -z "$python_bin" ]]; then
+  echo "setup_mg5_loop_tools: could not find a Python executable with the six module." >&2
+  echo "Try: python3.11 -m pip install --user six" >&2
+  exit 1
+fi
+
+install_card="$(mktemp "${TMPDIR:-/tmp}/mg5-loop-tools.XXXXXX")"
+trap 'rm -f "$install_card"' EXIT
+cat > "$install_card" <<'EOF'
+install ninja
+install collier
+quit
+EOF
+
+echo "Running MG5 loop-tool installer with $python_bin"
+"$python_bin" "$launcher" "$install_card"
+
+if have_loop_tools; then
+  echo "MG5 loop tools are installed in $MG5_DIR/HEPTools/lib"
+else
+  echo "setup_mg5_loop_tools: MG5 finished, but libninja.a or libcollier.a was not found." >&2
+  echo "Check the MG5 installation log above." >&2
+  exit 1
+fi

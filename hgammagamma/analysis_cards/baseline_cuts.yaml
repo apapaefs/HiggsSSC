@@ -1,6 +1,6 @@
 analysis:
   name: baseline_cuts
-  run_tag: run_01
+  run_tag: run_02
   luminosity_fb: 100.0
   rate_factors:
     # K_ggH * BR(H -> gamma gamma) = 2.0 * 2.27e-3.

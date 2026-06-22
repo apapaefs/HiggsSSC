@@ -166,6 +166,20 @@ If MG5 asks to install recommended libraries or helper packages while setting
 up this loop-induced process, accept the recommended installs.  Let MG5 manage
 those dependencies unless you already have a known working site installation.
 
+If MG5 warns that `ninja` or `collier` could not be found in `HEPTools/lib`,
+install the loop-reduction libraries once in this MG5 checkout:
+
+```bash
+cd HiggsSSC
+module use "$PWD/modulefiles"
+module load python/311
+module load higgsssc/mg5
+hgammagamma/bin/setup_mg5_loop_tools
+```
+
+After this finishes, `MG5_aMC_v3_5_15/HEPTools/lib` should contain
+`libninja.a` and `libcollier.a`.
+
 ## Beam Energy
 
 For the SSC setup we are using 20 TeV proton beams colliding with 20 TeV proton
