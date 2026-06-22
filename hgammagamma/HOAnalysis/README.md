@@ -109,12 +109,19 @@ On Linux, the default Makefile settings are usually sufficient:
 make pwhg_main CXX=g++ STDCLIB=-lstdc++
 ```
 
-On macOS, use `libc++` consistently. This avoids link failures with undefined
-`std::__1` symbols from LHAPDF or FastJet:
+On macOS, match the C++ standard library used to build LHAPDF and FastJet. For
+the Herwig GCC stack in this workspace, use Homebrew GCC and `libstdc++`:
 
 ```bash
-make pwhg_main CXX=c++ STDCLIB=-lc++
+source /Users/apapaefs/Projects/Herwig/Herwig-REAL-stable-gcc-full/bin/activate
+make pwhg_main \
+  CXX=/opt/homebrew/bin/g++-15 \
+  CC=/opt/homebrew/bin/gcc-15 \
+  STDCLIB=-lstdc++
 ```
+
+If LHAPDF and FastJet were instead built with Apple clang/`libc++`, use
+`CXX=c++ STDCLIB=-lc++`.
 
 For a clean rebuild:
 
@@ -125,8 +132,12 @@ rm -f pwhg_main obj-gfortran/*.o obj-gfortran/libfiles.a
 # Linux
 make pwhg_main CXX=g++ STDCLIB=-lstdc++
 
-# macOS
-make pwhg_main CXX=c++ STDCLIB=-lc++
+# macOS with the Herwig GCC stack in this workspace
+source /Users/apapaefs/Projects/Herwig/Herwig-REAL-stable-gcc-full/bin/activate
+make pwhg_main \
+  CXX=/opt/homebrew/bin/g++-15 \
+  CC=/opt/homebrew/bin/gcc-15 \
+  STDCLIB=-lstdc++
 ```
 
 Only run one of the final two `make` commands, depending on the platform.
@@ -147,14 +158,19 @@ is not in the sparse checkout:
 git -C /path/to/HiggsSSC/POWHEG-BOX-V2 sparse-checkout add MiNNLOStuff
 ```
 
-Undefined symbols involving `LHAPDF::mkPDF`, `fastjet::sorted_by_pt`, or
-`std::__1` usually mean inconsistent C++ link settings or inconsistent library
-architectures. On macOS, rebuild with:
+Undefined symbols involving `LHAPDF::mkPDF`, `fastjet::sorted_by_pt`,
+`std::__1`, or `std::__cxx11` usually mean inconsistent C++ link settings or
+inconsistent library architectures. On macOS with the Herwig GCC stack in this
+workspace, rebuild with:
 
 ```bash
 make clean
 rm -f pwhg_main obj-gfortran/*.o obj-gfortran/libfiles.a
-make pwhg_main CXX=c++ STDCLIB=-lc++
+source /Users/apapaefs/Projects/Herwig/Herwig-REAL-stable-gcc-full/bin/activate
+make pwhg_main \
+  CXX=/opt/homebrew/bin/g++-15 \
+  CC=/opt/homebrew/bin/gcc-15 \
+  STDCLIB=-lstdc++
 ```
 
 Then check the linked libraries:
@@ -166,22 +182,29 @@ fastjet-config --libs --plugins
 
 ## Minimal SSC Test Run
 
+The recommended starting card for SSC 40 TeV `HJMiNNLO` production is:
+
+```text
+hgammagamma/HOAnalysis/powheg-hjminnlo-ssc40-nnpdf31.input
+```
+
+It uses `NNPDF31_nnlo_as_0118` through LHAPDF ID `303600`, regenerates grids by
+default, keeps negative weights, and sets the central HJMiNNLO options for an
+inclusive `gg -> H` NNLO+PS signal. Copy it into a run directory as
+`powheg.input`.
+
 After `pwhg_main` is built, make a small 40 TeV test run directory:
 
 ```bash
 cd /path/to/HiggsSSC/POWHEG-BOX-V2/HJ/HJMiNNLO
 
 mkdir -p run-ssc-hjminnlo-test
-cp suggested_run/powheg.input-save suggested_run/pwgseeds.dat \
+cp suggested_run/pwgseeds.dat \
   run-ssc-hjminnlo-test/
+cp /path/to/HiggsSSC/hgammagamma/HOAnalysis/powheg-hjminnlo-ssc40-nnpdf31.input \
+  run-ssc-hjminnlo-test/powheg.input
 
 cd run-ssc-hjminnlo-test
-
-sed \
-  -e 's/ebeam1 .*/ebeam1 20000d0/' \
-  -e 's/ebeam2 .*/ebeam2 20000d0/' \
-  -e 's/numevts .*/numevts 1000/' \
-  ../suggested_run/powheg.input-save > powheg.input
 
 ../pwhg_main
 ```

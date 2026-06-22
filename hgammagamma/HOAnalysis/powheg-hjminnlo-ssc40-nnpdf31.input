@@ -1,0 +1,114 @@
+max_io_bufsize 2000000
+
+! HJMiNNLO central setup for the hgammagamma higher-order signal.
+! Collider: pp at sqrt(s) = 40 TeV, with 20 TeV per beam.
+! PDF: LHAPDF ID 303600 = NNPDF31_nnlo_as_0118.
+! Copy this file to a HJMiNNLO run directory as powheg.input.
+
+! TO CORRECT FOR UB VIOLATIONS DETECTED DURING STAGE 4
+! btildeviol 1
+! corr_btilde XXX
+! corr_remnant XXX
+
+! SCALE VARIATION
+renscfact  1d0
+facscfact  1d0
+kappaQ     1d0
+
+rwl_file '-'
+<initrwgt>
+<weightgroup name='scale_variation'>
+<weight id='11'> renscfact=1.0 facscfact=1.0 </weight>
+<weight id='12'> renscfact=1.0 facscfact=2.0 </weight>
+<weight id='21'> renscfact=2.0 facscfact=1.0 </weight>
+<weight id='22'> renscfact=2.0 facscfact=2.0 </weight>
+<weight id='1H'> renscfact=1.0 facscfact=0.5 </weight>
+<weight id='H1'> renscfact=0.5 facscfact=1.0 </weight>
+<weight id='HH'> renscfact=0.5 facscfact=0.5 </weight>
+</initrwgt>
+
+lhrwgt_id    'ssc40-nnpdf31'
+lhrwgt_descr 'SSC 40 TeV HJMiNNLO central NNLOPS NNPDF31_nnlo_as_0118'
+
+! ALPHAS AND PDF EVOLUTION
+alphas_from_pdf 1
+
+! MINLO/MINNLO SETTINGS
+minlo 1
+minnlo 1
+modlog_p 6
+inc_delta_terms 0
+distribute_by_ub 1
+distribute_by_ub_AP 1
+use_NNLOPS_pdfs 1
+pdf_cutoff_fact 1.1
+alphas_cutoff_fact 0.0
+negative_pdfs_zero 0
+
+profiledscales 1
+Q0 2.
+npow 1
+largeptscales 0
+
+! PROCESS PARAMETERS
+hmass 125
+hwidth 0.004152d0
+bwcutoff 1000
+higgsfixedwidth 1
+
+! POWHEG PARAMETERS
+numevts 20000
+ih1   1
+ih2   1
+ebeam1 20000d0
+ebeam2 20000d0
+
+! LHAPDF numbering: NNPDF31_nnlo_as_0118
+lhans1 303600
+lhans2 303600
+
+! Fresh grids are recommended after changing energy, PDF, or central scales.
+! Set these to 1 only when rerunning with identical integration settings.
+use-old-grid    0
+use-old-ubound  0
+
+! HJMiNNLO/Herwig 7 shower handoff settings.
+bornsuppfact 1
+ckkwscalup 0
+doublefsr 1
+withnegweights 1
+bornonly 0
+
+! Integration settings. For a smoke test, lower numevts and ncall2.
+ncall1   5000
+itmx1    1
+ncall2   50000
+itmx2    1
+foldcsi   1
+foldy     1
+foldphi   1
+nubound 30000
+
+! Event generation and diagnostics.
+bornktmin 0.26
+storeinfo_rwgt 1
+testplots 0
+flg_debug 0
+
+! PARALLEL RUNS
+manyseeds 1
+parallelstage 1
+xgriditeration 1
+maxseeds 1000
+
+! OPTIONS TO DEAL WITH UNSTABLE POINTS/GRIDS
+storemintupb 0
+check_bad_st1 1
+check_bad_st2 1
+ubexcess_correct 1
+
+! Leave compression off until the Herwig 7 LHE-reading step is validated.
+! compress_lhe 1
+! compress_upb 1
+! fastbtlbound 1
+! mintupbratlim 1d4
