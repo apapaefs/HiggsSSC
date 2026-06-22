@@ -669,6 +669,16 @@ python3 analyze_lo_varfiles.py cuts \
   --config hgammagamma/analysis_cards/baseline_cuts.yaml
 ```
 
+The run tag is normally read from `analysis.run_tag` in the YAML card.  To
+reuse the same card for a different LO campaign tag, override it on the command
+line:
+
+```bash
+python3 analyze_lo_varfiles.py cuts \
+  --config hgammagamma/analysis_cards/baseline_cuts.yaml \
+  --run-tag run_02
+```
+
 Cuts are inclusive and combined with logical AND.  The allowed variable names
 are:
 
@@ -763,6 +773,8 @@ Run it with:
 python3 analyze_lo_varfiles.py xgboost \
   --config hgammagamma/analysis_cards/xgboost_baseline.yaml
 ```
+
+The XGBoost mode accepts the same `--run-tag run_02` override.
 
 This writes the same `summary.csv`, `summary.json`, and `index.html` files,
 plus XGBoost outputs such as `metrics.json`, `scores.csv`, `roc.png`,

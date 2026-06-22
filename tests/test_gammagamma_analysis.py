@@ -1,4 +1,5 @@
 import array
+import io
 import math
 import tempfile
 import unittest
@@ -61,6 +62,67 @@ class GammaGammaReaderTests(unittest.TestCase):
 
 
 class CutFlowTests(unittest.TestCase):
+    def test_progress_bar_writes_current_sample_and_count(self) -> None:
+        from analyze_lo_varfiles import ProgressBar
+
+        stream = io.StringIO()
+        progress = ProgressBar(total=2, label="Analyzing samples", stream=stream, enabled=True, width=10)
+        progress.update(1, "signal_gg_h_aa")
+        progress.update(2, "bkg_prompt_aa")
+        progress.finish()
+
+        output = stream.getvalue()
+        self.assertIn("Analyzing samples", output)
+        self.assertIn("1/2", output)
+        self.assertIn("2/2", output)
+        self.assertIn("signal_gg_h_aa", output)
+        self.assertIn("bkg_prompt_aa", output)
+        self.assertTrue(output.endswith("\n"))
+
+    def test_terminal_summary_reports_outputs_and_totals(self) -> None:
+        from analyze_lo_varfiles import build_terminal_summary
+
+        summary = build_terminal_summary(
+            metadata={"name": "baseline_cuts", "mode": "cuts", "run_tag": "run_02", "luminosity_fb": 100.0},
+            rows=[
+                {
+                    "sample": "signal_gg_h_aa",
+                    "category": "Signal",
+                    "selected_cross_section_pb": 0.4,
+                    "expected_events": 40000.0,
+                    "mc_events_after_analysis": 10,
+                },
+                {
+                    "sample": "bkg_prompt_aa",
+                    "category": "Backgrounds",
+                    "selected_cross_section_pb": 90.0,
+                    "expected_events": 9000000.0,
+                    "mc_events_after_analysis": 1,
+                },
+            ],
+            output_dir=Path("/tmp/out"),
+        )
+
+        self.assertIn("Analysis summary", summary)
+        self.assertIn("run tag: run_02", summary)
+        self.assertIn("Signal", summary)
+        self.assertIn("Backgrounds", summary)
+        self.assertIn("expected events=40000", summary)
+        self.assertIn("/tmp/out/summary.csv", summary)
+
+    def test_cli_run_tag_override_is_parsed(self) -> None:
+        from analyze_lo_varfiles import build_parser
+
+        args = build_parser().parse_args(["cuts", "--config", "card.yaml", "--run-tag", "run_02"])
+
+        self.assertEqual(args.run_tag, "run_02")
+
+    def test_resolve_run_tag_prefers_cli_then_yaml_then_environment(self) -> None:
+        from analyze_lo_varfiles import resolve_run_tag
+
+        self.assertEqual(resolve_run_tag({"run_tag": "run_01"}, "run_02"), "run_02")
+        self.assertEqual(resolve_run_tag({"run_tag": "run_01"}, None), "run_01")
+
     def test_rectangular_cuts_are_inclusive_and_anded(self) -> None:
         from analyze_lo_varfiles import Cut, apply_cuts
 

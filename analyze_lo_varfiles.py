@@ -86,6 +86,50 @@ class SampleInfo:
     sum_weight: float
 
 
+@dataclass
+class AnalysisRunResult:
+    index_html: Path
+    output_dir: Path
+    metadata: dict[str, Any]
+    rows: list[dict[str, Any]]
+    assets: list[Path]
+
+
+class ProgressBar:
+    def __init__(
+        self,
+        total: int,
+        label: str,
+        stream: Any = None,
+        enabled: bool = True,
+        width: int = 28,
+    ) -> None:
+        self.total = max(int(total), 0)
+        self.label = label
+        self.stream = stream if stream is not None else sys.stderr
+        self.enabled = enabled
+        self.width = max(int(width), 1)
+        self._finished = False
+
+    def update(self, current: int, item: str | None = None) -> None:
+        if not self.enabled:
+            return
+        denominator = max(self.total, 1)
+        current = max(0, min(int(current), denominator))
+        filled = int(round(self.width * current / denominator))
+        bar = "#" * filled + "-" * (self.width - filled)
+        suffix = f" {item}" if item else ""
+        self.stream.write(f"\r{self.label} [{bar}] {current}/{self.total}{suffix}")
+        self.stream.flush()
+
+    def finish(self) -> None:
+        if not self.enabled or self._finished:
+            return
+        self.stream.write("\n")
+        self.stream.flush()
+        self._finished = True
+
+
 SUMMARY_FIELDS = [
     "sample",
     "category",
@@ -485,11 +529,62 @@ def requested_samples(value: Any) -> set[str] | None:
     return {str(part) for part in value}
 
 
-def load_analysis_inputs(config_path: Path) -> tuple[dict[str, Any], Path, str, str, float, list[SampleInfo], Path]:
+def resolve_run_tag(analysis: dict[str, Any], run_tag_override: str | None = None) -> str:
+    if run_tag_override:
+        return str(run_tag_override)
+    return str(analysis.get("run_tag", os.environ.get("RUN_TAG", "run_01")))
+
+
+def build_terminal_summary(
+    metadata: dict[str, Any],
+    rows: Sequence[dict[str, Any]],
+    output_dir: Path,
+    assets: Sequence[Path] = (),
+) -> str:
+    def fmt(value: float) -> str:
+        return f"{float(value):.6g}"
+
+    def category_line(label: str, selected_rows: Sequence[dict[str, Any]]) -> str:
+        selected_xsec = sum(float(row.get("selected_cross_section_pb", 0.0)) for row in selected_rows)
+        expected = sum(float(row.get("expected_events", 0.0)) for row in selected_rows)
+        mc_events = sum(int(row.get("mc_events_after_analysis", 0)) for row in selected_rows)
+        return (
+            f"  {label}: samples={len(selected_rows)} "
+            f"selected_xsec_pb={fmt(selected_xsec)} expected events={fmt(expected)} "
+            f"mc_events={mc_events}"
+        )
+
+    signal_rows = [row for row in rows if row.get("category") == "Signal"]
+    background_rows = [row for row in rows if row.get("category") != "Signal"]
+    output_dir = Path(output_dir)
+    lines = [
+        "",
+        "Analysis summary",
+        f"  name: {metadata.get('name', 'analysis')}",
+        f"  mode: {metadata.get('mode', 'analysis')}",
+        f"  run tag: {metadata.get('run_tag', '')}",
+        f"  luminosity: {fmt(float(metadata.get('luminosity_fb', 0.0)))} fb^-1",
+        f"  samples: {len(rows)}",
+        category_line("Signal", signal_rows),
+        category_line("Backgrounds", background_rows),
+        "  output files:",
+        f"    {output_dir / 'summary.csv'}",
+        f"    {output_dir / 'summary.json'}",
+        f"    {output_dir / 'index.html'}",
+    ]
+    for asset in assets:
+        lines.append(f"    {asset}")
+    return "\n".join(lines)
+
+
+def load_analysis_inputs(
+    config_path: Path,
+    run_tag_override: str | None = None,
+) -> tuple[dict[str, Any], Path, str, str, float, list[SampleInfo], Path]:
     config = load_config(config_path)
     analysis = config["analysis"]
     name = str(analysis.get("name", "analysis"))
-    run_tag = str(analysis.get("run_tag", os.environ.get("RUN_TAG", "run_01")))
+    run_tag = resolve_run_tag(analysis, run_tag_override)
     luminosity_fb = float(analysis.get("luminosity_fb", DEFAULT_LUMINOSITY_FB))
     analysis_root = Path(analysis.get("analysis_root", DEFAULT_ANALYSIS_ROOT)).expanduser()
     rate_factors = parse_rate_factors(analysis.get("rate_factors"))
@@ -500,11 +595,18 @@ def load_analysis_inputs(config_path: Path) -> tuple[dict[str, Any], Path, str, 
     return analysis, analysis_root, name, run_tag, luminosity_fb, samples, output_dir
 
 
-def run_cuts(config_path: Path) -> Path:
-    analysis, _, name, run_tag, luminosity_fb, samples, output_dir = load_analysis_inputs(config_path)
+def run_cuts(config_path: Path, run_tag_override: str | None = None, progress_enabled: bool = True) -> AnalysisRunResult:
+    analysis, _, name, run_tag, luminosity_fb, samples, output_dir = load_analysis_inputs(config_path, run_tag_override)
     cuts = [Cut.from_mapping(item) for item in analysis.get("cuts", [])]
     max_events = analysis.get("max_events")
-    rows = [summarize_sample(sample, cuts, luminosity_fb, _optional_float(max_events)) for sample in samples]
+    rows: list[dict[str, Any]] = []
+    progress = ProgressBar(len(samples), "Analyzing samples", enabled=progress_enabled)
+    try:
+        for index, sample in enumerate(samples, start=1):
+            rows.append(summarize_sample(sample, cuts, luminosity_fb, _optional_float(max_events)))
+            progress.update(index, sample.name)
+    finally:
+        progress.finish()
     cut_metadata = [
         {"variable": cut.variable, "min": cut.minimum, "max": cut.maximum}
         for cut in cuts
@@ -516,55 +618,67 @@ def run_cuts(config_path: Path) -> Path:
         "luminosity_fb": luminosity_fb,
         "cuts": cut_metadata,
     }
-    return write_outputs(metadata, rows, output_dir)
+    index = write_outputs(metadata, rows, output_dir)
+    return AnalysisRunResult(index_html=index, output_dir=output_dir, metadata=metadata, rows=rows, assets=[])
 
 
-def run_xgboost(config_path: Path) -> Path:
-    analysis, _, name, run_tag, luminosity_fb, samples, output_dir = load_analysis_inputs(config_path)
+def run_xgboost(config_path: Path, run_tag_override: str | None = None, progress_enabled: bool = True) -> AnalysisRunResult:
+    analysis, _, name, run_tag, luminosity_fb, samples, output_dir = load_analysis_inputs(config_path, run_tag_override)
     signal_samples = [sample for sample in samples if sample.category == "Signal"]
     background_samples = [sample for sample in samples if sample.category != "Signal"]
     if not signal_samples or not background_samples:
         raise RuntimeError("xgboost mode requires at least one Signal sample and one background sample")
 
+    progress = ProgressBar(3, "XGBoost analysis", enabled=progress_enabled)
     try:
+        progress.update(1, "prepared samples")
         from xgboost_root_varfiles_module import run_signal_background_analysis
     except ImportError as exc:
         raise RuntimeError(
             "xgboost mode requires optional packages: xgboost, scikit-learn, and tqdm. "
             "Install them before running this subcommand."
         ) from exc
+    finally:
+        if "run_signal_background_analysis" not in locals():
+            progress.finish()
 
     xgb_cfg = analysis.get("xgboost", {}) or {}
-    result = run_signal_background_analysis(
-        signal_files=[sample.var_file for sample in signal_samples],
-        background_files=[sample.var_file for sample in background_samples],
-        output_dir=output_dir,
-        signal_xsecs_fb=[sample.cross_section_pb * 1000.0 for sample in signal_samples],
-        background_xsecs_fb=[sample.cross_section_pb * 1000.0 for sample in background_samples],
-        signal_rate_factors=[sample.weight_scale for sample in signal_samples],
-        background_rate_factors=[sample.weight_scale for sample in background_samples],
-        signal_normalisation_weights=[sample.sum_weight for sample in signal_samples],
-        background_normalisation_weights=[sample.sum_weight for sample in background_samples],
-        signal_metadata=[{"sample": sample.name, "category": sample.category} for sample in signal_samples],
-        background_metadata=[{"sample": sample.name, "category": sample.category} for sample in background_samples],
-        luminosity=luminosity_fb,
-        test_size=float(xgb_cfg.get("test_size", 0.35)),
-        seed=int(xgb_cfg.get("seed", 12345)),
-        systematics=float(xgb_cfg.get("systematics", 0.0)),
-        max_events=xgb_cfg.get("max_events"),
-        model_params=xgb_cfg.get("model_params"),
-    )
-    metadata = {
-        "name": name,
-        "mode": "xgboost",
-        "run_tag": run_tag,
-        "luminosity_fb": luminosity_fb,
-        "cuts": [{"variable": "xgboost_score", "min": result["metadata"]["best_threshold"], "max": None}],
-        "xgboost": result["metadata"],
-    }
-    rows = result["summary_rows"]
-    assets = [Path(path) for path in result["metadata"].get("outputs", {}).values() if str(path).endswith((".png", ".json", ".csv"))]
-    return write_outputs(metadata, rows, output_dir, assets)
+    try:
+        result = run_signal_background_analysis(
+            signal_files=[sample.var_file for sample in signal_samples],
+            background_files=[sample.var_file for sample in background_samples],
+            output_dir=output_dir,
+            signal_xsecs_fb=[sample.cross_section_pb * 1000.0 for sample in signal_samples],
+            background_xsecs_fb=[sample.cross_section_pb * 1000.0 for sample in background_samples],
+            signal_rate_factors=[sample.weight_scale for sample in signal_samples],
+            background_rate_factors=[sample.weight_scale for sample in background_samples],
+            signal_normalisation_weights=[sample.sum_weight for sample in signal_samples],
+            background_normalisation_weights=[sample.sum_weight for sample in background_samples],
+            signal_metadata=[{"sample": sample.name, "category": sample.category} for sample in signal_samples],
+            background_metadata=[{"sample": sample.name, "category": sample.category} for sample in background_samples],
+            luminosity=luminosity_fb,
+            test_size=float(xgb_cfg.get("test_size", 0.35)),
+            seed=int(xgb_cfg.get("seed", 12345)),
+            systematics=float(xgb_cfg.get("systematics", 0.0)),
+            max_events=xgb_cfg.get("max_events"),
+            model_params=xgb_cfg.get("model_params"),
+        )
+        progress.update(2, "trained and scored")
+        metadata = {
+            "name": name,
+            "mode": "xgboost",
+            "run_tag": run_tag,
+            "luminosity_fb": luminosity_fb,
+            "cuts": [{"variable": "xgboost_score", "min": result["metadata"]["best_threshold"], "max": None}],
+            "xgboost": result["metadata"],
+        }
+        rows = result["summary_rows"]
+        assets = [Path(path) for path in result["metadata"].get("outputs", {}).values() if str(path).endswith((".png", ".json", ".csv"))]
+        index = write_outputs(metadata, rows, output_dir, assets)
+        progress.update(3, "wrote outputs")
+        return AnalysisRunResult(index_html=index, output_dir=output_dir, metadata=metadata, rows=list(rows), assets=assets)
+    finally:
+        progress.finish()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -576,18 +690,20 @@ def build_parser() -> argparse.ArgumentParser:
     for command in ("cuts", "xgboost"):
         subparser = subparsers.add_parser(command)
         subparser.add_argument("--config", type=Path, required=True)
+        subparser.add_argument("--run-tag", help="Override analysis.run_tag from the YAML card.")
+        subparser.add_argument("--no-progress", action="store_true", help="Disable terminal progress bars.")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "cuts":
-        index = run_cuts(args.config)
+        result = run_cuts(args.config, run_tag_override=args.run_tag, progress_enabled=not args.no_progress)
     elif args.command == "xgboost":
-        index = run_xgboost(args.config)
+        result = run_xgboost(args.config, run_tag_override=args.run_tag, progress_enabled=not args.no_progress)
     else:  # pragma: no cover - argparse prevents this.
         raise RuntimeError(f"unknown command {args.command}")
-    print(f"Wrote analysis report: {index}")
+    print(build_terminal_summary(result.metadata, result.rows, result.output_dir, result.assets))
     return 0
 
 
