@@ -33,6 +33,8 @@ clone the existing repository, update it when needed, and work with the files.
 
 ```text
 HiggsSSC/
+  hgammagamma/ # h -> gamma gamma campaign and LO analysis outputs
+  analyze_lo_varfiles.py # repo-root cut/XGBoost analysis CLI for _var.root files
   paper/   # paper submodule -> HiggsAtSSC
 ```
 

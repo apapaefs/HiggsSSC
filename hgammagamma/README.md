@@ -621,6 +621,113 @@ python3 hgammagamma/make_gammagamma_report.py \
   --samples signal_gg_h_aa,bkg_prompt_aa
 ```
 
+### Running Cut And XGBoost Analyses
+
+The repo-root analysis CLI reads the `_var.root` files written by the LO
+campaign and produces a small analysis report above the campaign outputs.  It
+uses the same MG5 cross sections and `.dat` weight scales used by the plot
+report.
+
+Install the Python analysis dependencies in the environment where PyROOT is
+available:
+
+```bash
+python3 -m pip install -r requirements-analysis.txt
+```
+
+PyROOT itself usually comes from the local ROOT installation rather than from
+`pip`.
+
+For a rectangular cut analysis, create a YAML card such as:
+
+```yaml
+analysis:
+  name: baseline_cuts
+  run_tag: run_01
+  luminosity_fb: 100.0
+  cuts:
+    - variable: n_selected_photons
+      min: 2
+    - variable: m_gg
+      min: 120.0
+      max: 130.0
+```
+
+Then run, from the repository root:
+
+```bash
+python3 analyze_lo_varfiles.py cuts --config baseline_cuts.yaml
+```
+
+Cuts are inclusive and combined with logical AND.  The allowed variable names
+are:
+
+```text
+m_gg, pt_gamma1, eta_gamma1, pt_gamma2, eta_gamma2,
+deltaR_gg, deltaPhi_gg, pt_gg, y_gg, n_selected_photons
+```
+
+By default the output is written to:
+
+```text
+hgammagamma/LOAnalysis/analyses/<run_tag>/<analysis_name>/
+```
+
+The output directory contains:
+
+- `summary.csv`;
+- `summary.json`;
+- `index.html`.
+
+The summary includes the number of selected Monte Carlo events, the analysis
+efficiency, the selected cross section, and the expected event yield at the
+luminosity in the YAML card.  The expected event count is calculated as:
+
+```text
+expected events = selected cross section [pb] * luminosity [fb^-1] * 1000
+```
+
+To analyze only selected samples, add:
+
+```yaml
+  samples:
+    - signal_gg_h_aa
+    - bkg_prompt_aa
+```
+
+To write somewhere else, add:
+
+```yaml
+  output_dir: /path/to/output
+```
+
+The XGBoost mode uses the same sample discovery and normalization, but trains a
+binary signal-versus-background classifier and chooses a score threshold that
+maximizes the expected significance on the test split.  A minimal card is:
+
+```yaml
+analysis:
+  name: xgboost_baseline
+  run_tag: run_01
+  luminosity_fb: 100.0
+  xgboost:
+    test_size: 0.35
+    seed: 12345
+    max_events: 1000
+```
+
+Run it with:
+
+```bash
+python3 analyze_lo_varfiles.py xgboost --config xgboost_baseline.yaml
+```
+
+This writes the same `summary.csv`, `summary.json`, and `index.html` files,
+plus XGBoost outputs such as `metrics.json`, `scores.csv`, `roc.png`,
+`feature_importance.png`, and the trained model JSON.  If `xgboost`,
+`scikit-learn`, or `tqdm` are missing, this subcommand exits with a dependency
+message; the cut analysis does not require those optional packages.
+
 ### Linux Notes
 
 The Python runner is written so it can move to Linux.  On Linux the script uses

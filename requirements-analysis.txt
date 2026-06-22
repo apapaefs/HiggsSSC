@@ -1,0 +1,13 @@
+# Python packages for the repo-root gamma-gamma analysis CLI.
+#
+# PyROOT is also required and is normally provided by the local ROOT install,
+# not by pip.
+PyYAML
+numpy
+matplotlib
+
+# Optional, only needed for:
+#   python3 analyze_lo_varfiles.py xgboost --config <config.yaml>
+xgboost
+scikit-learn
+tqdm

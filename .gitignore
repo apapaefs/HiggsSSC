@@ -6,6 +6,7 @@
 /hgammagamma/LOAnalysis/Signal/events/
 /hgammagamma/LOAnalysis/Backgrounds/events/
 /hgammagamma/LOAnalysis/plots/
+/hgammagamma/LOAnalysis/analyses/
 
 # Local analysis build products.
 /hgammagamma/LOAnalysis/Code/*.o
