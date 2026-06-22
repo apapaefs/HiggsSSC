@@ -1,0 +1,8 @@
+analysis:
+  name: xgboost_baseline
+  run_tag: run_01
+  luminosity_fb: 100.0
+  xgboost:
+    test_size: 0.35
+    seed: 12345
+    max_events: 1000

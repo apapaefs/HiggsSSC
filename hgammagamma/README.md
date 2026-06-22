@@ -638,7 +638,13 @@ python3 -m pip install -r requirements-analysis.txt
 PyROOT itself usually comes from the local ROOT installation rather than from
 `pip`.
 
-For a rectangular cut analysis, create a YAML card such as:
+For a rectangular cut analysis, use the example card:
+
+```text
+hgammagamma/analysis_cards/baseline_cuts.yaml
+```
+
+It contains:
 
 ```yaml
 analysis:
@@ -656,7 +662,8 @@ analysis:
 Then run, from the repository root:
 
 ```bash
-python3 analyze_lo_varfiles.py cuts --config baseline_cuts.yaml
+python3 analyze_lo_varfiles.py cuts \
+  --config hgammagamma/analysis_cards/baseline_cuts.yaml
 ```
 
 Cuts are inclusive and combined with logical AND.  The allowed variable names
@@ -703,7 +710,13 @@ To write somewhere else, add:
 
 The XGBoost mode uses the same sample discovery and normalization, but trains a
 binary signal-versus-background classifier and chooses a score threshold that
-maximizes the expected significance on the test split.  A minimal card is:
+maximizes the expected significance on the test split.  The example card is:
+
+```text
+hgammagamma/analysis_cards/xgboost_baseline.yaml
+```
+
+It contains:
 
 ```yaml
 analysis:
@@ -719,7 +732,8 @@ analysis:
 Run it with:
 
 ```bash
-python3 analyze_lo_varfiles.py xgboost --config xgboost_baseline.yaml
+python3 analyze_lo_varfiles.py xgboost \
+  --config hgammagamma/analysis_cards/xgboost_baseline.yaml
 ```
 
 This writes the same `summary.csv`, `summary.json`, and `index.html` files,

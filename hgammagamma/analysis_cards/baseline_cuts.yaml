@@ -1,0 +1,10 @@
+analysis:
+  name: baseline_cuts
+  run_tag: run_01
+  luminosity_fb: 100.0
+  cuts:
+    - variable: n_selected_photons
+      min: 2
+    - variable: m_gg
+      min: 120.0
+      max: 130.0
