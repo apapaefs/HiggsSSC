@@ -95,6 +95,77 @@ class CutFlowTests(unittest.TestCase):
 
         self.assertEqual(apply_cuts(rows, [Cut(variable="m_gg", minimum=120.0, maximum=130.0)]), [False, False, True])
 
+    def test_summary_cross_section_includes_weight_scale(self) -> None:
+        from analyze_lo_varfiles import Cut, SampleInfo, summarize_sample
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "sample_var.root"
+            write_gamma_gamma_varfile(
+                path,
+                [
+                    ([125.0, 60.0, 0.2, 50.0, -0.3, 1.7, 3.1, 20.0, 0.1, 2.0], 1.0),
+                    ([110.0, 45.0, -1.2, 30.0, 0.4, 2.4, 2.9, 12.0, -0.5, 2.0], 1.0),
+                ],
+            )
+            dat_file = Path(tmpdir) / "sample.dat"
+            dat_file.write_text("")
+            sample = SampleInfo(
+                name="signal",
+                category="Signal",
+                sample_dir=Path(tmpdir),
+                var_file=path,
+                dat_file=dat_file,
+                cross_section_pb=100.0,
+                cross_section_error_pb=None,
+                weight_scale=0.01,
+                events_read=2.0,
+                sum_weight=2.0,
+            )
+
+            row = summarize_sample(sample, [Cut(variable="m_gg", minimum=120.0, maximum=130.0)], luminosity_fb=10.0)
+
+        self.assertEqual(row["raw_cross_section_pb"], 100.0)
+        self.assertEqual(row["weight_scale"], 0.01)
+        self.assertEqual(row["cross_section_pb"], 1.0)
+        self.assertEqual(row["selected_cross_section_pb"], 0.5)
+        self.assertEqual(row["expected_events"], 5000.0)
+
+    def test_xgboost_summary_cross_section_includes_rate_factor(self) -> None:
+        from xgboost_root_varfiles_module import _summarize_full_sample
+
+        class FakeModel:
+            def predict_proba(self, rows):
+                import numpy as np
+
+                return np.asarray([[0.2, 0.8], [0.7, 0.3]])
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "sample_var.root"
+            write_gamma_gamma_varfile(
+                path,
+                [
+                    ([125.0, 60.0, 0.2, 50.0, -0.3, 1.7, 3.1, 20.0, 0.1, 2.0], 1.0),
+                    ([124.0, 45.0, -1.2, 30.0, 0.4, 2.4, 2.9, 12.0, -0.5, 2.0], 1.0),
+                ],
+            )
+            sample = {
+                "sample": "signal",
+                "category": "Signal",
+                "input_file": str(path),
+                "xsec_fb": 1000.0,
+                "rate_factor": 0.5,
+                "effective_xsec_fb": 500.0,
+                "normalisation_weight": 2.0,
+            }
+
+            row = _summarize_full_sample(FakeModel(), sample, label=1, threshold=0.5, luminosity=10.0)
+
+        self.assertEqual(row["raw_cross_section_pb"], 1.0)
+        self.assertEqual(row["weight_scale"], 0.5)
+        self.assertEqual(row["cross_section_pb"], 0.5)
+        self.assertEqual(row["selected_cross_section_pb"], 0.25)
+        self.assertEqual(row["expected_events"], 2500.0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -84,6 +84,7 @@ SUMMARY_FIELDS = [
     "sample",
     "category",
     "input_file",
+    "raw_cross_section_pb",
     "cross_section_pb",
     "weight_scale",
     "entries_read",
@@ -320,12 +321,14 @@ def summarize_sample(sample: SampleInfo, cuts: Sequence[Cut], luminosity_fb: flo
     sum_selected_weight = float(sum(weight for weight, selected in zip(weights, decisions) if selected))
     selected_entries = int(sum(1 for selected in decisions if selected))
     efficiency = sum_selected_weight / sum_weight if sum_weight > 0.0 else 0.0
-    selected_cross_section_pb = sample.cross_section_pb * sample.weight_scale * efficiency
+    cross_section_pb = sample.cross_section_pb * sample.weight_scale
+    selected_cross_section_pb = cross_section_pb * efficiency
     return {
         "sample": sample.name,
         "category": sample.category,
         "input_file": str(sample.var_file),
-        "cross_section_pb": sample.cross_section_pb,
+        "raw_cross_section_pb": sample.cross_section_pb,
+        "cross_section_pb": cross_section_pb,
         "weight_scale": sample.weight_scale,
         "entries_read": len(rows),
         "selected_entries": selected_entries,

@@ -232,13 +232,16 @@ def _summarize_full_sample(
     sum_weight = float(np.sum(weights))
     sum_selected_weight = float(np.sum(weights[selected]))
     efficiency = sum_selected_weight / sum_weight if sum_weight > 0.0 else 0.0
-    selected_xsec_pb = (float(sample["effective_xsec_fb"]) * efficiency) / 1000.0
+    raw_cross_section_pb = float(sample["xsec_fb"]) / 1000.0
+    cross_section_pb = float(sample["effective_xsec_fb"]) / 1000.0
+    selected_xsec_pb = cross_section_pb * efficiency
 
     return {
         "sample": sample.get("sample", Path(sample["input_file"]).parent.name),
         "category": sample.get("category", "Signal" if label == 1 else "Backgrounds"),
         "input_file": sample["input_file"],
-        "cross_section_pb": float(sample["xsec_fb"]) / 1000.0,
+        "raw_cross_section_pb": raw_cross_section_pb,
+        "cross_section_pb": cross_section_pb,
         "weight_scale": float(sample["rate_factor"]),
         "entries_read": len(features),
         "selected_entries": int(np.sum(selected)),

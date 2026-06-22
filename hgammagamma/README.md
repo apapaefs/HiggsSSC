@@ -688,7 +688,13 @@ The output directory contains:
 
 The summary includes the number of selected Monte Carlo events, the analysis
 efficiency, the selected cross section, and the expected event yield at the
-luminosity in the YAML card.  The expected event count is calculated as:
+luminosity in the YAML card.  The `cross_section_pb` column is the physics
+normalization used for rates: the raw MG5 cross section multiplied by the
+sample `weight_scale`, so signal branching ratios, signal/background
+`K`-factors, and fake-rate factors belong there through `weight_scale`.
+The original MG5 value is kept separately in `raw_cross_section_pb`.
+
+The expected event count is calculated as:
 
 ```text
 expected events = selected cross section [pb] * luminosity [fb^-1] * 1000
