@@ -621,8 +621,8 @@ Open this file in a browser.  If the report was produced on
 
 The report contains:
 
-- stacked histograms;
-- backgrounds first, Higgs signal stacked on top;
+- transparent overlaid histograms for the default density plots;
+- stacked histograms for `--no-density`, with backgrounds first and Higgs signal on top;
 - one PNG and one SVG per plot;
 - one CSV per plot;
 - a `sample_summary.csv` file;
@@ -631,9 +631,17 @@ The report contains:
 The plots use a compact `SSCwf?` publication style inspired by the
 `H -> gamma gamma` figures in the ATLAS discovery paper,
 <https://arxiv.org/pdf/1207.7214>: white canvas, black axes with inward ticks,
-stepped stacked histograms, and in-plot simulation labels.
+stepped histograms, and in-plot simulation labels.
 
-By default, the report normalizes each sample to:
+By default, the report makes density plots in which each sample histogram is
+normalized to unit area before dividing by bin width.  A mass distribution such
+as `m_gg` is therefore plotted in:
+
+```text
+1 / GeV
+```
+
+For non-density plots, the report normalizes each sample to:
 
 ```text
 cross section * weight_scale * analysis efficiency
@@ -646,19 +654,22 @@ analysis efficiency are read from the `.dat` file:
 analysis efficiency = sum_diphoton_weight / sum_weight
 ```
 
-The report divides by bin width by default, so a mass distribution such as
-`m_gg` is plotted in:
-
-```text
-pb / GeV
-```
-
 To make non-density plots instead, use:
 
 ```bash
 python3 hgammagamma/make_gammagamma_report.py \
   --run-tag run_01 \
   --no-density
+```
+
+In non-density mode, the Higgs signal can be multiplied for visibility.  The
+legend records non-default factors:
+
+```bash
+python3 hgammagamma/make_gammagamma_report.py \
+  --run-tag run_01 \
+  --no-density \
+  --signal-scale 10
 ```
 
 To make a report from selected samples only:

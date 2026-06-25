@@ -4,10 +4,74 @@ import math
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import ROOT
 
 import read_root_varfiles
+
+
+class FakeReportAxes:
+    def __init__(self) -> None:
+        self.transAxes = object()
+        self.fill_between_calls = []
+        self.texts = []
+
+    def fill_between(self, edges, lower, upper, **kwargs) -> None:
+        self.fill_between_calls.append(
+            {
+                "edges": list(edges),
+                "lower": list(lower),
+                "upper": list(upper),
+                "kwargs": kwargs,
+            }
+        )
+
+    def step(self, *args, **kwargs) -> None:
+        pass
+
+    def text(self, *args, **kwargs) -> None:
+        self.texts.append(args[2])
+
+    def set_xlim(self, *args, **kwargs) -> None:
+        pass
+
+    def set_xlabel(self, *args, **kwargs) -> None:
+        pass
+
+    def set_ylabel(self, *args, **kwargs) -> None:
+        pass
+
+    def minorticks_on(self) -> None:
+        pass
+
+    def tick_params(self, *args, **kwargs) -> None:
+        pass
+
+    def set_ylim(self, *args, **kwargs) -> None:
+        pass
+
+    def legend(self, *args, **kwargs) -> None:
+        pass
+
+
+class FakeReportFigure:
+    def tight_layout(self) -> None:
+        pass
+
+    def savefig(self, *args, **kwargs) -> None:
+        pass
+
+
+class FakeReportPlot:
+    def __init__(self, axes: FakeReportAxes) -> None:
+        self.axes = axes
+
+    def subplots(self, *args, **kwargs):
+        return FakeReportFigure(), self.axes
+
+    def close(self, *args, **kwargs) -> None:
+        pass
 
 
 def write_gamma_gamma_varfile(path: Path, rows: list[tuple[list[float], float]]) -> None:
@@ -154,6 +218,15 @@ class CutFlowTests(unittest.TestCase):
 
         self.assertEqual(args.run_tag, "run_02")
 
+    def test_report_signal_scale_cli_defaults_to_one_and_accepts_override(self) -> None:
+        from hgammagamma.make_gammagamma_report import build_parser
+
+        default_args = build_parser().parse_args([])
+        scaled_args = build_parser().parse_args(["--signal-scale", "25"])
+
+        self.assertEqual(default_args.signal_scale, 1.0)
+        self.assertEqual(scaled_args.signal_scale, 25.0)
+
     def test_resolve_run_tag_prefers_cli_then_yaml_then_environment(self) -> None:
         from analyze_lo_varfiles import resolve_run_tag
 
@@ -287,6 +360,81 @@ class CutFlowTests(unittest.TestCase):
         self.assertEqual(row["cross_section_pb"], 0.5)
         self.assertEqual(row["selected_cross_section_pb"], 0.25)
         self.assertEqual(row["expected_events"], 2500.0)
+
+    def make_report_sample(
+        self,
+        name: str,
+        category: str,
+        selected_xsec: float,
+        y_values: list[float],
+    ):
+        from hgammagamma import make_gammagamma_report as report
+
+        histogram = report.Histogram(
+            title="diphoton invariant mass",
+            x_min=0.0,
+            x_max=2.0,
+            x=[0.5, 1.5],
+            y=y_values,
+        )
+        return report.SampleResult(
+            name=name,
+            label=name,
+            category=category,
+            sample_dir=Path("/tmp"),
+            top_file=Path("/tmp/sample.top"),
+            dat_file=Path("/tmp/sample.dat"),
+            cross_section_pb=selected_xsec,
+            cross_section_error_pb=None,
+            events_read=10.0,
+            selected_events=10.0,
+            sum_weight=10.0,
+            sum_diphoton_weight=10.0,
+            weight_scale=1.0,
+            efficiency=1.0,
+            selected_cross_section_pb=selected_xsec,
+            histograms={"diphoton invariant mass": histogram},
+        )
+
+    def capture_report_plot(self, *, density: bool, signal_scale: float = 1.0) -> FakeReportAxes:
+        from hgammagamma import make_gammagamma_report as report
+
+        axes = FakeReportAxes()
+        samples = [
+            self.make_report_sample("background", "Backgrounds", 10.0, [3.0, 7.0]),
+            self.make_report_sample("signal", "Signal", 20.0, [5.0, 5.0]),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.object(report, "ensure_matplotlib", return_value=FakeReportPlot(axes)):
+                report.plot_histogram(
+                    "diphoton invariant mass",
+                    samples,
+                    Path(tmpdir),
+                    "selected_xsec",
+                    density=density,
+                    signal_scale=signal_scale,
+                )
+        return axes
+
+    def test_density_report_plot_overlays_transparent_histograms(self) -> None:
+        axes = self.capture_report_plot(density=True)
+
+        self.assertEqual(len(axes.fill_between_calls), 2)
+        signal_call = axes.fill_between_calls[1]
+        self.assertEqual(signal_call["lower"], [0.0, 0.0, 0.0])
+        self.assertEqual(signal_call["upper"], [0.5, 0.5, 0.5])
+        self.assertLess(signal_call["kwargs"]["alpha"], 0.6)
+        self.assertIn("Norm: unit area", axes.texts)
+
+    def test_non_density_report_plot_stacks_and_labels_scaled_signal(self) -> None:
+        axes = self.capture_report_plot(density=False, signal_scale=5.0)
+
+        self.assertEqual(len(axes.fill_between_calls), 2)
+        signal_call = axes.fill_between_calls[1]
+        self.assertEqual(signal_call["lower"], [3.0, 7.0, 7.0])
+        self.assertEqual(signal_call["upper"], [53.0, 57.0, 57.0])
+        self.assertEqual(signal_call["kwargs"]["label"], "signal x5")
 
 
 if __name__ == "__main__":

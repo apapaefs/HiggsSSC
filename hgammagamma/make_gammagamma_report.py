@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Build an HTML report from LO h -> gamma gamma analysis .top files.
 
-The report stacks backgrounds first and the Higgs signal on top.  By default
-each histogram shape is normalized so its area is sigma * weight_scale *
-analysis efficiency for that sample.  The analysis efficiency and weight scale
-are read from the matching .dat file.
+The report overlays transparent per-sample histograms for the default density
+plots, with each histogram normalized to unit area.  With ``--no-density``,
+backgrounds are stacked first and the Higgs signal is stacked on top.  In
+non-density mode, each histogram shape is normalized so its area is sigma *
+weight_scale * analysis efficiency for that sample.  The analysis efficiency
+and weight scale are read from the matching .dat file.
 """
 
 from __future__ import annotations
@@ -91,6 +93,17 @@ SAMPLE_LABELS = {
 }
 
 
+def positive_float(value: str) -> float:
+    parsed = float(value)
+    if parsed <= 0.0:
+        raise argparse.ArgumentTypeError("value must be positive")
+    return parsed
+
+
+def format_scale(value: float) -> str:
+    return f"{value:g}"
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--analysis-root", type=Path, default=DEFAULT_ANALYSIS_ROOT)
@@ -101,12 +114,24 @@ def build_parser() -> argparse.ArgumentParser:
         "--normalization",
         choices=("selected_xsec", "event_xsec", "unit_area"),
         default="selected_xsec",
-        help="selected_xsec gives each plotted histogram area sigma*weight_scale*efficiency.",
+        help=(
+            "Non-density scaling mode. selected_xsec gives each plotted histogram "
+            "area sigma*weight_scale*efficiency; density plots are always unit-normalized."
+        ),
     )
     parser.add_argument(
         "--no-density",
         action="store_true",
-        help="Do not divide by bin width.  The default gives differential pb/unit where possible.",
+        help="Do not divide by bin width.  Non-density plots stack backgrounds and signal.",
+    )
+    parser.add_argument(
+        "--signal-scale",
+        type=positive_float,
+        default=1.0,
+        help=(
+            "Multiply Signal histograms by this factor in --no-density stacked "
+            "plots; non-default values are shown in the legend."
+        ),
     )
     parser.add_argument("--title", default="LO h -> gamma gamma analysis")
     parser.add_argument("--allow-missing-xsec", action="store_true")
@@ -336,7 +361,9 @@ def scaled_histogram(histogram: Histogram, sample: SampleResult, normalization: 
     if total <= 0:
         return [0.0 for _ in histogram.y]
 
-    if normalization == "selected_xsec":
+    if density:
+        values = [value / total for value in histogram.y]
+    elif normalization == "selected_xsec":
         target = sample.selected_cross_section_pb
         values = [value / total * target for value in histogram.y]
     elif normalization == "event_xsec":
@@ -401,12 +428,14 @@ def publication_color(sample: SampleResult, background_index: int) -> str:
     return background_colors[background_index % len(background_colors)]
 
 
-def add_publication_labels(ax, title: str, normalization: str) -> None:
+def add_publication_labels(ax, title: str, normalization: str, density: bool) -> None:
     ax.text(0.06, 0.94, "SSCwf?", transform=ax.transAxes, ha="left", va="top", fontweight="bold", fontstyle="italic", fontsize=14)
     ax.text(0.06, 0.875, r"LO simulation, $\sqrt{s}=40$ TeV", transform=ax.transAxes, ha="left", va="top", fontsize=10)
     if title == "diphoton invariant mass":
         ax.text(0.06, 0.815, r"$H\rightarrow\gamma\gamma$", transform=ax.transAxes, ha="left", va="top", fontsize=10)
-    if normalization == "selected_xsec":
+    if density:
+        ax.text(0.06, 0.065, "Norm: unit area", transform=ax.transAxes, ha="left", va="bottom", fontsize=9)
+    elif normalization == "selected_xsec":
         ax.text(0.06, 0.065, r"Norm: $\sigma \times w \times \epsilon_{\gamma\gamma}$", transform=ax.transAxes, ha="left", va="bottom", fontsize=9)
 
 
@@ -416,6 +445,7 @@ def plot_histogram(
     output_dir: Path,
     normalization: str,
     density: bool,
+    signal_scale: float = 1.0,
 ) -> dict[str, str | float]:
     plt = ensure_matplotlib(output_dir)
     meta = PLOT_META.get(title, PlotMeta(slugify(title), title.title(), title, ""))
@@ -425,6 +455,9 @@ def plot_histogram(
     width = bin_width(reference)
     edges = bin_edges(reference)
     bottoms = [0.0 for _ in x_values]
+    stacked = not density
+    plot_x_min, plot_x_max = meta.x_range if meta.x_range else (reference.x_min, reference.x_max)
+    visible_heights: list[float] = []
 
     fig, ax = plt.subplots(figsize=(6.8, 5.1))
     rows: list[dict[str, str | float]] = []
@@ -435,31 +468,47 @@ def plot_histogram(
             continue
         hist = sample.histograms[title]
         y_values = scaled_histogram(hist, sample, normalization, density)
+        display_scale = signal_scale if stacked and sample.category == "Signal" else 1.0
+        if not math.isclose(display_scale, 1.0):
+            y_values = [value * display_scale for value in y_values]
         color = publication_color(sample, background_index)
         if sample.category != "Signal":
             background_index += 1
 
-        tops = [bottom + value for bottom, value in zip(bottoms, y_values)]
+        sample_bottoms = bottoms if stacked else [0.0 for _ in x_values]
+        tops = [bottom + value for bottom, value in zip(sample_bottoms, y_values)]
+        label = sample.label
+        if not math.isclose(display_scale, 1.0):
+            label = f"{label} x{format_scale(display_scale)}"
+        fill_alpha = (
+            (0.92 if sample.category == "Signal" else 0.96)
+            if stacked
+            else (0.34 if sample.category == "Signal" else 0.30)
+        )
+        outline_color = ("black" if sample.category != "Signal" else "#1f77b4") if stacked else color
+        outline_width = (0.7 if sample.category != "Signal" else 1.15) if stacked else 1.2
         ax.fill_between(
             edges,
-            step_values(bottoms),
+            step_values(sample_bottoms),
             step_values(tops),
             step="post",
-            label=sample.label,
+            label=label,
             color=color,
-            alpha=0.92 if sample.category == "Signal" else 0.96,
+            alpha=fill_alpha,
             linewidth=0.0,
         )
         ax.step(
             edges,
             step_values(tops),
             where="post",
-            color="black" if sample.category != "Signal" else "#1f77b4",
-            linewidth=0.7 if sample.category != "Signal" else 1.15,
+            color=outline_color,
+            linewidth=outline_width,
             label="_nolegend_",
         )
 
         for bin_index, x in enumerate(x_values):
+            if edges[bin_index] < plot_x_max and edges[bin_index + 1] > plot_x_min:
+                visible_heights.append(tops[bin_index])
             rows.append(
                 {
                     "plot": meta.slug,
@@ -472,36 +521,32 @@ def plot_histogram(
                     "cross_section_pb": sample.cross_section_pb,
                     "analysis_efficiency": sample.efficiency,
                     "selected_cross_section_pb": sample.selected_cross_section_pb,
+                    "display_scale": display_scale,
                 }
             )
-        bottoms = tops
+        if stacked:
+            bottoms = tops
 
-    if any(bottoms):
+    if stacked and any(bottoms):
         ax.step(edges, step_values(bottoms), where="post", color="black", linewidth=1.05, label="_nolegend_")
 
-    plot_x_min, plot_x_max = meta.x_range if meta.x_range else (reference.x_min, reference.x_max)
     ax.set_xlim(plot_x_min, plot_x_max)
     ax.set_xlabel(meta.x_label)
-    if normalization == "unit_area":
-        y_label = "Unit-normalized shape"
-    elif density and meta.unit:
-        y_label = rf"$\mathrm{{d}}\sigma_{{\rm sel}}/\mathrm{{d}}x$ [pb/{meta.unit}]"
+    if density and meta.unit:
+        y_label = rf"Unit-normalized density [1/{meta.unit}]"
     elif density:
-        y_label = r"$\mathrm{d}\sigma_{\rm sel}/\mathrm{d}x$ [pb]"
+        y_label = "Unit-normalized density"
+    elif normalization == "unit_area":
+        y_label = "Unit-normalized shape"
     else:
         y_label = r"Bin cross section [pb]"
     ax.set_ylabel(y_label)
     ax.minorticks_on()
     ax.tick_params(which="both", direction="in", top=True, right=True)
-    visible_tops = [
-        value
-        for bin_index, value in enumerate(bottoms)
-        if edges[bin_index] < plot_x_max and edges[bin_index + 1] > plot_x_min
-    ]
-    ymax = max(visible_tops) if visible_tops else (max(bottoms) if bottoms else 0.0)
+    ymax = max(visible_heights) if visible_heights else (max(bottoms) if bottoms else 0.0)
     if ymax > 0:
         ax.set_ylim(0.0, ymax * 1.35)
-    add_publication_labels(ax, title, normalization)
+    add_publication_labels(ax, title, normalization, density)
     ax.legend(frameon=False, loc="upper right", handlelength=1.6, borderaxespad=0.6)
     fig.tight_layout()
 
@@ -814,7 +859,14 @@ def main(argv: Sequence[str]) -> int:
 
     titles = common_histogram_titles(samples)
     plots = [
-        plot_histogram(title, samples, output_dir, args.normalization, density=not args.no_density)
+        plot_histogram(
+            title,
+            samples,
+            output_dir,
+            args.normalization,
+            density=not args.no_density,
+            signal_scale=args.signal_scale,
+        )
         for title in titles
     ]
     summary_csv = write_summary_csv(samples, output_dir)
