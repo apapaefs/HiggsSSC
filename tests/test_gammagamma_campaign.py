@@ -47,6 +47,19 @@ class GammaGammaCampaignRunCardTests(unittest.TestCase):
             self.assertIn("      LHAID = 331900", updated)
             self.assertFalse(setrun_object.exists())
 
+    def test_patch_run_card_include_allows_missing_generated_include(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            process_dir = Path(tmpdir)
+            source_dir = process_dir / "Source"
+            source_dir.mkdir()
+            setrun_object = source_dir / "setrun.o"
+            setrun_object.write_bytes(b"old object")
+
+            campaign.patch_run_card_include(process_dir, SimpleNamespace(dry_run=False))
+
+            self.assertFalse((source_dir / "run_card.inc").exists())
+            self.assertFalse(setrun_object.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

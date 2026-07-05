@@ -490,12 +490,12 @@ def patch_run_card_include(process_dir: Path, cfg: Config) -> None:
         print(f"+ patch generated MG5 include {include_path}")
         print(f"+ remove stale compiled setrun object {setrun_object} if present")
         return
-    if not include_path.exists():
-        die(f"missing MG5 generated run card include: {include_path}")
-    updated = rewrite_run_card_include(include_path.read_text())
-    include_path.write_text(updated)
     if setrun_object.exists():
         setrun_object.unlink()
+    if not include_path.exists():
+        return
+    updated = rewrite_run_card_include(include_path.read_text())
+    include_path.write_text(updated)
 
 
 def write_herwig_input(sample: Sample, lhe_file: Path, seed: int, output: Path, cfg: Config) -> None:
