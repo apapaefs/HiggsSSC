@@ -464,6 +464,40 @@ def patch_run_card(card: Path, seed: int, cfg: Config) -> None:
     card.write_text("".join(output_lines))
 
 
+def rewrite_run_card_include(text: str) -> str:
+    updates = {
+        "PDLABEL": "'lhapdf'",
+        "PDSUBLABEL(1)": "'lhapdf'",
+        "PDSUBLABEL(2)": "'lhapdf'",
+        "LHAID": str(LO_PDF_LHAID),
+    }
+    output_lines: list[str] = []
+    for line in text.splitlines(keepends=True):
+        for key, value in updates.items():
+            pattern = re.compile(rf"^(\s*){re.escape(key)}(\s*=\s*).*$")
+            if pattern.match(line.rstrip("\n")):
+                newline = "\n" if line.endswith("\n") else ""
+                line = pattern.sub(lambda match: f"{match.group(1)}{key}{match.group(2)}{value}", line.rstrip("\n")) + newline
+                break
+        output_lines.append(line)
+    return "".join(output_lines)
+
+
+def patch_run_card_include(process_dir: Path, cfg: Config) -> None:
+    include_path = process_dir / "Source" / "run_card.inc"
+    setrun_object = process_dir / "Source" / "setrun.o"
+    if cfg.dry_run:
+        print(f"+ patch generated MG5 include {include_path}")
+        print(f"+ remove stale compiled setrun object {setrun_object} if present")
+        return
+    if not include_path.exists():
+        die(f"missing MG5 generated run card include: {include_path}")
+    updated = rewrite_run_card_include(include_path.read_text())
+    include_path.write_text(updated)
+    if setrun_object.exists():
+        setrun_object.unlink()
+
+
 def write_herwig_input(sample: Sample, lhe_file: Path, seed: int, output: Path, cfg: Config) -> None:
     if cfg.dry_run:
         print(f"+ write Herwig input {output}")
@@ -702,6 +736,7 @@ def run_sample(index: int, sample: Sample, cfg: Config) -> None:
     restore_mg5_symmetry_factors(mg5_process_dir, cfg)
 
     patch_run_card(mg5_process_dir / "Cards" / "run_card.dat", seed, cfg)
+    patch_run_card_include(mg5_process_dir, cfg)
     if sample.madspin_decay:
         write_madspin_card(mg5_process_dir / "Cards" / "madspin_card.dat", sample.madspin_decay, cfg)
 
