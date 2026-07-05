@@ -534,6 +534,39 @@ def patch_mg5_pdf_label_sync(process_dir: Path, cfg: Config) -> None:
     interface.write_text(text.replace(needle, needle + block, 1))
 
 
+def patch_mg5_pdf_defaults(process_dir: Path, cfg: Config) -> None:
+    banner = process_dir / "bin" / "internal" / "banner.py"
+    if cfg.dry_run:
+        print(f"+ patch MG5 PDF hidden defaults {banner}")
+        return
+    if not banner.exists():
+        die(f"missing MG5 generated banner helper: {banner}")
+
+    replacements = {
+        'self.add_param("pdlabel", "nn23lo1", hidden=True, allowed=valid_pdf)': (
+            'self.add_param("pdlabel", "lhapdf", hidden=True, allowed=valid_pdf)'
+        ),
+        'self.add_param("pdlabel1", "nn23lo1", hidden=True, allowed=valid_pdf, fortran_name="pdsublabel(1)")': (
+            'self.add_param("pdlabel1", "lhapdf", hidden=True, allowed=valid_pdf, fortran_name="pdsublabel(1)")'
+        ),
+        'self.add_param("pdlabel2", "nn23lo1", hidden=True, allowed=valid_pdf, fortran_name="pdsublabel(2)")': (
+            'self.add_param("pdlabel2", "lhapdf", hidden=True, allowed=valid_pdf, fortran_name="pdsublabel(2)")'
+        ),
+        'self.add_param("lhaid", 230000, hidden=True)': (
+            f'self.add_param("lhaid", {LO_PDF_LHAID}, hidden=True)'
+        ),
+    }
+    text = banner.read_text()
+    updated = text
+    for old, new in replacements.items():
+        if old in updated:
+            updated = updated.replace(old, new, 1)
+        elif new not in updated:
+            die(f"could not locate MG5 hidden PDF default in {banner}: {old}")
+    if updated != text:
+        banner.write_text(updated)
+
+
 def write_herwig_input(sample: Sample, lhe_file: Path, seed: int, output: Path, cfg: Config) -> None:
     if cfg.dry_run:
         print(f"+ write Herwig input {output}")
@@ -771,6 +804,7 @@ def run_sample(index: int, sample: Sample, cfg: Config) -> None:
     link_madloop_runtime_dirs(mg5_process_dir, runtime_lib_dir, cfg)
     restore_mg5_symmetry_factors(mg5_process_dir, cfg)
 
+    patch_mg5_pdf_defaults(mg5_process_dir, cfg)
     patch_mg5_pdf_label_sync(mg5_process_dir, cfg)
     patch_run_card(mg5_process_dir / "Cards" / "run_card.dat", seed, cfg)
     generate_run_card_include(mg5_process_dir, cfg)

@@ -100,6 +100,29 @@ class GammaGammaCampaignRunCardTests(unittest.TestCase):
                 updated.index("        if self.run_card['pdlabel'] == \"lhapdf\":"),
             )
 
+    def test_patch_mg5_pdf_defaults_updates_hidden_banner_defaults(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            process_dir = Path(tmpdir)
+            banner = process_dir / "bin" / "internal" / "banner.py"
+            banner.parent.mkdir(parents=True)
+            banner.write_text(
+                '        self.add_param("pdlabel", "nn23lo1", hidden=True, allowed=valid_pdf)\n'
+                '        self.add_param("pdlabel1", "nn23lo1", hidden=True, allowed=valid_pdf, fortran_name="pdsublabel(1)")\n'
+                '        self.add_param("pdlabel2", "nn23lo1", hidden=True, allowed=valid_pdf, fortran_name="pdsublabel(2)")\n'
+                '        self.add_param("lhaid", 230000, hidden=True)\n'
+            )
+
+            campaign.patch_mg5_pdf_defaults(process_dir, SimpleNamespace(dry_run=False))
+            campaign.patch_mg5_pdf_defaults(process_dir, SimpleNamespace(dry_run=False))
+
+            updated = banner.read_text()
+            self.assertIn('self.add_param("pdlabel", "lhapdf"', updated)
+            self.assertIn('self.add_param("pdlabel1", "lhapdf"', updated)
+            self.assertIn('self.add_param("pdlabel2", "lhapdf"', updated)
+            self.assertIn('self.add_param("lhaid", 331900, hidden=True)', updated)
+            self.assertNotIn("nn23lo1", updated)
+            self.assertNotIn("230000", updated)
+
 
 if __name__ == "__main__":
     unittest.main()
