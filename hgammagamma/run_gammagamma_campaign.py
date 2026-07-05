@@ -35,6 +35,7 @@ YR4_BR_H_TO_GAMMAGAMMA = 2.27e-3
 SIGNAL_GGH_K_FACTOR = 2.0
 SIGNAL_GGH_TO_GAMMAGAMMA_WEIGHT = SIGNAL_GGH_K_FACTOR * YR4_BR_H_TO_GAMMAGAMMA
 MG5_PDF_LABEL_SYNC_MARKER = "# gamma-gamma campaign PDF label sync"
+MG5_POST_TREATCARDS_PDF_PATCH_MARKER = "# gamma-gamma campaign post-treatcards PDF include patch"
 
 
 @dataclass(frozen=True)
@@ -518,20 +519,52 @@ def patch_mg5_pdf_label_sync(process_dir: Path, cfg: Config) -> None:
     if not interface.exists():
         die(f"missing MG5 generated interface: {interface}")
 
-    text = interface.read_text()
-    if MG5_PDF_LABEL_SYNC_MARKER in text:
-        return
+    updated = interface.read_text()
 
-    needle = "        # set  lhapdf.\n"
-    if needle not in text:
-        die(f"could not locate MG5 LHAPDF setup block in {interface}")
+    if MG5_PDF_LABEL_SYNC_MARKER not in updated:
+        needle = "        # set  lhapdf.\n"
+        if needle not in updated:
+            die(f"could not locate MG5 LHAPDF setup block in {interface}")
 
-    block = (
-        f"        {MG5_PDF_LABEL_SYNC_MARKER}\n"
-        "        if self.run_card['pdlabel1'] == \"lhapdf\" or self.run_card['pdlabel2'] == \"lhapdf\":\n"
-        "            self.run_card['pdlabel'] = \"lhapdf\"\n"
-    )
-    interface.write_text(text.replace(needle, needle + block, 1))
+        block = (
+            f"        {MG5_PDF_LABEL_SYNC_MARKER}\n"
+            "        if self.run_card['pdlabel1'] == \"lhapdf\" or self.run_card['pdlabel2'] == \"lhapdf\":\n"
+            "            self.run_card['pdlabel'] = \"lhapdf\"\n"
+        )
+        updated = updated.replace(needle, needle + block, 1)
+
+    if MG5_POST_TREATCARDS_PDF_PATCH_MARKER not in updated:
+        needle = "        self.do_treatcards('')\n"
+        if needle not in updated:
+            die(f"could not locate MG5 treatcards call in {interface}")
+
+        block = (
+            f"        {MG5_POST_TREATCARDS_PDF_PATCH_MARKER}\n"
+            "        run_card_inc = pjoin(self.me_dir, 'Source', 'run_card.inc')\n"
+            "        if os.path.exists(run_card_inc):\n"
+            "            with open(run_card_inc) as run_card_stream:\n"
+            "                run_card_lines = run_card_stream.readlines()\n"
+            "            patched_run_card_lines = []\n"
+            "            for run_card_line in run_card_lines:\n"
+            "                stripped_run_card_line = run_card_line.lstrip().upper()\n"
+            "                if stripped_run_card_line.startswith('PDLABEL'):\n"
+            "                    run_card_line = \"      PDLABEL = 'lhapdf'\\n\"\n"
+            "                elif stripped_run_card_line.startswith('PDSUBLABEL(1)'):\n"
+            "                    run_card_line = \"      PDSUBLABEL(1) = 'lhapdf'\\n\"\n"
+            "                elif stripped_run_card_line.startswith('PDSUBLABEL(2)'):\n"
+            "                    run_card_line = \"      PDSUBLABEL(2) = 'lhapdf'\\n\"\n"
+            f"                elif stripped_run_card_line.startswith('LHAID'):\n"
+            f"                    run_card_line = \"      LHAID = {LO_PDF_LHAID}\\n\"\n"
+            "                patched_run_card_lines.append(run_card_line)\n"
+            "            with open(run_card_inc, 'w') as run_card_stream:\n"
+            "                run_card_stream.writelines(patched_run_card_lines)\n"
+            "            setrun_object = pjoin(self.me_dir, 'Source', 'setrun.o')\n"
+            "            if os.path.exists(setrun_object):\n"
+            "                os.remove(setrun_object)\n"
+        )
+        updated = updated.replace(needle, needle + block, 1)
+
+    interface.write_text(updated)
 
 
 def patch_mg5_pdf_defaults(process_dir: Path, cfg: Config) -> None:

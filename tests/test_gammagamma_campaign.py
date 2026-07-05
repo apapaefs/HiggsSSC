@@ -86,6 +86,10 @@ class GammaGammaCampaignRunCardTests(unittest.TestCase):
                 "        # set  lhapdf.\n"
                 "        if self.run_card['pdlabel'] == \"lhapdf\":\n"
                 "            self.make_opts_var['lhapdf'] = 'True'\n"
+                "        # create param_card.inc and run_card.inc\n"
+                "        self.do_treatcards('')\n"
+                "        \n"
+                "        logger.info(\"compile Source Directory\")\n"
             )
 
             campaign.patch_mg5_pdf_label_sync(process_dir, SimpleNamespace(dry_run=False))
@@ -93,12 +97,36 @@ class GammaGammaCampaignRunCardTests(unittest.TestCase):
 
             updated = interface.read_text()
             self.assertEqual(updated.count(campaign.MG5_PDF_LABEL_SYNC_MARKER), 1)
+            self.assertEqual(updated.count(campaign.MG5_POST_TREATCARDS_PDF_PATCH_MARKER), 1)
             self.assertIn("self.run_card['pdlabel1'] == \"lhapdf\"", updated)
             self.assertIn("self.run_card['pdlabel2'] == \"lhapdf\"", updated)
             self.assertLess(
                 updated.index(campaign.MG5_PDF_LABEL_SYNC_MARKER),
                 updated.index("        if self.run_card['pdlabel'] == \"lhapdf\":"),
             )
+            self.assertLess(
+                updated.index("        self.do_treatcards('')"),
+                updated.index(campaign.MG5_POST_TREATCARDS_PDF_PATCH_MARKER),
+            )
+            self.assertIn("run_card_inc = pjoin(self.me_dir, 'Source', 'run_card.inc')", updated)
+            self.assertIn("setrun_object = pjoin(self.me_dir, 'Source', 'setrun.o')", updated)
+
+    def test_patch_mg5_pdf_label_sync_upgrades_driver_with_existing_marker(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            process_dir = Path(tmpdir)
+            interface = process_dir / "bin" / "internal" / "madevent_interface.py"
+            interface.parent.mkdir(parents=True)
+            interface.write_text(
+                f"        {campaign.MG5_PDF_LABEL_SYNC_MARKER}\n"
+                "        # create param_card.inc and run_card.inc\n"
+                "        self.do_treatcards('')\n"
+            )
+
+            campaign.patch_mg5_pdf_label_sync(process_dir, SimpleNamespace(dry_run=False))
+
+            updated = interface.read_text()
+            self.assertEqual(updated.count(campaign.MG5_PDF_LABEL_SYNC_MARKER), 1)
+            self.assertEqual(updated.count(campaign.MG5_POST_TREATCARDS_PDF_PATCH_MARKER), 1)
 
     def test_patch_mg5_pdf_defaults_updates_hidden_banner_defaults(self) -> None:
         with TemporaryDirectory() as tmpdir:
