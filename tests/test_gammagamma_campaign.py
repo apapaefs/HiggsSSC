@@ -77,6 +77,29 @@ class GammaGammaCampaignRunCardTests(unittest.TestCase):
             run_mock.assert_called_once_with(["make", "-C", source_dir, "run_card.inc"], SimpleNamespace(dry_run=False))
             self.assertTrue(include_path.exists())
 
+    def test_patch_mg5_pdf_label_sync_updates_generated_driver_once(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            process_dir = Path(tmpdir)
+            interface = process_dir / "bin" / "internal" / "madevent_interface.py"
+            interface.parent.mkdir(parents=True)
+            interface.write_text(
+                "        # set  lhapdf.\n"
+                "        if self.run_card['pdlabel'] == \"lhapdf\":\n"
+                "            self.make_opts_var['lhapdf'] = 'True'\n"
+            )
+
+            campaign.patch_mg5_pdf_label_sync(process_dir, SimpleNamespace(dry_run=False))
+            campaign.patch_mg5_pdf_label_sync(process_dir, SimpleNamespace(dry_run=False))
+
+            updated = interface.read_text()
+            self.assertEqual(updated.count(campaign.MG5_PDF_LABEL_SYNC_MARKER), 1)
+            self.assertIn("self.run_card['pdlabel1'] == \"lhapdf\"", updated)
+            self.assertIn("self.run_card['pdlabel2'] == \"lhapdf\"", updated)
+            self.assertLess(
+                updated.index(campaign.MG5_PDF_LABEL_SYNC_MARKER),
+                updated.index("        if self.run_card['pdlabel'] == \"lhapdf\":"),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

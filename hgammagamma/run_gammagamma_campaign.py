@@ -34,6 +34,7 @@ NNLO_PDF_LHAID = 336100
 YR4_BR_H_TO_GAMMAGAMMA = 2.27e-3
 SIGNAL_GGH_K_FACTOR = 2.0
 SIGNAL_GGH_TO_GAMMAGAMMA_WEIGHT = SIGNAL_GGH_K_FACTOR * YR4_BR_H_TO_GAMMAGAMMA
+MG5_PDF_LABEL_SYNC_MARKER = "# gamma-gamma campaign PDF label sync"
 
 
 @dataclass(frozen=True)
@@ -509,6 +510,30 @@ def patch_run_card_include(process_dir: Path, cfg: Config) -> None:
     include_path.write_text(updated)
 
 
+def patch_mg5_pdf_label_sync(process_dir: Path, cfg: Config) -> None:
+    interface = process_dir / "bin" / "internal" / "madevent_interface.py"
+    if cfg.dry_run:
+        print(f"+ patch MG5 PDF label sync {interface}")
+        return
+    if not interface.exists():
+        die(f"missing MG5 generated interface: {interface}")
+
+    text = interface.read_text()
+    if MG5_PDF_LABEL_SYNC_MARKER in text:
+        return
+
+    needle = "        # set  lhapdf.\n"
+    if needle not in text:
+        die(f"could not locate MG5 LHAPDF setup block in {interface}")
+
+    block = (
+        f"        {MG5_PDF_LABEL_SYNC_MARKER}\n"
+        "        if self.run_card['pdlabel1'] == \"lhapdf\" or self.run_card['pdlabel2'] == \"lhapdf\":\n"
+        "            self.run_card['pdlabel'] = \"lhapdf\"\n"
+    )
+    interface.write_text(text.replace(needle, needle + block, 1))
+
+
 def write_herwig_input(sample: Sample, lhe_file: Path, seed: int, output: Path, cfg: Config) -> None:
     if cfg.dry_run:
         print(f"+ write Herwig input {output}")
@@ -746,6 +771,7 @@ def run_sample(index: int, sample: Sample, cfg: Config) -> None:
     link_madloop_runtime_dirs(mg5_process_dir, runtime_lib_dir, cfg)
     restore_mg5_symmetry_factors(mg5_process_dir, cfg)
 
+    patch_mg5_pdf_label_sync(mg5_process_dir, cfg)
     patch_run_card(mg5_process_dir / "Cards" / "run_card.dat", seed, cfg)
     generate_run_card_include(mg5_process_dir, cfg)
     patch_run_card_include(mg5_process_dir, cfg)
