@@ -483,6 +483,17 @@ def rewrite_run_card_include(text: str) -> str:
     return "".join(output_lines)
 
 
+def generate_run_card_include(process_dir: Path, cfg: Config) -> None:
+    source_dir = process_dir / "Source"
+    include_path = source_dir / "run_card.inc"
+    if cfg.dry_run:
+        print(f"+ make -C {source_dir} run_card.inc")
+        return
+    run(["make", "-C", source_dir, "run_card.inc"], cfg)
+    if not include_path.exists():
+        die(f"MG5 did not generate run card include: {include_path}")
+
+
 def patch_run_card_include(process_dir: Path, cfg: Config) -> None:
     include_path = process_dir / "Source" / "run_card.inc"
     setrun_object = process_dir / "Source" / "setrun.o"
@@ -736,6 +747,7 @@ def run_sample(index: int, sample: Sample, cfg: Config) -> None:
     restore_mg5_symmetry_factors(mg5_process_dir, cfg)
 
     patch_run_card(mg5_process_dir / "Cards" / "run_card.dat", seed, cfg)
+    generate_run_card_include(mg5_process_dir, cfg)
     patch_run_card_include(mg5_process_dir, cfg)
     if sample.madspin_decay:
         write_madspin_card(mg5_process_dir / "Cards" / "madspin_card.dat", sample.madspin_decay, cfg)

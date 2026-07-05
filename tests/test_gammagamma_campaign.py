@@ -2,6 +2,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from hgammagamma import run_gammagamma_campaign as campaign
 
@@ -59,6 +60,22 @@ class GammaGammaCampaignRunCardTests(unittest.TestCase):
 
             self.assertFalse((source_dir / "run_card.inc").exists())
             self.assertFalse(setrun_object.exists())
+
+    def test_generate_run_card_include_invokes_mg5_make_target(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            process_dir = Path(tmpdir)
+            source_dir = process_dir / "Source"
+            source_dir.mkdir()
+            include_path = source_dir / "run_card.inc"
+
+            def fake_run(args, cfg):
+                include_path.write_text("      PDLABEL = 'nn23lo1'\n")
+
+            with patch.object(campaign, "run", side_effect=fake_run) as run_mock:
+                campaign.generate_run_card_include(process_dir, SimpleNamespace(dry_run=False))
+
+            run_mock.assert_called_once_with(["make", "-C", source_dir, "run_card.inc"], SimpleNamespace(dry_run=False))
+            self.assertTrue(include_path.exists())
 
 
 if __name__ == "__main__":
