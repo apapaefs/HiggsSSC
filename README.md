@@ -102,6 +102,58 @@ You can also restore a fresh original copy from the shared directory:
 cp /home/shared/HerwigTesting/LHC.in ~/HerwigWork/HerwigTesting/LHC.in
 ```
 
+## Keeping A Session Alive With `screen`
+
+For longer runs, it is a good idea to work inside `screen`. A screen session
+keeps running on Timur even if your laptop disconnects.
+
+To start a screen session, type:
+
+```bash
+screen
+```
+
+Then do whatever you would normally do in the terminal.
+
+To detach from the screen session, press `Ctrl-A` and then press `D`.
+Detaching leaves the session running in the background.
+
+To re-attach later, run:
+
+```bash
+screen -r
+```
+
+If you disconnected while the screen session was still active, it may still
+look attached. In that case, detach it first:
+
+```bash
+screen -d
+```
+
+Then re-attach:
+
+```bash
+screen -r
+```
+
+There can be multiple screen sessions. If that happens, `screen -r` will show
+a list. Copy the session name you want and run something like:
+
+```bash
+screen -r XXXX_NAME_OF_SCREEN
+```
+
+To scroll through earlier output while inside screen, press `Ctrl-A` and then
+press `[`. Use the arrow keys or Page Up/Page Down to move around. Press `Esc`
+to go back to normal terminal mode.
+
+A few small useful commands:
+
+- `screen -ls` lists your screen sessions.
+- `screen -S herwig-run` starts a new screen session named `herwig-run`.
+- `exit` closes the current screen session when you are done with it.
+
 ## Editing Files With Vim On Timur
 
 Vim is a terminal text editor. To edit a file, run:
