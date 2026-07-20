@@ -28,6 +28,7 @@ MERGED_LHE_NAME = "powheg-hjminnlo-merged.lhe"
 LHE_MANIFEST_NAME = "powheg-lhe-files.txt"
 SEED_LHE_MANIFEST_NAME = "powheg-lhe-seed-files.txt"
 SUMMARY_NAME = "powheg-run-summary.txt"
+RESUME_BACKUP_DIR_NAME = "resume-backups"
 LHE_EVENT_START_RE = re.compile(r"^\s*<event\b", re.IGNORECASE)
 LHE_CLOSE_RE = re.compile(r"^\s*</LesHouchesEvents\s*>", re.IGNORECASE)
 LHE_SEED_RE = re.compile(r"^pwgevents-(?P<seed>\d+)\.lhe$")
@@ -274,6 +275,68 @@ def seed_lhe_path(run_dir: Path, seed: int) -> Path:
     return run_dir / f"pwgevents-{seed:04d}.lhe"
 
 
+def unique_backup_path(run_dir: Path, path: Path, label: str, seed: int) -> Path:
+    stamp = dt.datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
+    backup_dir = run_dir / RESUME_BACKUP_DIR_NAME / stamp
+    candidate = backup_dir / f"{label}-seed{seed}-{path.name}"
+    counter = 1
+    while candidate.exists():
+        candidate = backup_dir / f"{label}-seed{seed}-{counter}-{path.name}"
+        counter += 1
+    return candidate
+
+
+def archive_existing_file(path: Path, run_dir: Path, label: str, seed: int, dry_run: bool) -> Path | None:
+    if not path.exists():
+        return None
+    backup = unique_backup_path(run_dir, path, label, seed)
+    if dry_run:
+        print(f"+ archive existing {path} -> {backup}")
+        return backup
+    backup.parent.mkdir(parents=True, exist_ok=True)
+    path.replace(backup)
+    return backup
+
+
+def stage_seed_is_complete(
+    label: str,
+    seed: int,
+    log_path: Path,
+    run_dir: Path,
+    event_targets: dict[int, int] | None,
+) -> bool:
+    if label != "st4":
+        return log_is_complete(label, seed, log_path, run_dir)
+    target = event_targets.get(seed) if event_targets else None
+    lhe_path = seed_lhe_path(run_dir, seed)
+    return target is not None and lhe_path.exists() and count_lhe_events(lhe_path) >= target
+
+
+def prepare_resume_seed(
+    label: str,
+    seed: int,
+    log_path: Path,
+    run_dir: Path,
+    event_targets: dict[int, int] | None,
+    dry_run: bool,
+) -> bool:
+    if stage_seed_is_complete(label, seed, log_path, run_dir, event_targets):
+        print(f"[{label}] resume skip seed {seed}; output already complete", flush=True)
+        return False
+
+    if label == "st4":
+        lhe_path = seed_lhe_path(run_dir, seed)
+        target = event_targets.get(seed) if event_targets else None
+        if lhe_path.exists():
+            count = count_lhe_events(lhe_path)
+            detail = f"{count}/{target} events" if target is not None else f"{count} events"
+            backup = archive_existing_file(lhe_path, run_dir, label, seed, dry_run)
+            print(f"[{label}] archived incomplete seed {seed} LHE ({detail}) to {backup}", flush=True)
+
+    archive_existing_file(log_path, run_dir, label, seed, dry_run)
+    return True
+
+
 def seed_from_lhe_path(path: Path) -> int | None:
     match = LHE_SEED_RE.match(path.name)
     return int(match.group("seed")) if match else None
@@ -493,9 +556,12 @@ def seed_event_targets(groups: Iterable[tuple[int, list[int]]]) -> dict[int, int
     return {seed: events for events, seeds in groups for seed in seeds}
 
 
-def copy_or_make_seeds(powheg_dir: Path, run_dir: Path, nseeds: int, dry_run: bool) -> None:
+def copy_or_make_seeds(powheg_dir: Path, run_dir: Path, nseeds: int, resume: bool, dry_run: bool) -> None:
     source = powheg_dir / "suggested_run" / "pwgseeds.dat"
     target = run_dir / "pwgseeds.dat"
+    if resume and target.exists():
+        print(f"+ resume: keep existing {target}")
+        return
     if dry_run:
         print(f"+ write {target} with {nseeds} seed entries")
         return
@@ -573,11 +639,23 @@ def run_seed_group(
     label: str,
     herwig_env: Path | None,
     herwig_module: str | None,
+    event_targets: dict[int, int] | None,
+    resume: bool,
     dry_run: bool,
 ) -> None:
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(seeds)) as pool:
+    seeds_to_run: list[int] = []
+    for seed in seeds:
+        log_path = run_dir / f"run-{label}-{seed}.log"
+        if resume and not prepare_resume_seed(label, seed, log_path, run_dir, event_targets, dry_run):
+            continue
+        seeds_to_run.append(seed)
+    if not seeds_to_run:
+        print(f"[{label}] resume: all requested seed jobs already complete", flush=True)
+        return
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(seeds_to_run)) as pool:
         futures = {}
-        for seed in seeds:
+        for seed in seeds_to_run:
             log_name = f"run-{label}-{seed}.log"
             future = pool.submit(run_seed, exe, run_dir, seed, log_name, herwig_env, herwig_module, dry_run)
             futures[future] = (seed, log_name)
@@ -587,7 +665,7 @@ def run_seed_group(
             future.result()
             completed += 1
             if not dry_run:
-                print(f"[{label}] completed seed {seed} ({completed}/{len(seeds)}); log {run_dir / log_name}", flush=True)
+                print(f"[{label}] completed seed {seed} ({completed}/{len(seeds_to_run)}); log {run_dir / log_name}", flush=True)
 
 
 def stage_updates(
@@ -714,6 +792,7 @@ def main() -> None:
     card = args.card.expanduser().resolve()
     groups = event_groups(args.nevents, args.jobs)
     nseeds = active_seed_count(groups)
+    event_targets = seed_event_targets(groups)
     max_events_per_seed = max(events for events, _seeds in groups)
     run_dir = (args.run_dir.expanduser() if args.run_dir else run_dir_for(powheg_dir, args.nevents)).resolve()
 
@@ -781,8 +860,10 @@ def main() -> None:
         print(f"+ write {run_dir / 'powheg.input-save'}")
     else:
         (run_dir / "powheg.input-save").write_text(base_text)
-        (run_dir / "Timings.txt").write_text("")
-    copy_or_make_seeds(powheg_dir, run_dir, nseeds, args.dry_run)
+        timings = run_dir / "Timings.txt"
+        if not args.resume or not timings.exists():
+            timings.write_text("")
+    copy_or_make_seeds(powheg_dir, run_dir, nseeds, args.resume, args.dry_run)
 
     print(f"Requested {args.nevents} LHE events over {nseeds} POWHEG seed job(s).")
     print(f"Beam setup: pp at sqrt(s) = {2 * args.ebeam:g} GeV ({args.ebeam:g} GeV per beam).")
@@ -798,20 +879,60 @@ def main() -> None:
             stage_updates(1, nseeds, max_events_per_seed, xgriditeration=igrid, use_old_grid=0, use_old_ubound=0),
             args.dry_run,
         )
-        run_seed_group(exe, run_dir, list(range(1, nseeds + 1)), label, herwig_env, herwig_module, args.dry_run)
+        run_seed_group(
+            exe,
+            run_dir,
+            list(range(1, nseeds + 1)),
+            label,
+            herwig_env,
+            herwig_module,
+            None,
+            args.resume,
+            args.dry_run,
+        )
 
     append_timing(run_dir, "st2", args.dry_run)
     write_input(run_dir, base_text, stage_updates(2, nseeds, max_events_per_seed, use_old_grid=0, use_old_ubound=0), args.dry_run)
-    run_seed_group(exe, run_dir, list(range(1, nseeds + 1)), "st2", herwig_env, herwig_module, args.dry_run)
+    run_seed_group(
+        exe,
+        run_dir,
+        list(range(1, nseeds + 1)),
+        "st2",
+        herwig_env,
+        herwig_module,
+        None,
+        args.resume,
+        args.dry_run,
+    )
 
     append_timing(run_dir, "st3", args.dry_run)
     write_input(run_dir, base_text, stage_updates(3, nseeds, max_events_per_seed, use_old_grid=1, use_old_ubound=0), args.dry_run)
-    run_seed_group(exe, run_dir, list(range(1, nseeds + 1)), "st3", herwig_env, herwig_module, args.dry_run)
+    run_seed_group(
+        exe,
+        run_dir,
+        list(range(1, nseeds + 1)),
+        "st3",
+        herwig_env,
+        herwig_module,
+        None,
+        args.resume,
+        args.dry_run,
+    )
 
     append_timing(run_dir, "st4", args.dry_run)
     for events, seeds in groups:
         write_input(run_dir, base_text, stage_updates(4, nseeds, events, use_old_grid=1, use_old_ubound=1), args.dry_run)
-        run_seed_group(exe, run_dir, seeds, "st4", herwig_env, herwig_module, args.dry_run)
+        run_seed_group(
+            exe,
+            run_dir,
+            seeds,
+            "st4",
+            herwig_env,
+            herwig_module,
+            event_targets,
+            args.resume,
+            args.dry_run,
+        )
     append_timing(run_dir, "end", args.dry_run)
 
     write_manifest(

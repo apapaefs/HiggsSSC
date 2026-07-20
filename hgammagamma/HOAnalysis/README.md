@@ -226,6 +226,20 @@ The status view reports completed POWHEG stages, latest log activity,
 per-seed LHE files, event blocks written so far, and the merged LHE/manifest
 once the run has finished.
 
+If a resumed run reaches stage 4 and POWHEG reports that a
+`pwgevents-000N.lhe` file already exists, rerun with `--resume`. The wrapper
+will now skip complete seed outputs and archive incomplete/stale stage-4 LHE
+files under `resume-backups/` before rerunning those seeds, so POWHEG gets a
+clean output filename without deleting the partial file:
+
+```bash
+python3 /path/to/HiggsSSC/hgammagamma/run_powheg_hjminnlo.py \
+  --nevents 100000 \
+  --jobs 8 \
+  --herwig-module herwig/730 \
+  --resume
+```
+
 For example:
 
 ```bash
