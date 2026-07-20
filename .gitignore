@@ -11,6 +11,7 @@
 # Local analysis build products.
 /hgammagamma/LOAnalysis/Code/*.o
 /hgammagamma/LOAnalysis/Code/HwSimPostAnalysis_gammagamma
+/hgammagamma/LOAnalysis/Code/HwSimPostAnalysis_gammagamma_SSC
 /hgammagamma/LOAnalysis/Code/HwSimPostAnalysis_objects
 /hgammagamma/LOAnalysis/Code/HwSimPostAnalysis_objects_jetfinding
 

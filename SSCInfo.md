@@ -1,11 +1,11 @@
 # SSC Detector And Higgs Channel Notes
 
 These notes treat the GEM detector studies as the main numerical SSC baseline.
-The GEM Higgs note is the most complete SSC-era source used here for both
-channels: it updated the GEM TDR Higgs analysis, used detailed GEANT
-simulations for detector response and lepton/photon identification, and covered
-the channels $H\to\gamma\gamma$, $H\to 4\ell$, $\ell\ell\nu\nu$, and
-$\ell\ell jj$.
+The GEM Higgs note, *Higgs Searches with the GEM Detector* (GEM TN-93-373,
+CALT-68-1856), is the most complete SSC-era source used here for both channels:
+it updated the GEM TDR Higgs analysis, used detailed GEANT simulations for
+detector response and lepton/photon identification, and covered the channels
+$H\to\gamma\gamma$, $H\to 4\ell$, $\ell\ell\nu\nu$, and $\ell\ell jj$.
 
 The SDC program is still relevant as a comparator. The SDC TDR and SDC
 four-lepton/muon-resolution notes are listed in the Fermilab SSC report index,
@@ -13,14 +13,27 @@ but the numerical fake-rate and Higgs-channel tables below are GEM-based
 because those quantities are explicitly tabulated in the accessible GEM Higgs
 study.
 
+The exact gamma-gamma implementation, selectable campaign interface, output
+contract, validation record, and limitations are documented in
+[`hgammagamma/SSC_DETECTOR_RESPONSE.md`](hgammagamma/SSC_DETECTOR_RESPONSE.md).
+
 ## SSC/GEM Detector-Performance Assumptions
 
 | Object | Geometric acceptance / efficiency | Projected resolution | Mis-tag / fake assumptions |
 | --- | --- | --- | --- |
-| Photons | EMC coverage $0.1 < \lvert\eta\rvert < 3.0$. For high-resolution $H\to\gamma\gamma$, photons were excluded from the barrel/endcap transition $1.01 < \lvert\eta\rvert < 1.16$. Real photon/electron ID was kept at about 90% at the shower-ID stage; including geometry and cuts, photon/electron efficiency was 80-85%. | EMC energy resolution $6\text{-}8\%/\sqrt{E}\oplus 0.4\%$; position resolution $4.4~\mathrm{mm}/\sqrt{E}$; photon pointing about $40\text{-}50~\mathrm{mrad}/\sqrt{E}$ plus a constant term. The resulting $H\to\gamma\gamma$ mass resolution was 0.66-1.0 GeV for $M_H=80\text{-}160~\mathrm{GeV}$ in the baseline design. | Jet$\to\gamma$ after photon ID: quark jets $4.1\to 3.4\times 10^{-4}$ and gluon jets $1.2\to 0.83\times 10^{-4}$ over $M_{\gamma\gamma}=80\text{-}160~\mathrm{GeV}$. Electron$\to\gamma$ was studied separately: $R(\gamma/e)$ ranged from 5.0% to 0.14% depending on the tracker-hit cut; the analysis assumed about 0.15% near $M_Z$ and 2% elsewhere. |
+| Photons | EMC coverage $0.1 < \lvert\eta\rvert < 3.0$. For high-resolution $H\to\gamma\gamma$, photons were excluded from the barrel/endcap transition $1.01 < \lvert\eta\rvert < 1.16$. Real photon/electron ID was kept at about 90% at the shower-ID stage; including geometry and cuts, photon/electron efficiency was 80-85%. | EMC energy resolution $6\%/\sqrt{E}$ in the barrel and $8\text{-}8.5\%/\sqrt{E}$ in the endcap, with a $0.4\%$ constant term; the detailed TDR parametrization used $8.5\%$ in the endcap. Position resolution was $4.4~\mathrm{mm}/\sqrt{E}$; photon pointing was about $40\text{-}50~\mathrm{mrad}/\sqrt{E}$ plus a constant term. The resulting $H\to\gamma\gamma$ mass resolution was 0.66-1.0 GeV for $M_H=80\text{-}160~\mathrm{GeV}$ in the baseline design. | Jet$\to\gamma$ after photon ID: quark jets $4.1\to 3.4\times 10^{-4}$ and gluon jets $1.2\to 0.83\times 10^{-4}$ over $M_{\gamma\gamma}=80\text{-}160~\mathrm{GeV}$. Electron$\to\gamma$ was studied separately: $R(\gamma/e)$ ranged from 5.0% to 0.14% depending on the tracker-hit cut; the analysis assumed about 0.15% near $M_Z$ and 2% elsewhere. |
 | Electrons | Same EMC fiducial logic as photons. High-resolution analyses excluded $1.01 < \lvert\eta\rvert < 1.16$; overall electron/photon ID efficiency after geometry and cuts was 80-85%. | Electron energy resolution follows the EMC resolution. In the $H\to ZZ^\ast\to 4e$ study, the reconstructed Higgs mass resolution was 1.05-1.33 GeV for $M_H=140\text{-}180~\mathrm{GeV}$. | Jet$\to e$ rejection was tabulated as a total rejection factor of 123,750, corresponding to a fake probability of roughly $8\times 10^{-6}$, consistent with the text's "typically $10^{-5}$" electron fake level. |
 | Muons | Muon coverage $0.1 < \lvert\eta\rvert < 2.5$. Typical muon ID efficiency was about 80% within the fiducial volume, including 85% geometrical acceptance from holes/cracks and 95% reconstruction efficiency. | Muon momentum resolution at $p_T=500~\mathrm{GeV}$ was projected as 5% at $\eta=0$ and 12% at $\lvert\eta\rvert=2.5$. In $H\to 4\ell$, $4\mu$ mass resolution was 1.59-2.22 GeV and $2e2\mu$ was 1.36-1.77 GeV for $M_H=140\text{-}180~\mathrm{GeV}$. | GEM did not tabulate a universal jet$\to\mu$ fake probability. It stated that the calorimeter reduced hadron punch-through to well below genuine-muon rates; reducible lepton backgrounds were evaluated at event level through $ZQ\bar{Q}$ and $t\bar{t}$ samples with isolation and track matching. |
 | Jets | HCAL coverage $0.1 < \lvert\eta\rvert < 5.5$. Central-jet ID efficiency was not the key object in $H\to\gamma\gamma$ or $4\ell$; jets mainly enter as fake photons/leptons or as forward tags. | Central jet energy resolution: $60\%/\sqrt{E}\oplus 4\%$. A forward-tagging study for very heavy $H\to ZZ\to 4\ell$ assumed forward calorimeter segmentation $0.2\times 0.2$ and forward-jet energy resolution $200\%/\sqrt{E}\oplus 6\%$. | Jet$\to\gamma$ and jet$\to e$ rates are listed above. For heavy-Higgs forward tagging, requiring one jet with $E>0.5~\mathrm{TeV}$ and $2 < \lvert\eta\rvert < 5.2$ tagged 60% of signal and 27% of background, increasing purity but reducing statistics. |
+
+For the detailed $H\to\gamma\gamma$ simulation, GEM used
+$\sigma_E/E=a/\sqrt{E}\oplus b\oplus c/E$, with $a=6\%$ in the barrel,
+$a=8.5\%$ in the endcap, and $b=0.4\%$. At standard luminosity, the
+transverse thermal-noise terms entering $c$ were 0.100 GeV in the barrel and
+0.175 GeV in the endcap. The transverse pileup-noise term was 0.120 GeV for
+$\lvert\eta\rvert<1.4$ and
+$0.120+0.366(\lvert\eta\rvert-1.4)~\mathrm{GeV}$ at larger pseudorapidity; the
+thermal and pileup contributions were combined in quadrature.
 
 ## Scenario A: $H\to\gamma\gamma$
 
@@ -34,7 +47,8 @@ requirement is a precision EMC with strong photon ID.
 
 The analysis used isolated photon candidates, EMC shower-shape discrimination,
 HCAL veto information, tracker-based electron/photon separation, and a
-$\lvert\cos\theta^\ast\rvert$ cut.
+$\lvert\cos\theta^\ast\rvert$ cut. The operational photon requirements were
+$p_T>20~\mathrm{GeV}$ and $\lvert\eta\rvert<2.5$.
 
 After the final cuts, the listed accepted signal cross sections correspond to
 roughly 18-27% of the tabulated $H\to\gamma\gamma$ production times branching
@@ -59,15 +73,20 @@ The irreducible background is prompt $\gamma\gamma$ production. Reducible
 backgrounds are $\gamma j$, $jj$, and Drell-Yan $e^+e^-$ with electrons
 misidentified as photons.
 
-GEM's jet$\to\gamma$ study generated $10^8$ $\gamma q$ and $\gamma g$ events,
-applied isolation, and then detailed GEANT shower-shape ID. After photon ID,
-quark-jet fake rates were approximately $3.4\text{-}4.1\times 10^{-4}$;
-gluon-jet fake rates were approximately $0.8\text{-}1.2\times 10^{-4}$.
+GEM's jet$\to\gamma$ study generated $10^6$ events each for the $\gamma q$ and
+$\gamma g$ samples, applied isolation, and then detailed GEANT shower-shape ID.
+After photon ID, quark-jet fake rates were approximately
+$3.4\text{-}4.1\times 10^{-4}$; gluon-jet fake rates were approximately
+$0.8\text{-}1.2\times 10^{-4}$. The separate radiative-$Z$ background study
+used $10^8$ YFS3 events.
 
 Electron$\to\gamma$ was controlled with central-tracker hit/no-hit information.
 GEM needed about $R(\gamma/e)\sim 0.5\%$ near the $Z$ peak to keep Drell-Yan
 below 20% of the Higgs signal, and it assumed 0.15% near $M_Z$ and 2%
-elsewhere.
+elsewhere. These tracker-veto probabilities were evaluated after identifying
+an isolated EM cluster; a truth-electron estimate must therefore apply the
+separate common EM shower-ID efficiency (about 90%) and isolation selection,
+but not an additional electron-reconstruction efficiency.
 
 ### Discovery Reach
 
@@ -204,15 +223,16 @@ less faithful to the immediate late-1990s baseline.
   SSCL-SR-1219, April 1993. Used here as the detector-performance baseline.
   Fermilab Library Server:
   <https://lss.fnal.gov/archive/other/ssc/ssc-gem-tn-93-262.pdf>.
-- GEM Collaboration, *Higgs Boson Studies with the GEM Detector at the SSC*,
-  SSC-era GEM Higgs analysis note/update to the GEM TDR. This is the numerical
-  source for the GEM $H\to\gamma\gamma$ and $H\to ZZ^{(\ast)}\to 4\ell$ tables
-  summarized above; the exact report number should be filled in from the
-  archive copy used.
+- S. Mrenna, S. Shevchenko, X. R. Shi, H. Yamamoto, and R. Y. Zhu, *Higgs
+  Searches with the GEM Detector*, GEM TN-93-373, CALT-68-1856, June 20, 1993.
+  This update to the GEM TDR is the numerical source for the GEM
+  $H\to\gamma\gamma$ and $H\to ZZ^{(\ast)}\to 4\ell$ tables summarized above.
+  Fermilab Library Server:
+  <https://lss.fnal.gov/archive/other/calt-68-1856.pdf>.
 - SDC Collaboration, *Solenoidal Detector Collaboration Technical Design
   Report*, SSC-era detector TDR. Used here as a comparator rather than the
-  numerical source; the exact report number should be checked against the
-  Fermilab SSC report index.
+  numerical source summarized above; it is listed in the Fermilab SSC report
+  index.
 
 ### LHC TDR And Higgs Search Methodology
 

@@ -4,9 +4,10 @@
 The report overlays transparent per-sample histograms for the default density
 plots, with each histogram normalized to unit area.  With ``--no-density``,
 backgrounds are stacked first and the Higgs signal is stacked on top.  In
-non-density mode, each histogram shape is normalized so its area is sigma *
-weight_scale * analysis efficiency for that sample.  The analysis efficiency
-and weight scale are read from the matching .dat file.
+non-density mode, histogram bins are scaled by the generated event cross
+section and detector-response weights.  Diphoton-only histograms then
+integrate to sigma * weight_scale * analysis efficiency, while the exclusive
+photon-multiplicity histogram retains its physical normalization.
 """
 
 from __future__ import annotations
@@ -43,6 +44,11 @@ class SampleResult:
     name: str
     label: str
     category: str
+    analysis_name: str
+    detector_response: str
+    response_mode: str
+    weighted_hypotheses: bool
+    metadata_inferred: bool
     sample_dir: Path
     top_file: Path
     dat_file: Path
@@ -90,6 +96,7 @@ SAMPLE_LABELS = {
     "bkg_gamma_j": "gamma + j fake",
     "bkg_jj": "jj fake",
     "bkg_ee": "e+e- fake",
+    "bkg_dy_ee": "Drell-Yan e+e- fake",
 }
 
 
@@ -113,10 +120,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--normalization",
         choices=("selected_xsec", "event_xsec", "unit_area"),
-        default="selected_xsec",
+        default="event_xsec",
         help=(
-            "Non-density scaling mode. selected_xsec gives each plotted histogram "
-            "area sigma*weight_scale*efficiency; density plots are always unit-normalized."
+            "Non-density scaling mode. event_xsec preserves detector-outcome weights; "
+            "selected_xsec forces every shape to sigma*weight_scale*efficiency. "
+            "Density plots are always unit-normalized."
         ),
     )
     parser.add_argument(
@@ -226,6 +234,36 @@ def parse_key_value_dat(path: Path) -> dict[str, float | str]:
     return values
 
 
+def response_provenance(dat: dict[str, float | str]) -> dict[str, str | bool]:
+    """Resolve response metadata while retaining compatibility with old outputs."""
+
+    raw_analysis = str(dat.get("analysis", "")).strip()
+    explicit_detector_response = str(dat.get("detector_response", "")).strip()
+    metadata_inferred = not bool(explicit_detector_response)
+
+    if explicit_detector_response:
+        detector_response = explicit_detector_response
+    elif raw_analysis == "SSC_GEM_weighted_response":
+        detector_response = "ssc"
+    elif not raw_analysis or raw_analysis == "legacy_direct_photons":
+        detector_response = "none"
+    else:
+        detector_response = "unknown"
+
+    analysis_name = raw_analysis or "legacy_direct_photons"
+    default_mode = "genuine" if detector_response in {"ssc", "none"} else "unknown"
+    response_mode = str(dat.get("response_mode", default_mode))
+    weighted_default = 1.0 if detector_response == "ssc" else 0.0
+    weighted_hypotheses = bool(float(dat.get("weighted_hypotheses", weighted_default)))
+    return {
+        "analysis_name": analysis_name,
+        "detector_response": detector_response,
+        "response_mode": response_mode,
+        "weighted_hypotheses": weighted_hypotheses,
+        "metadata_inferred": metadata_inferred,
+    }
+
+
 def parse_cross_section(sample_dir: Path, run_tag: str) -> tuple[float, float | None]:
     banner = sample_dir / "mg5_process" / "Events" / run_tag / f"{run_tag}_tag_1_banner.txt"
     if banner.exists():
@@ -291,6 +329,7 @@ def load_samples(args: argparse.Namespace) -> list[SampleResult]:
             continue
         top_file, dat_file = files
         dat = parse_key_value_dat(dat_file)
+        provenance = response_provenance(dat)
         try:
             cross_section_pb, cross_section_error_pb = parse_cross_section(sample_dir, args.run_tag)
         except FileNotFoundError as error:
@@ -312,6 +351,11 @@ def load_samples(args: argparse.Namespace) -> list[SampleResult]:
                 name=name,
                 label=SAMPLE_LABELS.get(name, name.replace("_", " ")),
                 category=category,
+                analysis_name=str(provenance["analysis_name"]),
+                detector_response=str(provenance["detector_response"]),
+                response_mode=str(provenance["response_mode"]),
+                weighted_hypotheses=bool(provenance["weighted_hypotheses"]),
+                metadata_inferred=bool(provenance["metadata_inferred"]),
                 sample_dir=sample_dir,
                 top_file=top_file,
                 dat_file=dat_file,
@@ -437,6 +481,8 @@ def add_publication_labels(ax, title: str, normalization: str, density: bool) ->
         ax.text(0.06, 0.065, "Norm: unit area", transform=ax.transAxes, ha="left", va="bottom", fontsize=9)
     elif normalization == "selected_xsec":
         ax.text(0.06, 0.065, r"Norm: $\sigma \times w \times \epsilon_{\gamma\gamma}$", transform=ax.transAxes, ha="left", va="bottom", fontsize=9)
+    elif normalization == "event_xsec":
+        ax.text(0.06, 0.065, r"Norm: event cross section", transform=ax.transAxes, ha="left", va="bottom", fontsize=9)
 
 
 def plot_histogram(
@@ -514,6 +560,11 @@ def plot_histogram(
                     "plot": meta.slug,
                     "sample": sample.name,
                     "category": sample.category,
+                    "analysis": sample.analysis_name,
+                    "detector_response": sample.detector_response,
+                    "response_mode": sample.response_mode,
+                    "weighted_hypotheses": int(sample.weighted_hypotheses),
+                    "response_metadata_inferred": int(sample.metadata_inferred),
                     "x_center": x,
                     "raw_bin_weight": hist.y[bin_index],
                     "scaled_bin_value": y_values[bin_index],
@@ -588,6 +639,11 @@ def write_summary_csv(samples: Sequence[SampleResult], output_dir: Path) -> str:
             fieldnames=[
                 "sample",
                 "category",
+                "analysis",
+                "detector_response",
+                "response_mode",
+                "weighted_hypotheses",
+                "response_metadata_inferred",
                 "cross_section_pb",
                 "cross_section_error_pb",
                 "weight_scale",
@@ -607,6 +663,11 @@ def write_summary_csv(samples: Sequence[SampleResult], output_dir: Path) -> str:
                 {
                     "sample": sample.name,
                     "category": sample.category,
+                    "analysis": sample.analysis_name,
+                    "detector_response": sample.detector_response,
+                    "response_mode": sample.response_mode,
+                    "weighted_hypotheses": int(sample.weighted_hypotheses),
+                    "response_metadata_inferred": int(sample.metadata_inferred),
                     "cross_section_pb": sample.cross_section_pb,
                     "cross_section_error_pb": sample.cross_section_error_pb if sample.cross_section_error_pb is not None else "",
                     "weight_scale": sample.weight_scale,
@@ -636,11 +697,32 @@ def write_html(
     zip_name = "gammagamma_report_assets.zip"
     shutil.make_archive(str(output_dir / "gammagamma_report_assets"), "zip", root_dir=output_dir, base_dir="plots")
 
+    detector_responses = sorted({sample.detector_response for sample in samples})
+    response_modes = sorted({sample.response_mode for sample in samples})
+    inferred_count = sum(1 for sample in samples if sample.metadata_inferred)
+    detector_summary = (
+        f"Detector response: {', '.join(detector_responses)}. "
+        f"Sample response modes: {', '.join(response_modes)}."
+    )
+    if inferred_count:
+        detector_summary += f" Provenance was inferred for {inferred_count} historical output(s)."
+    mixed_warning = ""
+    if len(detector_responses) > 1:
+        mixed_warning = (
+            '<p class="warning"><strong>Warning:</strong> this report mixes detector-response '
+            "profiles under one run tag. Check for partially rerun or stale outputs.</p>"
+        )
+
     sample_rows = "\n".join(
         f"""
         <tr>
           <td>{html.escape(sample.label)}</td>
           <td>{html.escape(sample.category)}</td>
+          <td>{html.escape(sample.analysis_name)}</td>
+          <td>{html.escape(sample.detector_response)}</td>
+          <td>{html.escape(sample.response_mode)}</td>
+          <td>{'weighted' if sample.weighted_hypotheses else 'one row/event'}</td>
+          <td>{'inferred' if sample.metadata_inferred else 'explicit'}</td>
           <td>{sample.cross_section_pb:.6g}</td>
           <td>{sample.weight_scale:.6g}</td>
           <td>{sample.efficiency:.6g}</td>
@@ -674,13 +756,16 @@ def write_html(
         for plot in plots
     )
 
-    normalization_text = {
-        "selected_xsec": "Each plotted histogram area is normalized to cross section times weight scale times diphoton analysis efficiency for its sample.",
-        "event_xsec": "Histogram bins are scaled by the event cross section and weight scale; selected-only histograms integrate to cross section times weight scale times efficiency.",
-        "unit_area": "Each sample histogram is unit-area normalized before stacking.",
-    }[normalization]
     if density:
-        normalization_text += " Bin contents are divided by bin width."
+        normalization_text = (
+            "Each sample histogram is unit-area normalized and divided by bin width."
+        )
+    else:
+        normalization_text = {
+            "selected_xsec": "Each plotted histogram area is normalized to cross section times weight scale times diphoton analysis efficiency for its sample.",
+            "event_xsec": "Histogram bins are scaled by the event cross section and weight scale; selected-only histograms integrate to cross section times weight scale times efficiency.",
+            "unit_area": "Each sample histogram is unit-area normalized before stacking.",
+        }[normalization]
 
     html_text = f"""<!doctype html>
 <html lang="en">
@@ -722,6 +807,14 @@ def write_html(
     p {{
       margin: 4px 0;
       color: var(--muted);
+    }}
+    .warning {{
+      color: #8a1c22;
+      background: #fff0f1;
+      border: 1px solid #e7a8ad;
+      border-radius: 6px;
+      padding: 9px 12px;
+      margin-top: 12px;
     }}
     main {{
       max-width: 1180px;
@@ -801,6 +894,8 @@ def write_html(
   <header>
     <h1>{html.escape(title)}</h1>
     <p>Run tag: {html.escape(run_tag)}. {html.escape(normalization_text)}</p>
+    <p>{html.escape(detector_summary)}</p>
+    {mixed_warning}
   </header>
   <main>
     <nav class="toolbar">
@@ -813,12 +908,17 @@ def write_html(
           <tr>
             <th>Sample</th>
             <th>Category</th>
+            <th>Analysis</th>
+            <th>Detector response</th>
+            <th>Response mode</th>
+            <th>Tree semantics</th>
+            <th>Provenance</th>
             <th>&sigma; [pb]</th>
             <th>Weight scale</th>
             <th>Analysis efficiency</th>
             <th>&sigma;&times;&epsilon; [pb]</th>
             <th>Events read</th>
-            <th>Diphoton events</th>
+            <th>Diphoton events/hypotheses</th>
           </tr>
         </thead>
         <tbody>
@@ -850,9 +950,16 @@ def main(argv: Sequence[str]) -> int:
         die(f"no samples with .top/.dat files found under {analysis_root}")
 
     log(f"Loaded {len(samples)} samples")
+    detector_responses = sorted({sample.detector_response for sample in samples})
+    if len(detector_responses) > 1:
+        print(
+            "Warning: mixed detector-response profiles under one run tag: "
+            + ", ".join(detector_responses)
+        )
     for sample in ordered_samples(samples):
         print(
             f"  {sample.name:18s} {sample.category:11s} "
+            f"response={sample.detector_response}/{sample.response_mode} "
             f"xsec={sample.cross_section_pb:.6g} pb weight={sample.weight_scale:.6g} "
             f"eff={sample.efficiency:.6g} xsec*weight*eff={sample.selected_cross_section_pb:.6g} pb"
         )

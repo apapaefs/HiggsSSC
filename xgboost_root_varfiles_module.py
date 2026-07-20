@@ -11,7 +11,7 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from read_root_varfiles import FEATURE_NAMES, read_ROOT_varfile
+from read_root_varfiles import FEATURE_NAMES, read_ROOT_varfile, sum_ROOT_varfile_weights
 
 
 def _require_xgboost_dependencies():
@@ -72,9 +72,15 @@ def _expand_metadata(metadata, files: Sequence[Path]) -> list[dict[str, Any]]:
     return rows
 
 
-def _normalisation_denominator(normalisation_weight, raw_weights) -> tuple[float, str]:
+def _normalisation_denominator(
+    normalisation_weight,
+    raw_weights,
+    full_tree_weight=None,
+) -> tuple[float, str]:
     if normalisation_weight is not None and normalisation_weight > 0:
         return float(normalisation_weight), "input_weight_sum"
+    if full_tree_weight is not None and full_tree_weight > 0:
+        return float(full_tree_weight), "tree_weight_sum"
     fallback = float(np.sum(raw_weights))
     if fallback > 0.0:
         return fallback, "loaded_weight_sum"
@@ -119,9 +125,22 @@ def _load_group(
         normalisation_weights,
         metadata,
     ):
-        features, sample_labels, weights = read_ROOT_varfile(path, label, 1.0, max_events=max_events)
+        features, sample_labels, weights = read_ROOT_varfile(
+            path,
+            label,
+            1.0,
+            max_events=max_events,
+            selected_only=True,
+        )
         weights = np.asarray(weights, dtype=float)
-        normalisation, normalisation_source = _normalisation_denominator(normalisation_weight, weights)
+        full_tree_weight = None
+        if normalisation_weight is None or normalisation_weight <= 0:
+            full_tree_weight = sum_ROOT_varfile_weights(path)
+        normalisation, normalisation_source = _normalisation_denominator(
+            normalisation_weight,
+            weights,
+            full_tree_weight,
+        )
         effective_xsec_fb = float(xsec_fb) * float(rate_factor)
         physical = float(luminosity) * effective_xsec_fb * weights / normalisation
 
@@ -140,7 +159,8 @@ def _load_group(
                 "normalisation_weight": normalisation,
                 "normalisation_source": normalisation_source,
                 "entries_read": len(features),
-                "sum_weight": float(np.sum(weights)),
+                "sum_weight": normalisation,
+                "sum_loaded_selected_weight": float(np.sum(weights)),
             }
         )
 
@@ -223,15 +243,28 @@ def _summarize_full_sample(
     luminosity: float,
     max_events=None,
 ) -> dict[str, Any]:
-    features, _, weights = read_ROOT_varfile(sample["input_file"], label, 1.0, max_events=max_events)
+    features, _, weights = read_ROOT_varfile(
+        sample["input_file"],
+        label,
+        1.0,
+        max_events=max_events,
+        selected_only=True,
+    )
     weights = np.asarray(weights, dtype=float)
-    scores = model.predict_proba(np.asarray(features, dtype=float))[:, 1]
-    selected = scores >= threshold
     normalisation = float(sample["normalisation_weight"])
-    physical_weights = float(luminosity) * float(sample["effective_xsec_fb"]) * weights / normalisation
-    sum_weight = float(np.sum(weights))
+    if features:
+        scores = model.predict_proba(np.asarray(features, dtype=float))[:, 1]
+        selected = scores >= threshold
+    else:
+        selected = np.asarray([], dtype=bool)
+    physical_weights = (
+        float(luminosity) * float(sample["effective_xsec_fb"]) * weights / normalisation
+        if normalisation > 0.0
+        else np.zeros_like(weights)
+    )
+    sum_weight = normalisation
     sum_selected_weight = float(np.sum(weights[selected]))
-    efficiency = sum_selected_weight / sum_weight if sum_weight > 0.0 else 0.0
+    efficiency = sum_selected_weight / normalisation if normalisation > 0.0 else 0.0
     raw_cross_section_pb = float(sample["xsec_fb"]) / 1000.0
     cross_section_pb = float(sample["effective_xsec_fb"]) / 1000.0
     selected_xsec_pb = cross_section_pb * efficiency
@@ -239,6 +272,9 @@ def _summarize_full_sample(
     return {
         "sample": sample.get("sample", Path(sample["input_file"]).parent.name),
         "category": sample.get("category", "Signal" if label == 1 else "Backgrounds"),
+        "analysis": sample.get("analysis", "unknown"),
+        "detector_response": sample.get("detector_response", "unknown"),
+        "response_mode": sample.get("response_mode", "unknown"),
         "input_file": sample["input_file"],
         "raw_cross_section_pb": raw_cross_section_pb,
         "cross_section_pb": cross_section_pb,
@@ -379,8 +415,8 @@ def run_signal_background_analysis(
     _write_feature_importance_plot(feature_file, plt, model)
 
     summary_rows = [
-        *[_summarize_full_sample(model, sample, 1, best["threshold"], luminosity, max_events) for sample in signal_summary],
-        *[_summarize_full_sample(model, sample, 0, best["threshold"], luminosity, max_events) for sample in background_summary],
+        *[_summarize_full_sample(model, sample, 1, best["threshold"], luminosity, None) for sample in signal_summary],
+        *[_summarize_full_sample(model, sample, 0, best["threshold"], luminosity, None) for sample in background_summary],
     ]
     total_signal = float(sum(row["expected_events"] for row in summary_rows if row["category"] == "Signal"))
     total_background = float(sum(row["expected_events"] for row in summary_rows if row["category"] != "Signal"))

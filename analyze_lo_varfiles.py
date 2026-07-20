@@ -84,6 +84,9 @@ class SampleInfo:
     weight_scale: float
     events_read: float
     sum_weight: float
+    analysis_name: str = "legacy_direct_photons"
+    detector_response: str = "none"
+    response_mode: str = "genuine"
 
 
 @dataclass
@@ -133,6 +136,9 @@ class ProgressBar:
 SUMMARY_FIELDS = [
     "sample",
     "category",
+    "analysis",
+    "detector_response",
+    "response_mode",
     "input_file",
     "raw_cross_section_pb",
     "cross_section_pb",
@@ -165,7 +171,9 @@ def _parse_scalar(value: str) -> Any:
         return True
     if lowered in {"false", "no"}:
         return False
-    if lowered in {"null", "none"}:
+    # YAML null spellings are ``null`` and ``~``.  Keep bare ``none`` as a
+    # string because it is the detector-response profile used by this project.
+    if lowered in {"null", "~"}:
         return None
     try:
         if re.search(r"[.eE]", value):
@@ -299,6 +307,42 @@ def parse_key_value_dat(path: Path) -> dict[str, float | str]:
     return values
 
 
+def response_provenance(dat: dict[str, float | str]) -> tuple[str, str, str]:
+    """Return analysis, detector profile, and response mode for new or historical files."""
+
+    analysis_name = str(dat.get("analysis", "")).strip()
+    explicit_response = str(dat.get("detector_response", "")).strip()
+    if explicit_response:
+        detector_response = explicit_response
+    elif analysis_name == "SSC_GEM_weighted_response":
+        detector_response = "ssc"
+    elif not analysis_name or analysis_name == "legacy_direct_photons":
+        detector_response = "none"
+    else:
+        detector_response = "unknown"
+    if not analysis_name:
+        analysis_name = "legacy_direct_photons"
+    default_mode = "genuine" if detector_response in {"ssc", "none"} else "unknown"
+    response_mode = str(dat.get("response_mode", default_mode))
+    return analysis_name, detector_response, response_mode
+
+
+def validate_detector_response(samples: Sequence[SampleInfo], expected: Any) -> str:
+    actual = sorted({sample.detector_response for sample in samples})
+    if expected is None:
+        return actual[0] if len(actual) == 1 else ",".join(actual)
+    expected_response = str(expected).strip().lower()
+    if expected_response not in {"ssc", "none"}:
+        raise ValueError("analysis.detector_response must be 'ssc' or 'none'")
+    mismatched = [sample.name for sample in samples if sample.detector_response != expected_response]
+    if mismatched:
+        raise ValueError(
+            f"analysis.detector_response={expected_response} does not match .dat metadata for "
+            + ", ".join(mismatched)
+        )
+    return expected_response
+
+
 def parse_rate_factors(value: Any) -> dict[str, float]:
     if value is None:
         return {}
@@ -378,6 +422,7 @@ def discover_samples(
             if not dat_file.exists():
                 raise FileNotFoundError(f"missing .dat summary for {var_file}")
             dat = parse_key_value_dat(dat_file)
+            analysis_name, detector_response, response_mode = response_provenance(dat)
             cross_section_pb, cross_section_error_pb = parse_cross_section(sample_dir, run_tag)
             dat_weight_scale = float(dat.get("weight_scale", 1.0))
             samples.append(
@@ -392,6 +437,9 @@ def discover_samples(
                     weight_scale=resolve_weight_scale(sample_dir.name, category, dat_weight_scale, rate_factors),
                     events_read=float(dat.get("events_read", 0.0)),
                     sum_weight=float(dat.get("sum_weight", 0.0)),
+                    analysis_name=analysis_name,
+                    detector_response=detector_response,
+                    response_mode=response_mode,
                 )
             )
     return samples
@@ -413,6 +461,9 @@ def summarize_sample(sample: SampleInfo, cuts: Sequence[Cut], luminosity_fb: flo
     return {
         "sample": sample.name,
         "category": sample.category,
+        "analysis": sample.analysis_name,
+        "detector_response": sample.detector_response,
+        "response_mode": sample.response_mode,
         "input_file": str(sample.var_file),
         "raw_cross_section_pb": sample.cross_section_pb,
         "cross_section_pb": cross_section_pb,
@@ -519,6 +570,7 @@ def write_html_report(metadata: dict[str, Any], rows: Sequence[dict[str, Any]], 
   <div class="meta">
     <div>Mode: {html.escape(metadata['mode'])}</div>
     <div>Run tag: {html.escape(metadata['run_tag'])}</div>
+    <div>Detector response: {html.escape(str(metadata.get('detector_response', 'unspecified')))}</div>
     <div>Luminosity: {metadata['luminosity_fb']:.6g} fb<sup>-1</sup></div>
   </div>
   <p><a href="summary.csv">Download CSV</a> | <a href="summary.json">Download JSON</a></p>
@@ -601,6 +653,7 @@ def build_terminal_summary(
         f"  name: {metadata.get('name', 'analysis')}",
         f"  mode: {metadata.get('mode', 'analysis')}",
         f"  run tag: {metadata.get('run_tag', '')}",
+        f"  detector response: {metadata.get('detector_response', 'unspecified')}",
         f"  luminosity: {fmt(float(metadata.get('luminosity_fb', 0.0)))} fb^-1",
         f"  samples: {len(rows)}",
         category_line("Signal", signal_rows),
@@ -630,6 +683,9 @@ def load_analysis_inputs(
     samples = discover_samples(analysis_root, run_tag, requested_samples(analysis.get("samples")), rate_factors)
     if not samples:
         raise RuntimeError(f"no gamma-gamma _var.root samples found under {analysis_root} for run tag {run_tag}")
+    analysis["_resolved_detector_response"] = validate_detector_response(
+        samples, analysis.get("detector_response")
+    )
     output_dir = output_dir_for(analysis_root, run_tag, name, analysis.get("output_dir"))
     return analysis, analysis_root, name, run_tag, luminosity_fb, samples, output_dir
 
@@ -655,6 +711,7 @@ def run_cuts(config_path: Path, run_tag_override: str | None = None, progress_en
         "mode": "cuts",
         "run_tag": run_tag,
         "luminosity_fb": luminosity_fb,
+        "detector_response": analysis["_resolved_detector_response"],
         "cuts": cut_metadata,
     }
     metadata["totals"] = compute_analysis_totals(rows)
@@ -694,8 +751,26 @@ def run_xgboost(config_path: Path, run_tag_override: str | None = None, progress
             background_rate_factors=[sample.weight_scale for sample in background_samples],
             signal_normalisation_weights=[sample.sum_weight for sample in signal_samples],
             background_normalisation_weights=[sample.sum_weight for sample in background_samples],
-            signal_metadata=[{"sample": sample.name, "category": sample.category} for sample in signal_samples],
-            background_metadata=[{"sample": sample.name, "category": sample.category} for sample in background_samples],
+            signal_metadata=[
+                {
+                    "sample": sample.name,
+                    "category": sample.category,
+                    "analysis": sample.analysis_name,
+                    "detector_response": sample.detector_response,
+                    "response_mode": sample.response_mode,
+                }
+                for sample in signal_samples
+            ],
+            background_metadata=[
+                {
+                    "sample": sample.name,
+                    "category": sample.category,
+                    "analysis": sample.analysis_name,
+                    "detector_response": sample.detector_response,
+                    "response_mode": sample.response_mode,
+                }
+                for sample in background_samples
+            ],
             luminosity=luminosity_fb,
             test_size=float(xgb_cfg.get("test_size", 0.35)),
             seed=int(xgb_cfg.get("seed", 12345)),
@@ -709,6 +784,7 @@ def run_xgboost(config_path: Path, run_tag_override: str | None = None, progress
             "mode": "xgboost",
             "run_tag": run_tag,
             "luminosity_fb": luminosity_fb,
+            "detector_response": analysis["_resolved_detector_response"],
             "cuts": [{"variable": "xgboost_score", "min": result["metadata"]["best_threshold"], "max": None}],
             "xgboost": result["metadata"],
         }

@@ -111,6 +111,10 @@ set /Herwig/Analysis/HwSim:OnTheFlyAnalysis No
 
 set /Herwig/Analysis/HwSim:SaveObjects No
 
+# Retain hard-process parton IDs so the SSC response analysis can distinguish
+# quark- and gluon-initiated jet-to-photon fakes.
+set /Herwig/Analysis/HwSim:SavePartons Yes
+
 set /Herwig/Analysis/HwSim:SaveReconstructed Yes
 
 set /Herwig/Analysis/HwSim:JetAlgorithm AntiKt

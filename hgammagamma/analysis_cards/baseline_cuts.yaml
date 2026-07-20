@@ -1,12 +1,17 @@
 analysis:
   name: baseline_cuts
   run_tag: run_02
+  # Require matching detector-response provenance in every campaign .dat file.
+  detector_response: ssc
   luminosity_fb: 100.0
   rate_factors:
     # K_ggH * BR(H -> gamma gamma) = 2.0 * 2.27e-3.
     signal_gg_h_aa: 0.00454
     # Replace with the chosen prompt diphoton K-factor when available.
     bkg_prompt_aa: 1.0
+    # GEM fake probabilities are already folded into the SSC analysis weights.
+    bkg_gamma_j: 1.0
+    bkg_dy_ee: 1.0
   cuts:
     - variable: n_selected_photons
       min: 2

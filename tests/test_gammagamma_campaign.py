@@ -1,3 +1,4 @@
+import io
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -8,6 +9,107 @@ from hgammagamma import run_gammagamma_campaign as campaign
 
 
 class GammaGammaCampaignRunCardTests(unittest.TestCase):
+    def test_default_samples_include_ssc_fake_background_modes(self) -> None:
+        samples = {sample.name: sample for sample in campaign.SAMPLES}
+
+        self.assertEqual(samples["signal_gg_h_aa"].response_mode, "genuine")
+        self.assertEqual(samples["bkg_prompt_aa"].response_mode, "genuine")
+        self.assertEqual(samples["bkg_gamma_j"].process, "p p > a j")
+        self.assertEqual(samples["bkg_gamma_j"].response_mode, "gammajet")
+        self.assertEqual(samples["bkg_dy_ee"].process, "p p > e+ e-")
+        self.assertEqual(samples["bkg_dy_ee"].response_mode, "dielectron")
+
+    def test_config_uses_ssc_response_executable_and_four_sample_default(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            cfg = campaign.parse_config(["--dry-run", "--no-herwig-module"])
+
+        self.assertEqual(cfg.detector_response, "ssc")
+        self.assertEqual(cfg.analysis_target, "HwSimPostAnalysis_gammagamma_SSC")
+        self.assertEqual(cfg.analysis_exe.name, "HwSimPostAnalysis_gammagamma_SSC")
+        self.assertEqual(
+            cfg.run_samples,
+            "signal_gg_h_aa,bkg_prompt_aa,bkg_gamma_j,bkg_dy_ee",
+        )
+
+    def test_none_response_uses_legacy_executable_and_environment_default(self) -> None:
+        with patch.dict("os.environ", {"DETECTOR_RESPONSE": "none"}, clear=True):
+            cfg = campaign.parse_config(["--dry-run", "--no-herwig-module"])
+
+        self.assertEqual(cfg.detector_response, "none")
+        self.assertEqual(cfg.analysis_target, "HwSimPostAnalysis_gammagamma")
+        self.assertEqual(cfg.analysis_exe.name, "HwSimPostAnalysis_gammagamma")
+
+    def test_invalid_environment_detector_response_is_rejected(self) -> None:
+        with patch.dict("os.environ", {"DETECTOR_RESPONSE": "typo"}, clear=True):
+            with patch("sys.stderr", new=io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    campaign.parse_config(["--dry-run", "--no-herwig-module"])
+
+    def test_ssc_analysis_command_includes_response_mode_and_seed(self) -> None:
+        cfg = campaign.parse_config(["--dry-run", "--no-herwig-module"])
+        sample = next(sample for sample in campaign.SAMPLES if sample.name == "bkg_gamma_j")
+
+        command = campaign.analysis_command(sample, Path("roots.input"), 1234, cfg)
+
+        self.assertIn("--response-mode", command)
+        self.assertIn("gammajet", command)
+        self.assertIn("--seed", command)
+        self.assertIn(1234, command)
+
+    def test_none_analysis_command_omits_ssc_only_options(self) -> None:
+        cfg = campaign.parse_config(
+            ["--dry-run", "--no-herwig-module", "--detector-response", "none"]
+        )
+        sample = next(sample for sample in campaign.SAMPLES if sample.name == "signal_gg_h_aa")
+
+        command = campaign.analysis_command(sample, Path("roots.input"), 1234, cfg)
+
+        self.assertNotIn("--response-mode", command)
+        self.assertNotIn("--seed", command)
+        self.assertEqual(command[0], cfg.analysis_exe)
+
+    def test_none_response_accepts_genuine_samples_and_rejects_fake_samples(self) -> None:
+        cfg = campaign.parse_config(
+            [
+                "--dry-run",
+                "--no-herwig-module",
+                "--detector-response",
+                "none",
+                "--run-samples",
+                "signal_gg_h_aa,bkg_prompt_aa",
+            ]
+        )
+        campaign.validate_detector_response(cfg, campaign.selected_samples(cfg))
+
+        fake_cfg = campaign.parse_config(
+            [
+                "--dry-run",
+                "--no-herwig-module",
+                "--detector-response",
+                "none",
+                "--run-samples",
+                "bkg_gamma_j,bkg_dy_ee",
+            ]
+        )
+        with self.assertRaisesRegex(SystemExit, "cannot model the photon fakes.*bkg_gamma_j,bkg_dy_ee"):
+            campaign.validate_detector_response(fake_cfg, campaign.selected_samples(fake_cfg))
+
+    def test_module_takes_precedence_over_exported_herwig_prefix(self) -> None:
+        with patch.dict("os.environ", {"HERWIG_ENV": "/home/shared/Herwig"}, clear=False):
+            cfg = campaign.parse_config(["--herwig-module", "herwig/stable"])
+
+        self.assertEqual(cfg.herwig_module, "herwig/stable")
+        self.assertIsNone(cfg.herwig_env)
+
+    def test_exported_herwig_directory_uses_linux_module_default(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            with patch.dict("os.environ", {"HERWIG_ENV": tmpdir}, clear=True):
+                with patch.object(campaign.platform, "system", return_value="Linux"):
+                    cfg = campaign.parse_config([])
+
+        self.assertEqual(cfg.herwig_module, "herwig/stable")
+        self.assertIsNone(cfg.herwig_env)
+
     def test_rewrite_run_card_include_updates_pdf_assignments(self) -> None:
         stale_include = """      GRIDPACK = .FALSE.
 
@@ -71,7 +173,7 @@ class GammaGammaCampaignRunCardTests(unittest.TestCase):
             def fake_run(args, cfg):
                 include_path.write_text("      PDLABEL = 'nn23lo1'\n")
 
-            with patch.object(campaign, "run", side_effect=fake_run) as run_mock:
+            with patch.object(campaign, "run_runtime_command", side_effect=fake_run) as run_mock:
                 campaign.generate_run_card_include(process_dir, SimpleNamespace(dry_run=False))
 
             run_mock.assert_called_once_with(["make", "-C", source_dir, "run_card.inc"], SimpleNamespace(dry_run=False))

@@ -352,6 +352,10 @@ int main(int argc, char* argv[]) {
 
   outdat << "# HwSimPostAnalysis_gammagamma summary" << endl;
   outdat << "input " << infile << endl;
+  outdat << "analysis legacy_direct_photons" << endl;
+  outdat << "detector_response none" << endl;
+  outdat << "response_mode genuine" << endl;
+  outdat << "weighted_hypotheses 0" << endl;
   outdat << "events_read " << (maxevents - minevents) << endl;
   outdat << "events_with_two_selected_photons " << selected_events << endl;
   outdat << "weight_scale " << setprecision(12) << weight_scale << endl;

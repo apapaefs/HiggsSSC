@@ -8,6 +8,10 @@ h -> gamma gamma
 
 using the `loop_sm_haa` MadGraph5_aMC@NLO model in this repository.
 
+For the exact SSC/GEM smearing, efficiency, fake-rate, configuration,
+provenance, validation, and limitation reference, see
+[`SSC_DETECTOR_RESPONSE.md`](SSC_DETECTOR_RESPONSE.md).
+
 ## Get The Repository
 
 Start by cloning the repository onto the machine where you will run the
@@ -50,7 +54,8 @@ NLO:  NNPDF40_nlo_as_01180_qed      LHAPDF ID 335900
 NNLO: NNPDF40_nnlo_as_01180_qed     LHAPDF ID 336100
 ```
 
-The LO gamma-gamma campaign enforces `pdlabel = lhapdf`, `lhaid = 331900` in
+The LO gamma-gamma campaign enforces `pdlabel = pdlabel1 = pdlabel2 = lhapdf`
+and `lhaid = 331900` in
 MadGraph5 run cards and uses `NNPDF40_lo_as_01180` for Herwig. The higher-order
 `HJMiNNLO` card uses the NNLO QED set.
 
@@ -322,6 +327,33 @@ hgammagamma/make_gammagamma_report.py
 The first script generates and analyzes samples.  The second script combines
 the analysis outputs into stacked plots and a small HTML webpage.
 
+### Detector-Response Option
+
+The campaign defaults to the new SSC/GEM response:
+
+```bash
+python3 hgammagamma/run_gammagamma_campaign.py \
+  --detector-response ssc \
+  --run-tag run_02_ssc
+```
+
+The original unsmeared HwSim analysis remains available for genuine-photon
+signal and prompt diphoton samples:
+
+```bash
+python3 hgammagamma/run_gammagamma_campaign.py \
+  --detector-response none \
+  --run-samples signal_gg_h_aa,bkg_prompt_aa \
+  --run-tag run_02_legacy
+```
+
+Use separate tags.  `none` selects the original analysis and is not an
+apples-to-apples SSC selection with only the random energy smear removed: its
+acceptance and cuts are also the legacy ones.  The campaign rejects gamma+jet
+and Drell--Yan samples under `none` because the legacy executable has no fake
+response.  See [`SSC_DETECTOR_RESPONSE.md`](SSC_DETECTOR_RESPONSE.md) for the
+precise semantics.
+
 ### What The Campaign Does
 
 For each enabled sample, the campaign script:
@@ -335,12 +367,15 @@ For each enabled sample, the campaign script:
 7. finds the generated LHE file;
 8. writes a Herwig input file from `HW-template.in`;
 9. runs `Herwig read` and `Herwig run`;
-10. runs `HwSimPostAnalysis_gammagamma`;
+10. runs the post-analysis selected by `--detector-response`, with the SSC
+    response topology assigned to the sample when `ssc` is selected;
 11. writes `.top`, `.dat`, `.evp`, and `_var.root` analysis outputs.
 
-At this stage there is no smearing and no internal fake-photon construction.
-Reducible backgrounds can be generated as samples, but jet-to-photon and
-lepton-to-photon fake shapes still need the later fake-photon analysis code.
+The SSC post-analysis applies GEM electromagnetic and jet resolutions,
+fiducial acceptance, object efficiencies, and weighted jet-to-photon and
+electron-to-photon fake probabilities.  HwSim also saves the hard-process
+partons so that a reconstructed fake jet can use the separate GEM quark- and
+gluon-jet rates.
 
 ### Setup Checklist
 
@@ -414,7 +449,7 @@ python3 hgammagamma/run_gammagamma_campaign.py \
   --run-samples signal_gg_h_aa
 ```
 
-To check both default samples:
+To check all default samples:
 
 ```bash
 python3 hgammagamma/run_gammagamma_campaign.py \
@@ -427,6 +462,8 @@ The default enabled samples are:
 ```text
 signal_gg_h_aa  : g g > h [noborn=QCD], then h > a a
 bkg_prompt_aa   : p p > a a
+bkg_gamma_j     : p p > a j
+bkg_dy_ee       : p p > e+ e-
 ```
 
 ### Run A Tiny Smoke Test
@@ -447,11 +484,19 @@ python3 hgammagamma/run_gammagamma_campaign.py \
   --run-samples bkg_prompt_aa
 ```
 
-If both commands finish, the full chain is working.
+Finally test the two reducible backgrounds:
+
+```bash
+python3 hgammagamma/run_gammagamma_campaign.py \
+  --nevents 10 \
+  --run-samples bkg_gamma_j,bkg_dy_ee
+```
+
+If these commands finish, the full chain is working.
 
 ### Run The Default Campaign
 
-To run both the Higgs signal and the prompt diphoton background:
+To run the signal, prompt diphoton, photon-plus-jet, and Drell--Yan samples:
 
 ```bash
 python3 hgammagamma/run_gammagamma_campaign.py \
@@ -516,6 +561,15 @@ The `.top` files contain the histograms.  The `.dat` files contain the analysis
 summary, including the number of events read and the number of events with two
 selected photons.  The `_var.root` files contain the analysis tree.
 
+Rare fakes are represented by weighted exclusive hypotheses.  The tree
+enumerates zero-, one-, and (when both source objects pass kinematic and
+isolation acceptance) two-photon detector outcomes; their probabilities sum
+to one and their weights sum to the original event weight.  Events with only
+one accepted source retain their zero/one-photon outcomes.  This avoids the
+enormous event samples that a Bernoulli throw at a jet fake rate of order
+`1e-4` would require, while keeping both photon multiplicity and downstream
+efficiency normalization valid.
+
 ### Gamma Gamma Variables
 
 The `_var.root` tree stores:
@@ -531,10 +585,95 @@ variables[6] = deltaPhi_gg
 variables[7] = pt_gg
 variables[8] = y_gg
 variables[9] = n_selected_photons
-eventweight[0] = evweight * weight_scale
+eventweight[0] = evweight * weight_scale * responseweight[0]
 ```
 
 All transverse momenta and invariant masses are in GeV.
+
+The SSC tree also stores diagnostic branches:
+
+```text
+generatorweight[0] = evweight * weight_scale
+responseweight[0]  = exclusive detector-response probability
+photonorigin[0:2]  = 0 none, 1 genuine photon, 2 jet, 3 electron
+sourceevent[0]     = original HwSim chain entry
+```
+
+### SSC/GEM Detector Response
+
+The implementation is in:
+
+```text
+hgammagamma/LOAnalysis/Code/HwSimPostAnalysis_gammagamma_SSC.cc
+```
+
+It uses the [GEM Technical Design Report](https://lss.fnal.gov/archive/other/ssc/ssc-gem-tn-93-262.pdf)
+and the [GEM Higgs update](https://lss.fnal.gov/archive/other/calt-68-1856.pdf).
+Energies are smeared along the measured direction.  The electromagnetic
+resolution is
+
+```text
+sigma_E / E = 6%/sqrt(E) (barrel) or 8.5%/sqrt(E) (endcap)
+              (+ in quadrature) 0.4% (+ thermal and SSC pileup noise)
+```
+
+and the central-jet resolution is `60%/sqrt(E) (+) 4%`.  Forward jets use the
+GEM forward benchmark `200%/sqrt(E) (+) 6%`.  Scaling the full reconstructed
+jet four-vector preserves its direction and `m/E` while scaling its mass.  A
+jet promoted to a photon is treated as
+an isolated electromagnetic cluster and receives the EM response.
+
+The diphoton selection uses `pT > 20 GeV`, `0.1 < |eta| < 2.5`, the
+`1.01 < |eta| < 1.16` transition-region veto, and a coarse `DeltaR=0.4`
+photon--jet isolation veto.  Genuine photons use 90% shower ID and the GEM
+electron-veto acceptance (96% normally, 86% near the Z peak).  Electron and
+muon diagnostic efficiencies are 90% and `0.85*0.95 = 80.75%`.  GEM does not
+quote a universal offline jet efficiency, so the transparent baseline is 100%
+above threshold and is recorded as an assumption in every `.dat` file.
+
+The response modes are:
+
+```text
+genuine     two reconstructed photons, used by signal and prompt gamma gamma
+gammajet    one genuine photon plus one hard-jet fake
+dielectron  e+ and e- promoted to photons
+```
+
+For `gammajet`, the hard outgoing parton is matched to the reconstructed jet
+within `DeltaR=0.4`.  The analysis linearly interpolates GEM Table 13's
+mass-dependent quark and gluon fake probabilities.  If showering moves the
+jet outside the geometric matching radius, the unique colored Born parton in
+the gamma+jet record still supplies its quark/gluon flavor and the `.dat`
+summary records that fallback separately.  If an old HwSim file contains no
+hard partons, the configurable default is the conservative quark-jet rate.
+For `dielectron`,
+the tracker-veto probability per isolated EM cluster is 0.15% within a
+configurable 10 GeV window around the Z and 2% elsewhere.  Each electron must
+also pass the photon fiducial/isolation selection and the separate 90% EM
+shower-ID efficiency, so the event transfer factor is
+`(0.90 * electron_fake_rate)^2` at the defaults.  Electron reconstruction
+efficiency and the genuine-photon track-veto acceptance are not applied to
+this truth-electron transfer factor.
+
+The defaults can be varied when running the executable directly.  Useful
+options include:
+
+```text
+--seed N
+--photon-id-efficiency X
+--electron-efficiency X
+--muon-efficiency X
+--jet-efficiency X
+--jet-fake-scale X
+--electron-fake-scale X
+--near-z-half-width GEV
+--unmatched-jet-quark-fraction X
+--no-pileup-noise
+```
+
+The `.dat` output records all response settings, expected object counts before
+and after efficiencies, q/g matching counts, and the closure between the input
+and output-tree weight sums.
 
 ### Editing Samples
 
@@ -547,7 +686,7 @@ hgammagamma/run_gammagamma_campaign.py
 Near the top there is a list called `SAMPLES`.  Each entry has the form:
 
 ```python
-Sample(name, category, model, process, madspin_decay, weight_scale)
+Sample(name, category, model, process, madspin_decay, weight_scale, response_mode)
 ```
 
 The default entries are:
@@ -559,10 +698,16 @@ SIGNAL_GGH_TO_GAMMAGAMMA_WEIGHT = SIGNAL_GGH_K_FACTOR * YR4_BR_H_TO_GAMMAGAMMA
 
 Sample("signal_gg_h_aa", "Signal", "loop_sm_haa",
        "g g > h [noborn=QCD]", "h > a a",
-       SIGNAL_GGH_TO_GAMMAGAMMA_WEIGHT)
+       SIGNAL_GGH_TO_GAMMAGAMMA_WEIGHT, "genuine")
 
 Sample("bkg_prompt_aa", "Backgrounds", "sm",
-       "p p > a a", "", 1.0)
+       "p p > a a", "", 1.0, "genuine")
+
+Sample("bkg_gamma_j", "Backgrounds", "sm",
+       "p p > a j", "", 1.0, "gammajet")
+
+Sample("bkg_dy_ee", "Backgrounds", "sm",
+       "p p > e+ e-", "", 1.0, "dielectron")
 ```
 
 For the signal, MadSpin decays every generated Higgs boson to photons.  The MG5
@@ -581,20 +726,20 @@ the LHC Higgs Cross Section Working Group
 factor is a first-pass total cross-section correction; replace it later with a
 more precise prediction if needed.
 
-There are also commented entries for:
+There is also a commented entry for:
 
 ```text
 g g > a a [noborn=QCD]   loop-induced prompt continuum
-p p > a j                photon + jet reducible background
-p p > j j                dijet reducible background
-p p > e+ e-              electron fake background
 ```
 
-To enable a commented sample, remove the leading `#` and rerun the campaign.
+The full `p p > e+ e-` process includes both `Z` and virtual-photon Drell--Yan,
+which is required to model the continuum away from the on-shell Z peak.
 
-The last number, `weight_scale`, multiplies the event weights in the
-post-analysis.  For now this is the place to apply simple total normalization
-factors, fake-rate factors, or cross-section rescalings sample by sample.
+`weight_scale` multiplies the event weights in the post-analysis.  Use it for
+branching ratios, K-factors, or other sample-wide cross-section rescalings.
+Do not put the GEM jet/electron fake probabilities there: the SSC response
+analysis already applies them event by event.  The final field chooses the
+response mode.
 
 If you already produced signal `.top` and `.dat` files with `weight_scale = 1`,
 rerun the post-analysis or rerun the campaign so the `.dat` file records the
@@ -641,18 +786,33 @@ as `m_gg` is therefore plotted in:
 1 / GeV
 ```
 
-For non-density plots, the report normalizes each sample to:
+For non-density plots, the default `event_xsec` mode scales every histogram
+bin by:
+
+```text
+raw detector-response bin weight / sum_weight * cross section * weight_scale
+```
+
+where the cross section is read from the MG5 banner and the weights are read
+from the `.dat` and `.top` files.  Diphoton-only histograms therefore integrate
+to:
 
 ```text
 cross section * weight_scale * analysis efficiency
 ```
 
-where the cross section is read from the MG5 banner, and `weight_scale` and the
-analysis efficiency are read from the `.dat` file:
+with:
 
 ```text
 analysis efficiency = sum_diphoton_weight / sum_weight
 ```
+
+The exclusive photon-multiplicity histogram instead integrates to
+`cross section * weight_scale`, and its two-photon bin has the selected cross
+section.  This is
+the physically consistent normalization for the weighted zero-, one-, and
+two-photon outcomes.  `--normalization selected_xsec` remains available when
+an intentionally area-rescaled shape comparison is desired.
 
 To make non-density plots instead, use:
 
@@ -809,12 +969,15 @@ sample-directory names under `rate_factors`:
     signal_gg_h_aa: 0.00454
     bkg_prompt_aa: 1.0
     bkg_gamma_j: 1.0
-    bkg_jj: 1.0
+    bkg_dy_ee: 1.0
 ```
 
 The XGBoost mode uses the same sample discovery and normalization, but trains a
 binary signal-versus-background classifier and chooses a score threshold that
-maximizes the expected significance on the test split.  The example card is:
+maximizes the expected significance on the test split.  It trains only on the
+`n_selected_photons >= 2` response hypotheses; zero- and one-photon outcomes
+remain in the tree to preserve the input-weight normalization and multiplicity
+bookkeeping.  The example card is:
 
 ```text
 hgammagamma/analysis_cards/xgboost_baseline.yaml
@@ -833,8 +996,12 @@ analysis:
   xgboost:
     test_size: 0.35
     seed: 12345
-    max_events: 1000
 ```
+
+Leave `max_events` unset for a production classifier so the threshold scan and
+physical yields use representative full samples.  A finite value is useful
+only for quick development tests because it caps the rows loaded for training
+and validation.
 
 Run it with:
 
@@ -880,6 +1047,17 @@ python3 hgammagamma/run_gammagamma_campaign.py \
   --nevents 10000
 ```
 
+If the module reports that the clone-local MG5 launcher is missing, point the
+runner at the installed sibling checkout.  For the current `apapaefs` Timur
+workspace this is:
+
+```bash
+python3 hgammagamma/run_gammagamma_campaign.py \
+  --mg5-dir /home/apapaefs/Projects/MG5_aMC_v3_5_15 \
+  --detector-response ssc \
+  --nevents 10000
+```
+
 The runner loads `herwig/stable` automatically on Linux and `herwig/730` on
 macOS when `--herwig-env` is not set.  If you prefer to show the Herwig module
 choice explicitly, use:
@@ -919,7 +1097,8 @@ python3 hgammagamma/run_gammagamma_campaign.py \
 If the report script says it found no samples, check that the campaign produced
 matching `.top` and `.dat` files for the requested run tag.
 
-If a reducible background has zero diphoton events, remember that fake-photon
-construction is not implemented yet.  That is expected for `j j` and
-`e+ e-` until the analysis code learns how to reinterpret jets or leptons as
-photons.
+If a reducible background has zero diphoton weight, inspect its `.dat` file.
+Check `response_mode`, fiducial object counts, and (for `gammajet`)
+`hard_partons_available` and the q/g matching counters.  Existing ROOT files
+made before `SavePartons Yes` still work with the recorded fallback jet fake
+mixture.

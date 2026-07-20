@@ -124,6 +124,45 @@ class GammaGammaReaderTests(unittest.TestCase):
         self.assertEqual(features[0], [125.0, 60.0, 0.2, 50.0, -0.3, 1.7, 3.1, 20.0, 0.1, 2.0])
         self.assertEqual(features[1], [124.0, 45.0, -1.2, 30.0, 0.4, 2.4, 2.9, 12.0, -0.5, 2.0])
 
+    def test_selected_only_skips_weighted_response_complements(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "weighted_response_var.root"
+            write_gamma_gamma_varfile(
+                path,
+                [
+                    ([-999.0] * 9 + [0.0], 0.999),
+                    ([125.0, 60.0, 0.2, 50.0, -0.3, 1.7, 3.1, 20.0, 0.1, 2.0], 0.001),
+                    ([126.0, 55.0, 0.1, 45.0, -0.2, 1.8, 3.0, 18.0, 0.0, 2.0], 0.002),
+                ],
+            )
+
+            features, labels, weights = read_root_varfiles.read_ROOT_varfile(
+                path,
+                sample_id=0,
+                selected_only=True,
+                max_events=1,
+            )
+
+        self.assertEqual(len(features), 1)
+        self.assertEqual(features[0][0], 125.0)
+        self.assertEqual(labels, [0])
+        self.assertEqual(weights, [0.001])
+
+    def test_full_weight_sum_keeps_response_complements(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "weighted_response_var.root"
+            write_gamma_gamma_varfile(
+                path,
+                [
+                    ([-999.0] * 9 + [0.0], 0.999),
+                    ([125.0] + [-999.0] * 8 + [2.0], 0.001),
+                ],
+            )
+
+            total = read_root_varfiles.sum_ROOT_varfile_weights(path)
+
+        self.assertAlmostEqual(total, 1.0)
+
 
 class CutFlowTests(unittest.TestCase):
     def test_progress_bar_writes_current_sample_and_count(self) -> None:
@@ -361,6 +400,34 @@ class CutFlowTests(unittest.TestCase):
         self.assertEqual(row["selected_cross_section_pb"], 0.25)
         self.assertEqual(row["expected_events"], 2500.0)
 
+    def test_xgboost_empty_selected_sample_reports_zero_yield(self) -> None:
+        from xgboost_root_varfiles_module import _summarize_full_sample
+
+        class ModelMustNotRun:
+            def predict_proba(self, rows):
+                raise AssertionError("predict_proba should not run for an empty sample")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "empty_selected_var.root"
+            write_gamma_gamma_varfile(path, [([-999.0] * 9 + [0.0], 1.0)])
+            sample = {
+                "sample": "rare_fake",
+                "category": "Backgrounds",
+                "input_file": str(path),
+                "xsec_fb": 1000.0,
+                "rate_factor": 1.0,
+                "effective_xsec_fb": 1000.0,
+                "normalisation_weight": 1.0,
+            }
+
+            row = _summarize_full_sample(
+                ModelMustNotRun(), sample, label=0, threshold=0.5, luminosity=10.0
+            )
+
+        self.assertEqual(row["entries_read"], 0)
+        self.assertEqual(row["selected_entries"], 0)
+        self.assertEqual(row["expected_events"], 0.0)
+
     def make_report_sample(
         self,
         name: str,
@@ -381,6 +448,11 @@ class CutFlowTests(unittest.TestCase):
             name=name,
             label=name,
             category=category,
+            analysis_name="SSC_GEM_weighted_response",
+            detector_response="ssc",
+            response_mode="genuine",
+            weighted_hypotheses=True,
+            metadata_inferred=False,
             sample_dir=Path("/tmp"),
             top_file=Path("/tmp/sample.top"),
             dat_file=Path("/tmp/sample.dat"),
@@ -435,6 +507,71 @@ class CutFlowTests(unittest.TestCase):
         self.assertEqual(signal_call["lower"], [3.0, 7.0, 7.0])
         self.assertEqual(signal_call["upper"], [53.0, 57.0, 57.0])
         self.assertEqual(signal_call["kwargs"]["label"], "signal x5")
+
+    def test_report_defaults_to_event_cross_section_normalization(self) -> None:
+        from hgammagamma.make_gammagamma_report import build_parser
+
+        args = build_parser().parse_args([])
+
+        self.assertEqual(args.normalization, "event_xsec")
+
+    def test_report_response_provenance_supports_historical_and_explicit_metadata(self) -> None:
+        from hgammagamma.make_gammagamma_report import response_provenance
+
+        old_legacy = response_provenance({})
+        old_ssc = response_provenance(
+            {"analysis": "SSC_GEM_weighted_response", "response_mode": "gammajet"}
+        )
+        explicit = response_provenance(
+            {
+                "analysis": "SSC_GEM_weighted_response",
+                "detector_response": "ssc",
+                "response_mode": "dielectron",
+                "weighted_hypotheses": 1.0,
+            }
+        )
+        future = response_provenance({"analysis": "future_detector"})
+
+        self.assertEqual(old_legacy["detector_response"], "none")
+        self.assertTrue(old_legacy["metadata_inferred"])
+        self.assertEqual(old_ssc["detector_response"], "ssc")
+        self.assertEqual(old_ssc["response_mode"], "gammajet")
+        self.assertTrue(old_ssc["metadata_inferred"])
+        self.assertEqual(explicit["detector_response"], "ssc")
+        self.assertFalse(explicit["metadata_inferred"])
+        self.assertEqual(future["detector_response"], "unknown")
+
+    def test_analysis_detector_response_guard_rejects_mismatched_inputs(self) -> None:
+        from analyze_lo_varfiles import SampleInfo, validate_detector_response
+
+        sample = SampleInfo(
+            name="signal",
+            category="Signal",
+            sample_dir=Path("/tmp"),
+            var_file=Path("/tmp/sample.root"),
+            dat_file=Path("/tmp/sample.dat"),
+            cross_section_pb=1.0,
+            cross_section_error_pb=None,
+            weight_scale=1.0,
+            events_read=1.0,
+            sum_weight=1.0,
+            detector_response="ssc",
+        )
+
+        self.assertEqual(validate_detector_response([sample], "ssc"), "ssc")
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            validate_detector_response([sample], "none")
+
+    def test_fallback_yaml_parser_preserves_none_detector_profile(self) -> None:
+        from analyze_lo_varfiles import _parse_simple_yaml
+
+        config = _parse_simple_yaml(
+            "analysis:\n"
+            "  name: legacy_control\n"
+            "  detector_response: none\n"
+        )
+
+        self.assertEqual(config["analysis"]["detector_response"], "none")
 
 
 if __name__ == "__main__":
