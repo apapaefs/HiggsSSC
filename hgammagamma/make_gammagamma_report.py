@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build an HTML report from LO h -> gamma gamma analysis .top files.
+"""Build an HTML report from h -> gamma gamma analysis .top files.
 
 The report overlays transparent per-sample histograms for the default density
 plots, with each histogram normalized to unit area.  With ``--no-density``,
@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import csv
 import html
+import json
 import math
 import os
 import re
@@ -141,7 +142,8 @@ def build_parser() -> argparse.ArgumentParser:
             "plots; non-default values are shown in the legend."
         ),
     )
-    parser.add_argument("--title", default="LO h -> gamma gamma analysis")
+    parser.add_argument("--title", default=None, help="default inferred from LO or HO campaign provenance")
+    parser.add_argument("--simulation-label", help="override the plot's simulation label")
     parser.add_argument("--allow-missing-xsec", action="store_true")
     return parser
 
@@ -265,6 +267,16 @@ def response_provenance(dat: dict[str, float | str]) -> dict[str, str | bool]:
 
 
 def parse_cross_section(sample_dir: Path, run_tag: str) -> tuple[float, float | None]:
+    normalization = sample_dir / f"normalization-{run_tag}.json"
+    if normalization.exists():
+        data = json.loads(normalization.read_text())
+        if data["run_tag"] != run_tag or data["sample"] != sample_dir.name:
+            raise ValueError(f"normalization provenance mismatch in {normalization}")
+        xsec = float(data["cross_section_pb"])
+        error = data.get("cross_section_error_pb")
+        if not math.isfinite(xsec) or xsec <= 0:
+            raise ValueError(f"invalid signed cross section in {normalization}")
+        return xsec, float(error) if error is not None else None
     banner = sample_dir / "mg5_process" / "Events" / run_tag / f"{run_tag}_tag_1_banner.txt"
     if banner.exists():
         text = banner.read_text(errors="ignore")
@@ -402,6 +414,16 @@ def step_values(values: Sequence[float]) -> list[float]:
 
 def scaled_histogram(histogram: Histogram, sample: SampleResult, normalization: str, density: bool) -> list[float]:
     total = sum(histogram.y)
+    if not density and normalization == "event_xsec":
+        # An NLO histogram can have a zero or negative selected sum even
+        # though its inclusive denominator is positive. Preserve every bin.
+        if sample.sum_weight <= 0:
+            raise ValueError(f"non-positive signed normalization for {sample.name}")
+        return [value / sample.sum_weight * sample.cross_section_pb * sample.weight_scale
+                for value in histogram.y]
+    if total <= 0 and any(histogram.y) and (density or normalization == "unit_area"):
+        raise ValueError(f"cannot unit-normalize non-positive signed histogram for {sample.name}; "
+                         "use --no-density --normalization event_xsec")
     if total <= 0:
         return [0.0 for _ in histogram.y]
 
@@ -410,9 +432,6 @@ def scaled_histogram(histogram: Histogram, sample: SampleResult, normalization: 
     elif normalization == "selected_xsec":
         target = sample.selected_cross_section_pb
         values = [value / total * target for value in histogram.y]
-    elif normalization == "event_xsec":
-        denominator = sample.sum_weight if sample.sum_weight > 0 else total
-        values = [value / denominator * sample.cross_section_pb * sample.weight_scale for value in histogram.y]
     else:
         values = [value / total for value in histogram.y]
 
@@ -472,9 +491,10 @@ def publication_color(sample: SampleResult, background_index: int) -> str:
     return background_colors[background_index % len(background_colors)]
 
 
-def add_publication_labels(ax, title: str, normalization: str, density: bool) -> None:
+def add_publication_labels(ax, title: str, normalization: str, density: bool,
+                           simulation_label: str = "LO simulation", energy_tev: float = 40.) -> None:
     ax.text(0.06, 0.94, "SSCwf?", transform=ax.transAxes, ha="left", va="top", fontweight="bold", fontstyle="italic", fontsize=14)
-    ax.text(0.06, 0.875, r"LO simulation, $\sqrt{s}=40$ TeV", transform=ax.transAxes, ha="left", va="top", fontsize=10)
+    ax.text(0.06, 0.875, simulation_label + rf", $\sqrt{{s}}={energy_tev:g}$ TeV", transform=ax.transAxes, ha="left", va="top", fontsize=10)
     if title == "diphoton invariant mass":
         ax.text(0.06, 0.815, r"$H\rightarrow\gamma\gamma$", transform=ax.transAxes, ha="left", va="top", fontsize=10)
     if density:
@@ -492,6 +512,8 @@ def plot_histogram(
     normalization: str,
     density: bool,
     signal_scale: float = 1.0,
+    simulation_label: str = "LO simulation",
+    energy_tev: float = 40.,
 ) -> dict[str, str | float]:
     plt = ensure_matplotlib(output_dir)
     meta = PLOT_META.get(title, PlotMeta(slugify(title), title.title(), title, ""))
@@ -555,6 +577,7 @@ def plot_histogram(
         for bin_index, x in enumerate(x_values):
             if edges[bin_index] < plot_x_max and edges[bin_index + 1] > plot_x_min:
                 visible_heights.append(tops[bin_index])
+                visible_heights.append(sample_bottoms[bin_index])
             rows.append(
                 {
                     "plot": meta.slug,
@@ -595,9 +618,10 @@ def plot_histogram(
     ax.minorticks_on()
     ax.tick_params(which="both", direction="in", top=True, right=True)
     ymax = max(visible_heights) if visible_heights else (max(bottoms) if bottoms else 0.0)
-    if ymax > 0:
-        ax.set_ylim(0.0, ymax * 1.35)
-    add_publication_labels(ax, title, normalization, density)
+    ymin = min([0., *visible_heights])
+    if ymax > 0 or ymin < 0:
+        ax.set_ylim(ymin * 1.15, ymax * 1.35 if ymax > 0 else abs(ymin) * 0.15)
+    add_publication_labels(ax, title, normalization, density, simulation_label, energy_tev)
     ax.legend(frameon=False, loc="upper right", handlelength=1.6, borderaxespad=0.6)
     fig.tight_layout()
 
@@ -949,6 +973,16 @@ def main(argv: Sequence[str]) -> int:
     if not samples:
         die(f"no samples with .top/.dat files found under {analysis_root}")
 
+    campaigns = [json.loads((sample.sample_dir / "campaign.json").read_text())
+                 for sample in samples if (sample.sample_dir / "campaign.json").exists()]
+    simulation_label = args.simulation_label or ("Higher-order simulation" if campaigns else "LO simulation")
+    energies = {2 * float(data["ebeam_gev"]) / 1000 for data in campaigns}
+    if len(energies) > 1:
+        die("cannot combine different beam energies in one report")
+    energy_tev = next(iter(energies), 40.)
+    if args.title is None:
+        args.title = ("Higher-order" if campaigns else "LO") + " h -> gamma gamma analysis"
+
     log(f"Loaded {len(samples)} samples")
     detector_responses = sorted({sample.detector_response for sample in samples})
     if len(detector_responses) > 1:
@@ -973,6 +1007,8 @@ def main(argv: Sequence[str]) -> int:
             args.normalization,
             density=not args.no_density,
             signal_scale=args.signal_scale,
+            simulation_label=simulation_label,
+            energy_tev=energy_tev,
         )
         for title in titles
     ]

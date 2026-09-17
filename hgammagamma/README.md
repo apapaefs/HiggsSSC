@@ -12,6 +12,11 @@ For the exact SSC/GEM smearing, efficiency, fake-rate, configuration,
 provenance, validation, and limitation reference, see
 [`SSC_DETECTOR_RESPONSE.md`](SSC_DETECTOR_RESPONSE.md).
 
+For POWHEG HJMiNNLO + Herwig signal and MadGraph5 MC@NLO + Herwig
+backgrounds using the same response, see the
+[`HOAnalysis` campaign guide](HOAnalysis/README.md). Its runner is
+`run_gammagamma_ho_campaign.py`; the default stage prepares cards only.
+
 ## Get The Repository
 
 Start by cloning the repository onto the machine where you will run the

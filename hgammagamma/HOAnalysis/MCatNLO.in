@@ -1,0 +1,6 @@
+# Required by the HERWIGPP subtraction terms in MG5_aMC@NLO 3.5.15.
+# From Herwig 7.3 share/Herwig/LHE-MCatNLO.in.
+set /Herwig/Shower/KinematicsReconstructor:InitialInitialBoostOption LongTransBoost
+set /Herwig/Shower/KinematicsReconstructor:ReconstructionOption General
+set /Herwig/Shower/KinematicsReconstructor:InitialStateReconOption Rapidity
+set /Herwig/Shower/ShowerHandler:SpinCorrelations No

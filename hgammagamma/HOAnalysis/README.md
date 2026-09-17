@@ -1,13 +1,185 @@
-# Higher-Order Gamma-Gamma Signal Setup
+# Higher-Order Gamma-Gamma Campaign
 
-This directory records the higher-order signal workflow for the future
-`hgammagamma` analysis. The first target is inclusive gluon-fusion Higgs
-production with `POWHEG-BOX-V2/HJ/HJMiNNLO`, showered later with Herwig 7 and
-an `H -> gamma gamma` decay setup.
+The campaign runner is [`../run_gammagamma_ho_campaign.py`](../run_gammagamma_ho_campaign.py).
+It showers the existing POWHEG HJMiNNLO signal with Herwig, forces
+`H -> gamma gamma`, and generates the three backgrounds used in the LO
+detector-response study with MadGraph5_aMC@NLO and Herwig. All four samples
+use the same HwSim reconstruction and
+[SSC/GEM response analysis](../SSC_DETECTOR_RESPONSE.md).
+The checked local configuration, test results and remaining validation work
+are recorded in [`VALIDATION.md`](VALIDATION.md).
+The synchronized Timur checkout, input paths, and 100,000-event command
+are documented in [`TIMUR.md`](TIMUR.md).
 
 `HJ/HJMiNNLO` is built from a Higgs-plus-jet process, but the MiNNLOPS
 construction makes it appropriate as an inclusive `gg -> H` NNLO+PS signal
 sample. Do not treat it as requiring an analysis jet.
+
+## Processes And Conventions
+
+| Sample | Hard process and matching | Hard/shower PDF | Response |
+| --- | --- | --- | --- |
+| `signal_gg_h_aa` | POWHEG HJMiNNLO, followed by Herwig `h -> gamma gamma` | NNPDF40_nnlo_as_01180_qed, 336100 | genuine |
+| `bkg_prompt_aa` | `p p > a a [QCD]`, MC@NLO | NNPDF40_nlo_as_01180_qed, 335900 | genuine |
+| `bkg_gamma_j` | `p p > a j [QCD]`, MC@NLO | same NLO PDF | gammajet |
+| `bkg_dy_ee` | `p p > e+ e- [QCD]`, MC@NLO | same NLO PDF | dielectron |
+
+Defaults are proton beams of 20 TeV each, `mH = 125 GeV`, the Herwig
+angular-ordered shower, hadronization and the installed underlying-event
+tune. The MPI PDF is retained from that tune. The backgrounds use
+`loop_sm-no_b_mass` and five-flavour `p`/`j` definitions, including `b` and
+`b~`, consistently with the NLO PDF. This explicitly differs from the old
+LO cards' four-light-flavour parton lists. Drell--Yan includes both the
+virtual photon and Z contributions and their interference.
+
+MG5 uses `parton_shower = HERWIGPP`, `ickkw = 0`, and `event_norm = average`.
+`--parton` postpones the shower but retains MC@NLO subtraction terms; this
+is not a fixed-order event sample. The background template applies the
+recoil and spin settings from Herwig 7.3's distributed `LHE-MCatNLO.in`.
+The POWHEG template follows `LHE-POWHEG.in` and uses SCALUP as a shower veto.
+Both preserve signed variable weights and forbid recycling the LHE file.
+This is the external-LHE angular-ordered shower interface; no additional
+truncated-shower implementation is supplied here.
+
+Background central scales are explicitly `muR = muF = HT/2`
+(`dynamical_scale_choice = 3`), with MG5 scale-reweight information retained
+in the LHE. The current HwSim/response output analyzes the nominal weight;
+it does not yet propagate the full scale/PDF variation ensemble.
+
+NLO prompt-photon samples need an infrared-safe definition. The starting
+generation settings are smooth-cone isolation (`gamma_is_j = False`,
+`ptgmin = 10 GeV`, `R0gamma = 0.4`, `epsgamma = 1`, `xn = 1`, `isoEM = True`),
+`|eta| < 6`, anti-kt jets with R = 0.4, and a 10 GeV Born-jet threshold
+only for gamma+jet. There is no generation jet threshold for gamma-gamma
+or Drell--Yan. Drell--Yan has `pT(l) > 10 GeV` and `m(ll) > 30 GeV`.
+Generation cuts are configurable with `--gen-*` and `--isolation-*`.
+Check cut and isolation dependence before using the results for physics:
+the smooth-cone definition is distinct from the GEM jet-based isolation
+proxy, and photon fragmentation contributions are not included.
+
+The loop-induced `gg -> gamma gamma` box sample was disabled in the LO
+campaign and remains separate from the NLO quark-initiated continuum.
+Dijet double fakes are not enabled. Gamma+jet retains the existing
+single-jet fake choice and quark/gluon matching model, even with an extra
+NLO parton; its flavour and multiple-jet ambiguities remain detector-model
+systematics. See the response reference for its limitations.
+
+## Prepare And Run
+
+Run these commands from the repository root. The default `prepare` stage
+writes cards and a manifest without starting generators:
+
+```bash
+python3 hgammagamma/run_gammagamma_ho_campaign.py \
+  --run-tag ho_run_01 --nevents 10000 --nb-core 4 \
+  --herwig-module herwig/stable \
+  --signal-lhe "$PWD/hgammagamma/HOAnalysis/runs/ho_run_01/powheg/powheg-hjminnlo-merged.lhe"
+```
+
+For the signal, first generate LHE files with the existing wrapper described
+below, or supply an existing complete merged file:
+
+```bash
+python3 hgammagamma/run_powheg_hjminnlo.py \
+  --nevents 10000 --jobs 4 --herwig-module herwig/stable \
+  --run-dir "$PWD/hgammagamma/HOAnalysis/runs/ho_run_01/powheg"
+```
+
+Then run the signal and all three backgrounds:
+
+```bash
+python3 hgammagamma/run_gammagamma_ho_campaign.py \
+  --stage all --run-tag ho_run_01 --nevents 10000 --nb-core 4 \
+  --herwig-module herwig/stable \
+  --signal-lhe "$PWD/hgammagamma/HOAnalysis/runs/ho_run_01/powheg/powheg-hjminnlo-merged.lhe"
+```
+
+Use the same runtime options at preparation and execution. On macOS use
+`--herwig-module herwig/730`, or replace the module option with
+`--herwig-env /path/to/Herwig/prefix` (an activation script also works).
+`--no-herwig-module` uses the current environment. Select a compatible
+MG5 Python with `--mg5-python`; Python 3.11 needs the `six` package. If an
+activation script points to a removed compiler, explicitly set
+`--mg5-fortran /path/to/gfortran --mg5-cxx /path/to/g++`. These overrides
+also replace FC/F77/CXX after activation. `--analysis-cxx` selects a compiler
+compatible with ROOT; the macOS default is Apple clang.
+MG5 exports dependencies internally by default so that CutTools/IREGI can
+be rebuilt in the process directory after a compiler upgrade. A consistent
+site installation can use `--mg5-dependencies external` to share those libraries.
+The runner adds the missing `external virtgranny_red` declaration to the
+exported MG5 3.5.15 `genps_fks.f`, needed by gfortran 16. This declaration
+does not change its phase-space algorithm or modify the shared MG5 source.
+It also resolves `fastjet-config` and `lhapdf-config` inside the selected
+runtime and records their absolute paths in `cards/runtime-*.mg5`.
+For resumed exports it also updates these paths in the process-local
+`Cards/amcatnlo_configuration.txt`, which MG5 reloads at launch.
+
+For a first test, use a separate tag with `--nevents 30`. The signal may
+consume a prefix of a larger merged file; its reference cross section is
+calculated from the complete LHE sample. NLO integration still takes time
+even when requesting few events. `--run-samples backgrounds` selects only
+the three backgrounds; individual names or comma-separated lists also work.
+
+Other stages are `build` (MG5 process export only), `generate` (background
+LHE generation and signal LHE validation), `shower`, and `analyze`.
+`--dry-run` shows the selected stages without writing files. To continue a
+campaign, repeat the identical configuration with `--resume`; completed
+stages are reused. Changed physics or runtime configuration requires a new
+tag or output directory. Existing partial ROOT shower products are preserved
+and are never silently overwritten; inspect them before choosing a new run.
+
+Outputs live under `HOAnalysis/runs/RUN_TAG/{Signal,Backgrounds}/events/SAMPLE/`.
+Each sample has its generator cards, logs, `campaign.json`, Herwig ROOT
+files, analysis `.dat`/`.top`/`_var.root` outputs, and
+`normalization-RUN_TAG.json`. `--output-dir` can relocate the campaign.
+The shared analysis executable is built from `LOAnalysis/Code`; the LO
+campaign directories and their results are not used as HO outputs.
+
+## Normalization And Reports
+
+The signal LHE must contain one undecayed status-1 Higgs per event, the
+requested beam energy, and the NNLO PDF. Herwig selects only the diphoton
+decay with a unit proposal branching fraction. The physical
+`BR(H -> gamma gamma) = 0.00227` is applied once by the response analysis
+(`--higgs-br` overrides it). No LO signal K-factor is used. Backgrounds
+have unit extra weight scale.
+
+The LHE checker records positive/negative weight sums, sum of squared
+weights, effective event count, beam/PDF and matching provenance, and rejects
+incomplete files or mismatched inputs. HJMiNNLO can leave XSECUP and PDF IDs
+as `-1` in `<init>` with `IDWTUP = -4`. In that case the signed mean XWGTUP
+sets the production cross section, with its sampling error, and the PDF IDs
+come from the embedded POWHEG card. It never uses the absolute-weight sum as
+the physical cross section. For MG5, the integrated `<init>` cross section
+is used. The post-analysis additionally records negative-weight diagnostics
+and checks response-hypothesis weight closure.
+
+Generate the usual report using the HO campaign as its analysis root:
+
+```bash
+python3 hgammagamma/make_gammagamma_report.py \
+  --analysis-root hgammagamma/HOAnalysis/runs/ho_run_01 \
+  --run-tag ho_run_01 \
+  --output-dir hgammagamma/HOAnalysis/plots/ho_run_01 \
+  --no-density --normalization event_xsec
+```
+
+The report reads the HO normalization sidecars rather than requiring a
+MadGraph LO banner. The selected rate is
+`sigma_production * weight_scale * sum_selected_signed_weight / sum_signed_weight`.
+Small samples can have negative histogram bins; increasing statistics is
+necessary before interpreting efficiencies or distributions. Existing LO
+analysis cards with K-factors, or classifiers requiring positive training
+weights, should not be reused blindly for these samples.
+
+Configuration references are the installed Herwig 7.3 LHE examples and the
+MG5 3.5.15 `Template/NLO/Cards/run_card.dat` and
+`Template/NLO/MCatNLO/Scripts/MCatNLO_MadFKS_HERWIGPP.Script`.
+See also the matching discussion in the
+[MG5_aMC@NLO FAQ](https://amcatnlo.web.cern.ch/list_detailed2.htm)
+(its old Python/platform instructions do not apply to MG5 3.5.15),
+the [Herwig 7 release paper](https://arxiv.org/abs/1512.01178), and the
+[smooth-cone isolation definition](https://arxiv.org/abs/hep-ph/9801442).
 
 ## What This Compiles
 
@@ -311,10 +483,9 @@ before launching a large production run.
 
 ## Notes For The Gamma-Gamma Analysis
 
-`HJMiNNLO` generates the Higgs production process. The `H -> gamma gamma`
-decay should be handled in the later shower/decay step, or by a controlled
-post-processing step, and the final normalization should include
-`BR(H -> gamma gamma)` exactly once.
+`HJMiNNLO` generates the Higgs production process. The HO campaign runner
+handles `H -> gamma gamma` in Herwig and includes the physical branching
+ratio once in the response analysis, as specified above.
 
 For rate comparisons, do not apply the simple LO `ggH` K-factor used by the
 current `LOAnalysis` signal sample. `HJMiNNLO` is already the higher-order

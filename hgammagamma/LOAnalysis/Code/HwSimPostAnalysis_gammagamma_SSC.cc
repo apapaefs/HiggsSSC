@@ -818,6 +818,9 @@ int main(int argc, char* argv[]) {
     TopHist h_y_gg(60, output_top, "rapidity of diphoton system", -6, 6);
 
     double sum_weight = 0.0;
+    double sum_abs_weight = 0.0;
+    double sum_weight_squared = 0.0;
+    long long negative_weight_events = 0;
     double sum_tree_weight = 0.0;
     double sum_diphoton_weight = 0.0;
     double sum_unweighted_diphoton_probability = 0.0;
@@ -841,7 +844,13 @@ int main(int argc, char* argv[]) {
         std::cout << "Event number: " << event_index << "\r" << std::flush;
       }
       const double base_weight = event_weight_input * config.weight_scale;
+      if (!std::isfinite(base_weight)) {
+        throw std::runtime_error("non-finite event weight at event " + std::to_string(event_index));
+      }
       sum_weight += base_weight;
+      sum_abs_weight += std::abs(base_weight);
+      sum_weight_squared += base_weight * base_weight;
+      negative_weight_events += base_weight < 0.0;
 
       std::vector<Candidate> reconstructed_jets;
       std::vector<Candidate> isolation_jets;
@@ -1268,6 +1277,11 @@ int main(int argc, char* argv[]) {
     dat_output << "tree_entries " << output_entries << '\n';
     dat_output << "weight_scale " << config.weight_scale << '\n';
     dat_output << "sum_weight " << sum_weight << '\n';
+    dat_output << "sum_abs_weight " << sum_abs_weight << '\n';
+    dat_output << "sum_weight_squared " << sum_weight_squared << '\n';
+    dat_output << "negative_weight_events " << negative_weight_events << '\n';
+    dat_output << "negative_weight_fraction "
+               << double(negative_weight_events) / (last_event - first_event) << '\n';
     dat_output << "sum_tree_weight " << sum_tree_weight << '\n';
     dat_output << "tree_weight_closure_difference " << closure_difference << '\n';
     dat_output << "sum_diphoton_weight " << sum_diphoton_weight << '\n';

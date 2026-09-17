@@ -18,3 +18,8 @@
 # Python caches.
 __pycache__/
 *.py[cod]
+
+# Higher-order diphoton campaign products (cards/templates remain tracked).
+/hgammagamma/HOAnalysis/runs/
+/hgammagamma/HOAnalysis/plots/
+/hgammagamma/ho-analysis-build.log
