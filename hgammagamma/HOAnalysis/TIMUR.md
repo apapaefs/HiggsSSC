@@ -14,6 +14,14 @@ The signal file has SHA-256:
 01807025f5e6feb21d7d8f836f3161c4aeadce5c44af81edc305b3256ce51187
 ```
 
+The synchronized setup was checked on Timur with Python 3.9.25, GCC 11.5,
+Herwig 7.3.0, ThePEG 2.3.0, LHAPDF 6.5.3, ROOT 6.40.04, and the installed
+HwSim plugin. All 53 gamma-gamma regression tests passed. A separate
+30-event signal pilot completed showering and detector analysis, preserving
+three negative-weight events and response-weight closure to `8.2e-20`.
+The full signal input passed the 100,000-event LHE validation, and cards
+for all four production samples were prepared without generating events.
+
 Run this after logging in to Timur, preferably inside `screen` or `tmux`:
 
 ```bash
