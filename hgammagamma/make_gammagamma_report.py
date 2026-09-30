@@ -353,7 +353,11 @@ def validate_ho_analysis_summary(sample_dir: Path, dat_file: Path) -> None:
         if len(parts) != 2 or parts[0] in data:
             raise ValueError(f"invalid or duplicate analysis summary field: {dat_file}")
         data[parts[0]] = parts[1]
-    if not manifest.get("analysis") or data != manifest["analysis"]:
+    # Older runners retained the .dat header under a "#" key. Comments
+    # carry no analysis values and must be ignored on both sides.
+    recorded = {key: value for key, value in manifest.get("analysis", {}).items()
+                if not key.startswith("#")}
+    if not recorded or data != recorded:
         raise ValueError(f"HO analysis summary differs from its completed campaign: {dat_file}")
 
 

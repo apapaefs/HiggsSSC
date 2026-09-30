@@ -128,8 +128,10 @@ class HONormalizationReportTests(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             directory = Path(tmp)
             dat_file = directory / "signal-test.dat"
-            dat_file.write_text("events_read 10\nsum_weight 1\nsum_diphoton_weight 0.5\n")
+            dat_file.write_text("# HwSimPostAnalysis_gammagamma_SSC summary\n"
+                                "events_read 10\nsum_weight 1\nsum_diphoton_weight 0.5\n")
             (directory / "campaign.json").write_text(json.dumps({"analysis": {
+                "#": "HwSimPostAnalysis_gammagamma_SSC summary",
                 "events_read": "10", "sum_weight": "1", "sum_diphoton_weight": "0.5",
             }}))
             report.validate_ho_analysis_summary(directory, dat_file)

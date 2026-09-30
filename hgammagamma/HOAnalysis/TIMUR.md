@@ -32,6 +32,17 @@ The resulting `HOAnalysis/normalization/ggf-ssc40-n3lo.json` is mandatory
 for the HO signal. The existing NNLO signal input and NLO backgrounds
 keep their generation PDFs.
 
+If ihixs was run in `/home/apapaefs/Projects/HiggsSSC`, use its record by
+absolute path as shown below. The prepared production campaign remains
+in `HiggsSSC-HO`; the record and raw ihixs results can stay in the checkout
+where they were calculated. Update the production checkout's source before
+using the new normalization:
+
+```bash
+cd /home/apapaefs/Projects/HiggsSSC-HO
+git pull --ff-only origin main
+```
+
 Run this after logging in to Timur, preferably inside `screen` or `tmux`:
 
 ```bash
@@ -42,7 +53,7 @@ python3 hgammagamma/run_gammagamma_ho_campaign.py \
   --herwig-module herwig/stable \
   --mg5-dir /home/apapaefs/HiggsSSC/MG5_aMC_v3_5_15 \
   --mg5-fortran /usr/bin/gfortran --mg5-cxx /usr/bin/g++ \
-  --signal-normalization hgammagamma/HOAnalysis/normalization/ggf-ssc40-n3lo.json \
+  --signal-normalization /home/apapaefs/Projects/HiggsSSC/hgammagamma/HOAnalysis/normalization/ggf-ssc40-n3lo.json \
   --signal-lhe /home/apapaefs/Projects/HiggsSSC-HO-inputs/powheg-hjminnlo-merged.lhe \
   --resume
 ```
