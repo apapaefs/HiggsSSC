@@ -1,0 +1,3 @@
+import model loop_sm
+generate g g > e+ e- mu+ mu- / h [noborn=QCD]
+output H4L_GG_CONTINUUM -f

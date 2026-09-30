@@ -1,3 +1,6 @@
 [submodule "paper"]
 	path = paper
 	url = git@github.com:apapaefs/HiggsAtSSC.git
+[submodule "external/ihixs"]
+	path = external/ihixs
+	url = git@github.com:dulatf/ihixs.git

@@ -1,0 +1,5 @@
+/HwSimPostAnalysis_fourlepton
+/make_synthetic_hw_sim_fourlepton
+/test_fourlepton_core
+/*.o
+/*.dSYM/

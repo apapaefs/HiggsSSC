@@ -1,5 +1,9 @@
 # Local validation, 17 September 2026
 
+These results predate the ihixs N3LO normalization integration. The new
+workflow and tests have not been run; follow [`README.md`](README.md) to
+calculate the required normalization record before an HO signal analysis.
+
 The setup was checked with MadGraph5_aMC@NLO 3.5.15, Herwig 7.3.0,
 ThePEG 2.3.0, LHAPDF 6.5.6, ROOT 6.40.02 and the installed HwSim plugin.
 The local GCC installation is now version 16; the Herwig activation script
@@ -55,6 +59,7 @@ prepared configuration from the repository root:
 ```bash
 python3 hgammagamma/run_gammagamma_ho_campaign.py \
   --stage all --run-tag ho_run_01 --nevents 10000 \
+  --signal-normalization hgammagamma/HOAnalysis/normalization/ggf-ssc40-n3lo.json \
   --signal-lhe "$PWD/POWHEG-BOX-V2/HJ/HJMiNNLO/run-ssc40-hjminnlo-nnpdf40nnloqed-100000ev/powheg-hjminnlo-merged.lhe" \
   --herwig-env /Users/apapaefs/Projects/Herwig/Herwig-REAL-stable-gcc-full \
   --mg5-fortran /opt/homebrew/bin/gfortran \

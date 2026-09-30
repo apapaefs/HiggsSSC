@@ -21,6 +21,16 @@ HwSim plugin. All 53 gamma-gamma regression tests passed. A separate
 three negative-weight events and response-weight closure to `8.2e-20`.
 The full signal input passed the 100,000-event LHE validation, and cards
 for all four production samples were prepared without generating events.
+These checks predate the ihixs normalization integration. The new workflow
+and tests are left for you to run.
+
+Before the signal `all`/`analyze` stage, follow
+[`README.md`: Calculate The HO Signal Normalization](README.md#calculate-the-ho-signal-normalization)
+to initialize `external/ihixs`, supply a Cuba 4.2 prefix, install the aN3LO
+and benchmark PDFs, and run the build, benchmark and 109 integrations.
+The resulting `HOAnalysis/normalization/ggf-ssc40-n3lo.json` is mandatory
+for the HO signal. The existing NNLO signal input and NLO backgrounds
+keep their generation PDFs.
 
 Run this after logging in to Timur, preferably inside `screen` or `tmux`:
 
@@ -32,6 +42,7 @@ python3 hgammagamma/run_gammagamma_ho_campaign.py \
   --herwig-module herwig/stable \
   --mg5-dir /home/apapaefs/HiggsSSC/MG5_aMC_v3_5_15 \
   --mg5-fortran /usr/bin/gfortran --mg5-cxx /usr/bin/g++ \
+  --signal-normalization hgammagamma/HOAnalysis/normalization/ggf-ssc40-n3lo.json \
   --signal-lhe /home/apapaefs/Projects/HiggsSSC-HO-inputs/powheg-hjminnlo-merged.lhe \
   --resume
 ```
@@ -55,7 +66,7 @@ python3 hgammagamma/make_gammagamma_report.py \
   --analysis-root hgammagamma/HOAnalysis/runs/ho_100k_01 \
   --run-tag ho_100k_01 \
   --output-dir hgammagamma/HOAnalysis/plots/ho_100k_01 \
-  --no-density --normalization event_xsec
+  --no-density --normalization event_xsec --luminosity-fb 100
 ```
 
 The local validation status and physics limitations are in
@@ -63,3 +74,7 @@ The local validation status and physics limitations are in
 the photon-background processes have been exported but still require their
 first integration/shower validation. Synchronizing this checkout and its
 inputs does not launch the 100,000-event campaign.
+Replace the illustrative `100 fb^-1` report luminosity with your intended
+value. For the completed `ho_timur_smoke` pilot, use the README's
+`--stage normalize` command first; it updates the rate without rerunning
+the detector analysis.

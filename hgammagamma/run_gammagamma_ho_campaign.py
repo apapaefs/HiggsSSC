@@ -21,11 +21,14 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from string import Template
+from types import SimpleNamespace
 
 try:
     from . import run_gammagamma_campaign as lo
+    from . import ho_signal_normalization as signal_normalization
 except ImportError:
     import run_gammagamma_campaign as lo
+    import ho_signal_normalization as signal_normalization
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 HO_DIR = SCRIPT_DIR / "HOAnalysis"
@@ -62,13 +65,40 @@ SAMPLES = (
 )
 
 
+def signal_campaign_identity(args):
+    """Rate provenance independent of generation/shower configuration."""
+    sample = SAMPLES[0]
+    return {
+        "schema_version": 1, "run_tag": args.run_tag, "sample": sample.name,
+        "process": sample.process, "matching": sample.matching,
+        "hard_accuracy": "NNLO+PS (HJMiNNLO)", "hard_model": "pure_heft",
+        "higgs_mass_gev": 125.0, "pdf": sample.pdf_name,
+        "lhaid": sample.lhaid, "ebeam_gev": args.ebeam,
+    }
+
+
+def preflight_signal_normalization(args, manifest):
+    try:
+        record = signal_normalization.load_signal_record(args.signal_normalization, manifest)
+    except (OSError, ValueError) as error:
+        if not args.dry_run:
+            raise ValueError(f"HO signal requires a validated --signal-normalization record: {error}") from error
+        print(f"+ pending HO signal normalization: {error}; dry-run commands only")
+        return None
+    args.expected_native_parameters = record.get("native_parameters", {})
+    args.expected_higgs_mass = record["higgs_mass_gev"]
+    return record
+
+
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--stage", choices=("prepare", "build", "generate", "shower", "analyze", "all"), default="prepare")
+    parser.add_argument("--stage", choices=("prepare", "build", "generate", "shower", "analyze", "normalize", "all"), default="prepare")
     parser.add_argument("--run-tag", default="ho_run_01")
     parser.add_argument("--output-dir", type=Path, help="default: HOAnalysis/runs/RUN_TAG")
     parser.add_argument("--run-samples", default="all", help="all, backgrounds, or comma-separated names")
     parser.add_argument("--signal-lhe", type=Path, help="complete merged HJMiNNLO LHE (.gz accepted), with undecayed Higgs")
+    parser.add_argument("--signal-normalization", type=Path, default=signal_normalization.DEFAULT_RECORD,
+                        help="validated ihixs N3LO record required for HO signal analysis; normalize updates an existing run's rate only")
     parser.add_argument("--nevents", type=int, default=10000, help="events per background and maximum signal shower events")
     parser.add_argument("--ebeam", type=float, default=20000.)
     parser.add_argument("--seed-base", type=int, default=730001)
@@ -96,7 +126,10 @@ def parse_args(argv=None):
     parser.add_argument("--isolation-power", type=float, default=1.)
     parser.add_argument("--resume", action="store_true", help="reuse completed stages with identical configuration")
     parser.add_argument("--dry-run", action="store_true", help="print cards and commands without writing or running")
-    args = parser.parse_args(argv)
+    cli_arguments = list(argv) if argv is not None else sys.argv[1:]
+    args = parser.parse_args(cli_arguments)
+    args.run_tag_explicit = any(value == "--run-tag" or value.startswith("--run-tag=")
+                                for value in cli_arguments)
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", args.run_tag):
         parser.error("run-tag must contain only letters, digits, underscores and hyphens")
     for key in ("nevents", "nb_core", "seed_base", "ebeam", "gen_photon_pt_min", "gen_jet_pt_min",
@@ -108,6 +141,7 @@ def parse_args(argv=None):
         parser.error("higgs-br must be in (0, 1]")
     args.output_dir = (args.output_dir or HO_DIR / "runs" / args.run_tag).expanduser().resolve()
     args.mg5_dir = args.mg5_dir.expanduser().resolve()
+    args.signal_normalization = args.signal_normalization.expanduser().resolve()
     if args.signal_lhe:
         args.signal_lhe = args.signal_lhe.expanduser().resolve()
     if args.herwig_env:
@@ -267,6 +301,8 @@ def prepare(args, sample):
         "lhe_file": str(lhe_path(args, sample)), "fingerprint": fingerprint,
         "configuration": identity, "completed": [],
     }
+    if sample.signal:
+        manifest.update(hard_model="pure_heft", higgs_mass_gev=125.0)
     if manifest_path.exists():
         old = json.loads(manifest_path.read_text())
         if old["fingerprint"] != fingerprint or old["ebeam_gev"] != args.ebeam:
@@ -297,6 +333,8 @@ def inspect_lhe(path, sample, args):
     in_init = in_event = closed = False
     particle_lines = 0
     higgs = stable_higgs = count = negatives = 0
+    non_nominal_higgs_mass = False
+    expected_higgs_mass = getattr(args, "expected_higgs_mass", 125.0)
     sumw = sumabs = sumw2 = 0.
     with opener(path, "rt") as stream:
         for line in stream:
@@ -327,6 +365,8 @@ def inspect_lhe(path, sample, args):
                 if particle_lines == -1:
                     particle_lines = int(fields[0])
                     weight = number(fields[2])
+                    if not math.isfinite(weight):
+                        raise ValueError(f"non-finite signed LHE weight in {path}")
                     sumw += weight
                     sumabs += abs(weight)
                     sumw2 += weight * weight
@@ -336,6 +376,12 @@ def inspect_lhe(path, sample, args):
                         raise ValueError(f"short LHE particle record in {path}")
                     higgs += int(fields[0]) == 25
                     stable_higgs += int(fields[0]) == 25 and int(fields[1]) == 1
+                    if sample.signal and int(fields[0]) == 25:
+                        mass = number(fields[10])
+                        if not math.isfinite(mass) or mass <= 0:
+                            raise ValueError(f"invalid Higgs mass in LHE particle record: {path}")
+                        non_nominal_higgs_mass |= not math.isclose(
+                            mass, expected_higgs_mass, rel_tol=0., abs_tol=1.e-6)
                     particle_lines -= 1
             elif stripped == "</LesHouchesEvents>":
                 closed = True
@@ -363,6 +409,8 @@ def inspect_lhe(path, sample, args):
         raise ValueError("MC@NLO LHE lacks parton_shower=HERWIGPP provenance")
     if sample.signal and not re.search(r"\bminnlo\s+1\b", header_text, re.I):
         raise ValueError("signal LHE lacks HJMiNNLO provenance (minnlo 1)")
+    if sample.signal:
+        validate_signal_hard_inputs(header_text, args, non_nominal_higgs_mass)
     if count < args.nevents:
         raise ValueError(f"only {count} LHE events, but --nevents={args.nevents}")
     xsec = sum(number(row[0]) for row in init[1:])
@@ -382,6 +430,44 @@ def inspect_lhe(path, sample, args):
             "effective_events": sumw * sumw / sumw2 if sumw2 else 0,
             "idwtup": int(beam[8]), "source": str(path), "source_size": path.stat().st_size,
             "source_mtime_ns": path.stat().st_mtime_ns}
+
+
+def validate_signal_hard_inputs(header_text, args, non_nominal_higgs_mass=False):
+    """Check supplied POWHEG inputs; retain legacy LHE inventory fields."""
+    expected = {
+        "hmass": getattr(args, "expected_higgs_mass", 125.0),
+        "ih1": 1., "ih2": 1., "alphas_from_pdf": 1.,
+        "use_NNLOPS_pdfs": 1., "renscfact": 1., "facscfact": 1.,
+    }
+    physics_keys = {
+        "hmass", "hwidth", "tmass", "topmass", "bmass", "cmass", "gf", "gfermi", "fermi_g",
+        "gf_gev_minus2", "ih1", "ih2", "ebeam1", "ebeam2", "lhans1", "lhans2",
+        "minlo", "minnlo", "alphas_from_pdf", "use_NNLOPS_pdfs", "renscfact", "facscfact",
+        "lhapdf_in_hoppet",
+    }
+    expected.update({key: value for key, value in getattr(args, "expected_native_parameters", {}).items()
+                     if key in physics_keys})
+    expected.setdefault("topmass", 173.2)
+    expected.setdefault("lhapdf_in_hoppet", 0.)
+    for key in ("quarkmasseffects", "nnlo", "nnloint", "nnlopsreweight"):
+        matches = re.findall(rf"(?mi)^\s*{key}\s+([-+0-9.eEdD]+)(?:\s|$)", header_text)
+        if any(number(value) > 0 for value in matches):
+            raise ValueError(f"signal LHE {key} must be disabled for pure-HEFT ihixs normalization")
+    for key, wanted in expected.items():
+        if not isinstance(wanted, (int, float)):
+            continue
+        matches = re.findall(rf"(?mi)^\s*{re.escape(key)}\s+([-+0-9.eEdD]+)(?:\s|$)", header_text)
+        if not matches:
+            if key == "hmass" and non_nominal_higgs_mass:
+                raise ValueError("signal LHE Higgs mass differs from the normalization record; embedded hmass is missing")
+            continue
+        if key == "topmass":
+            # POWHEG uses the source fallback for absent/non-positive topmass.
+            # A supplied positive mass overrides that fallback in the Wilson coefficient.
+            matches = [value for value in matches if number(value) > 0]
+        if any(not math.isclose(number(value), float(wanted), rel_tol=1.e-9, abs_tol=1.e-12)
+               for value in matches):
+            raise ValueError(f"signal LHE hard input {key} differs from the normalization record ({wanted})")
 
 
 def save_manifest(args, sample, manifest):
@@ -505,6 +591,166 @@ def root_inventory(directory):
             for path in roots]
 
 
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def validate_root_inventory(directory, manifest, *, allow_legacy_snapshot=False):
+    """Adopt a missing legacy inventory only after checking recorded inputs."""
+    current = root_inventory(directory)
+    stored = manifest.get("root_files")
+    provenance = manifest.get("root_inventory_provenance", {})
+    input_list = directory / f"{manifest['sample']}_hwsim_roots.input"
+    summary = directory / f"{manifest['sample']}_hwsim_roots-{manifest['run_tag']}.dat"
+    if stored is not None:
+        if current != stored:
+            raise ValueError("ROOT products changed since the completed analyze stage")
+        if provenance.get("kind") == "legacy_snapshot_at_normalize":
+            hashes = [{"path": entry["path"], "sha256": file_sha256(entry["path"])} for entry in current]
+            if hashes != provenance.get("root_sha256"):
+                raise ValueError("ROOT contents changed since the legacy normalization snapshot")
+            if file_sha256(input_list) != provenance.get("root_input_list_sha256"):
+                raise ValueError("ROOT input list changed since the legacy normalization snapshot")
+            if file_sha256(summary) != provenance.get("analysis_summary_sha256"):
+                raise ValueError("analysis summary changed since the legacy normalization snapshot")
+        return
+    if not allow_legacy_snapshot:
+        raise ValueError("completed campaign lacks a ROOT inventory; use --stage normalize for legacy migration")
+    if not input_list.is_file() or not summary.is_file():
+        raise ValueError("legacy normalization requires the recorded ROOT input list and analysis summary")
+    listed = [Path(line.strip()) for line in input_list.read_text().splitlines() if line.strip()]
+    listed = sorted(str((path if path.is_absolute() else directory / path).resolve()) for path in listed)
+    if listed != sorted(str(Path(entry["path"]).resolve()) for entry in current):
+        raise ValueError("legacy ROOT input list differs from the present HwSim inventory")
+    recorded_input = manifest.get("analysis", {}).get("input")
+    if recorded_input is not None and Path(recorded_input).resolve() != input_list.resolve():
+        raise ValueError("legacy analysis summary identifies a different ROOT input list")
+    if input_list.stat().st_mtime_ns > summary.stat().st_mtime_ns or any(
+            entry["mtime_ns"] > summary.stat().st_mtime_ns for entry in current):
+        raise ValueError("legacy ROOT inputs are newer than the completed analysis; rerun analysis with a new run tag")
+    manifest["root_files"] = current
+    manifest["root_inventory_provenance"] = {
+        "kind": "legacy_snapshot_at_normalize", "historical_inventory_available": False,
+        "evidence": "completed campaign, unchanged recorded analysis summary, matching saved input list and input timestamps",
+        "root_sha256": [{"path": entry["path"], "sha256": file_sha256(entry["path"])} for entry in current],
+        "root_input_list_sha256": file_sha256(input_list),
+        "analysis_summary_sha256": file_sha256(summary),
+    }
+    print("+ adopted present legacy ROOT inventory; no historical content hashes were available")
+
+
+def analysis_summary(directory, run_tag, nevents, weight_scale=None, previous=None):
+    prefix = directory / f"{SAMPLES[0].name}_hwsim_roots-{run_tag}"
+    for suffix in (".dat", ".top", "_var.root"):
+        path = Path(str(prefix) + suffix)
+        if not path.is_file() or path.stat().st_size == 0:
+            raise ValueError(f"completed analysis output is missing or empty: {path}")
+    data = dict(line.split(maxsplit=1) for line in Path(str(prefix) + ".dat").read_text().splitlines()
+                if line.strip())
+    if "events_read" not in data or (weight_scale is not None and "weight_scale" not in data):
+        raise ValueError(f"analysis summary lacks event count or weight scale: {prefix}.dat")
+    if int(data["events_read"]) != nevents:
+        raise ValueError(f"HwSim event count {data['events_read']} differs from recorded/requested {nevents}")
+    for key in ("sum_weight", "sum_abs_weight", "sum_weight_squared", "sum_tree_weight"):
+        if key not in data or not math.isfinite(number(data[key])):
+            raise ValueError(f"missing or non-finite analysis {key} in {prefix}.dat")
+    if number(data["sum_weight"]) <= 0:
+        raise ValueError("non-positive signed analysis weight sum; increase the pilot statistics")
+    if number(data["sum_abs_weight"]) + 1.e-12 < abs(number(data["sum_weight"])):
+        raise ValueError("analysis sum_abs_weight is smaller than the signed sum_weight")
+    if number(data["sum_weight_squared"]) <= 0:
+        raise ValueError("non-positive analysis sum_weight_squared")
+    if not math.isclose(number(data["sum_tree_weight"]), number(data["sum_weight"]),
+                        rel_tol=1.e-8, abs_tol=1.e-12):
+        raise ValueError("analysis tree weight closure failed")
+    if weight_scale is not None and not math.isclose(number(data["weight_scale"]), weight_scale,
+                                                    rel_tol=1.e-9, abs_tol=1.e-12):
+        raise ValueError("analysis weight_scale differs from the physical Higgs branching ratio")
+    if previous is not None and data != previous:
+        raise ValueError("analysis summary changed since the completed analyze stage")
+    return data
+
+
+def write_signal_normalization(args, sample, manifest, native_lhe, weight_scale):
+    sidecar = signal_normalization.signal_sidecar(
+        args.signal_normalization, manifest, native_lhe, weight_scale)
+    path = sample_dir(args, sample) / f"normalization-{args.run_tag}.json"
+    write_json(path, sidecar, args)
+    manifest["rate_normalization"] = {
+        "normalization_kind": sidecar["normalization_kind"],
+        "record_path": str(args.signal_normalization),
+        "record_fingerprint": sidecar["ihixs_record_sha256"],
+        "sidecar_sha256": hashlib.sha256(json.dumps(sidecar, sort_keys=True,
+                                                    separators=(",", ":")).encode()).hexdigest(),
+    }
+    manifest["normalization_rule"] = "ihixs N3LO inclusive ggF cross section times physical BR once"
+    return sidecar
+
+
+def normalize_existing(args, sample):
+    """Update an analyzed HO signal's rate without invoking its generators."""
+    directory = sample_dir(args, sample)
+    manifest_path = directory / "campaign.json"
+    if not manifest_path.is_file():
+        raise ValueError(f"normalize requires an existing campaign manifest: {manifest_path}")
+    manifest = json.loads(manifest_path.read_text())
+    if not signal_normalization.is_ho_signal(manifest):
+        raise ValueError("normalize supports only the existing HJMiNNLO ggF signal campaign")
+    if "analyze" not in manifest.get("completed", []):
+        raise ValueError("normalize requires a completed analyze stage")
+    if args.run_tag_explicit and args.run_tag != manifest.get("run_tag"):
+        raise ValueError("--run-tag differs from the existing campaign; use its recorded run tag")
+    required = ("run_tag", "ebeam_gev", "nevents_requested", "weight_scale", "lhe_file", "lhe", "analysis")
+    if any(key not in manifest for key in required):
+        raise ValueError("normalize requires the recorded LHE and completed analysis summary")
+    inferred = dict(vars(args))
+    inferred.update(
+        run_tag=manifest["run_tag"], ebeam=float(manifest["ebeam_gev"]),
+        nevents=int(manifest["nevents_requested"]), higgs_br=float(manifest["weight_scale"]),
+        signal_lhe=Path(manifest["lhe_file"]).expanduser().resolve(),
+    )
+    existing_args = SimpleNamespace(**inferred)
+    if not 0 < existing_args.higgs_br <= 1 or existing_args.nevents <= 0:
+        raise ValueError("invalid recorded Higgs BR or event count")
+    record = preflight_signal_normalization(existing_args, manifest)
+    # Missing/unfinished ihixs inputs are printable during dry-run preparation.
+    # A migration still validates its existing products before printing writes.
+    current = inspect_lhe(existing_args.signal_lhe, sample, existing_args)
+    if current != manifest.get("lhe"):
+        raise ValueError("LHE changed since the completed analyze stage")
+    analysis_summary(directory, existing_args.run_tag, existing_args.nevents,
+                     existing_args.higgs_br, manifest.get("analysis"))
+    validate_root_inventory(directory, manifest, allow_legacy_snapshot=True)
+    if record is None:
+        print(f"+ pending normalization-only update for {directory}; no products will be changed")
+        return
+    write_signal_normalization(existing_args, sample, manifest, current, existing_args.higgs_br)
+    save_manifest(existing_args, sample, manifest)
+    print(f"Updated HO signal normalization: {directory} (run tag {existing_args.run_tag})")
+
+
+def verify_signal_rate(args, sample, manifest):
+    record = preflight_signal_normalization(args, manifest)
+    path = sample_dir(args, sample) / f"normalization-{manifest['run_tag']}.json"
+    if not path.is_file():
+        raise ValueError("completed signal normalization is missing; use --stage normalize")
+    sidecar = json.loads(path.read_text())
+    try:
+        signal_normalization.validate_sidecar(sidecar, manifest, args.higgs_br)
+    except ValueError as error:
+        raise ValueError(f"{error}; use --stage normalize to update only the signal rate") from error
+    if sidecar["ihixs_record_sha256"] != record["fingerprint"]:
+        raise ValueError("signal normalization changed; use --stage normalize to update only the rate")
+    rate = manifest.get("rate_normalization", {})
+    digest = hashlib.sha256(json.dumps(sidecar, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    if rate.get("record_fingerprint") != record["fingerprint"] or rate.get("sidecar_sha256") != digest:
+        raise ValueError("signal rate metadata changed; use --stage normalize to refresh its provenance")
+
+
 def verify_completed(args, sample, stage, manifest):
     directory = sample_dir(args, sample)
     if stage == "build" and not sample.signal:
@@ -515,7 +761,9 @@ def verify_completed(args, sample, stage, manifest):
         if current != manifest.get("lhe"):
             raise ValueError(f"LHE changed since completed {stage}: {directory}")
     if stage in ("shower", "analyze"):
-        if root_inventory(directory) != manifest.get("root_files"):
+        if sample.signal:
+            validate_root_inventory(directory, manifest)
+        elif root_inventory(directory) != manifest.get("root_files"):
             raise ValueError(f"ROOT products changed since completed {stage}: {directory}")
     if stage == "analyze":
         prefix = directory / f"{sample.name}_hwsim_roots-{args.run_tag}"
@@ -524,10 +772,21 @@ def verify_completed(args, sample, stage, manifest):
                 raise ValueError(f"completed analysis output is missing: {prefix}{suffix}")
         if not (directory / f"normalization-{args.run_tag}.json").is_file():
             raise ValueError(f"completed analysis normalization is missing in {directory}")
+        if sample.signal:
+            analysis_summary(directory, args.run_tag, args.nevents, args.higgs_br,
+                             manifest.get("analysis"))
+            verify_signal_rate(args, sample, manifest)
 
 
 def analyze(args, sample, manifest):
     directory = sample_dir(args, sample)
+    if sample.signal:
+        preflight_signal_normalization(args, manifest)
+        if not args.dry_run:
+            current = inspect_lhe(lhe_path(args, sample), sample, args)
+            if "lhe" in manifest and current != manifest["lhe"]:
+                raise ValueError("LHE changed since the previous stage; use a new run tag")
+            manifest["lhe"] = current
     roots = sorted((directory / "herwig/events").glob("**/*.root"))
     if not roots and not args.dry_run:
         raise ValueError(f"no HwSim ROOT files in {directory}")
@@ -549,22 +808,40 @@ def analyze(args, sample, manifest):
             raise ValueError(f"HwSim event count {data['events_read']} differs from requested {args.nevents}")
         if number(data["sum_weight"]) <= 0:
             raise ValueError("non-positive signed analysis weight sum; increase the pilot statistics")
+        if sample.signal:
+            data = analysis_summary(directory, args.run_tag, args.nevents, args.higgs_br)
         manifest["analysis"] = data
         if "lhe" not in manifest:
             manifest["lhe"] = inspect_lhe(lhe_path(args, sample), sample, args)
-        write_json(directory / f"normalization-{args.run_tag}.json", {
-            "run_tag": args.run_tag, "sample": sample.name,
-            "cross_section_pb": manifest["lhe"]["cross_section_pb"],
-            "cross_section_error_pb": manifest["lhe"]["cross_section_error_pb"],
-            "source": manifest["lhe"]["normalization_source"] + ": before detector response and BR",
-            "weight_scale": weight_scale,
-        }, args)
+        if sample.signal:
+            write_signal_normalization(args, sample, manifest, manifest["lhe"], weight_scale)
+        else:
+            write_json(directory / f"normalization-{args.run_tag}.json", {
+                "run_tag": args.run_tag, "sample": sample.name,
+                "cross_section_pb": manifest["lhe"]["cross_section_pb"],
+                "cross_section_error_pb": manifest["lhe"]["cross_section_error_pb"],
+                "source": manifest["lhe"]["normalization_source"] + ": before detector response and BR",
+                "weight_scale": weight_scale,
+            }, args)
 
 
 def run_campaign(args):
     samples = selected_samples(args)
+    if args.stage == "normalize":
+        for sample in samples:
+            if sample.signal:
+                normalize_existing(args, sample)
+        return 0
     if args.stage not in ("prepare", "build") and any(s.signal for s in samples) and not args.signal_lhe:
         raise ValueError("--signal-lhe is required for the signal; use --run-samples backgrounds for MG5 only")
+    if args.stage in ("analyze", "all") and any(s.signal for s in samples):
+        preflight_signal_normalization(args, signal_campaign_identity(args))
+        signal = SAMPLES[0]
+        manifest_path = sample_dir(args, signal) / "campaign.json"
+        if not args.dry_run and manifest_path.is_file():
+            previous = json.loads(manifest_path.read_text())
+            if "analyze" in previous.get("completed", []):
+                verify_signal_rate(args, signal, previous)
     if args.stage in ("analyze", "all"):
         command(args, ["make", "-C", ANALYSIS_DIR, ANALYSIS_EXE.name,
                        f"CPP={args.analysis_cxx}", f"CXX={args.analysis_cxx}",
@@ -594,6 +871,8 @@ def main(argv=None):
     args = parse_args(argv)
     if args.dry_run:
         return run_campaign(args)
+    if args.stage == "normalize" and not args.output_dir.is_dir():
+        raise ValueError(f"normalize requires an existing HO campaign directory: {args.output_dir}")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     with (args.output_dir / ".campaign.lock").open("a") as lock:
         try:

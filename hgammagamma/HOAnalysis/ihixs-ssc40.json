@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "profile": "ssc40-ho-pure-heft-v1",
+  "ihixs_commit": "316d5cdf3e88f2ba69cc43668d66b4f69ff833ce",
+  "sqrt_s_gev": 40000.0,
+  "higgs_mass_gev": 125.0,
+  "top_mass_gev": 173.2,
+  "top_scheme": "on-shell",
+  "gf_gev_minus2": 1.1663899987193257e-5,
+  "gev_minus2_to_pb": 389379660.0,
+  "ihixs_prefactor_pb": 35.0309,
+  "mur_gev": 62.5,
+  "muf_gev": 62.5,
+  "pdf_set": "NNPDF40_an3lo_as_01180_qed_mhou",
+  "pdf_member": 0,
+  "native_pdf_set": "NNPDF40_nnlo_as_01180_qed",
+  "alpha_s_mz": 0.118,
+  "qcd_order": "N3LO",
+  "hard_model": "pure_heft",
+  "electroweak_corrections": false,
+  "finite_mass_corrections": false,
+  "resummation": false,
+  "numerical_relative_tolerance": 0.0005,
+  "integration": {
+    "epsrel": 0.0001,
+    "epsabs": 0.0,
+    "mineval": 50000,
+    "maxeval": 50000000,
+    "nstart": 10000,
+    "nincrease": 1000,
+    "cuba_verbose": 0
+  },
+  "benchmark": {
+    "sqrt_s_gev": 13000.0,
+    "higgs_mass_gev": 125.0,
+    "pdf_set": "PDF4LHC15_nnlo_100",
+    "pdf_member": 0,
+    "result_key": "eftn3lo",
+    "expected_pb": 45.1816,
+    "relative_tolerance": 0.005,
+    "reference": "https://arxiv.org/html/1802.00827v1"
+  },
+  "notes": [
+    "Extract the raw eftn3lo result; Higgs XS and R_LO*eftn3lo include a finite-top Born rescaling absent from HJMiNNLO pure HEFT.",
+    "The production build adapts only the hard alpha_s to LHAPDF alphasQ(muR) in an isolated source copy. Benchmark the unmodified source separately.",
+    "The native HJMiNNLO hybrid HOPPET evolution uses three-loop alpha_s reconstructed from the NNLO PDF at MZ. The inclusive normalization intentionally upgrades to four-loop alpha_s with aN3LO QED PDFs.",
+    "Multiply every pure-QCD EFT result and its numerical error by [GF*pi/(sqrt(2)*288)*GeV^-2_to_pb]/35.0309 to match the POWHEG GF convention.",
+    "Use the seven standard scale points and all 100 PDF replicas before publishing the record. The stored production cross section excludes the branching fraction and detector response."
+  ]
+}

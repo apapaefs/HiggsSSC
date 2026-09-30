@@ -1,0 +1,8 @@
+import model sm
+generate h > e+ e- e+ e-
+output H4L_WIDTH_4E -f
+launch H4L_WIDTH_4E
+set mass 25 125.09
+set nevents 1000
+set use_syst False
+done

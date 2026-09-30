@@ -26,6 +26,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
+try:
+    from . import ho_signal_normalization as ho_normalization
+except ImportError:
+    import ho_signal_normalization as ho_normalization
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_ANALYSIS_ROOT = SCRIPT_DIR / "LOAnalysis"
@@ -63,6 +68,10 @@ class SampleResult:
     efficiency: float
     selected_cross_section_pb: float
     histograms: dict[str, Histogram]
+    normalization_kind: str = "generator"
+    native_cross_section_pb: float | None = None
+    ihixs_record_sha256: str = ""
+    rate_uncertainties: dict[str, float] | None = None
 
 
 @dataclass(frozen=True)
@@ -103,8 +112,8 @@ SAMPLE_LABELS = {
 
 def positive_float(value: str) -> float:
     parsed = float(value)
-    if parsed <= 0.0:
-        raise argparse.ArgumentTypeError("value must be positive")
+    if not math.isfinite(parsed) or parsed <= 0.0:
+        raise argparse.ArgumentTypeError("value must be finite and positive")
     return parsed
 
 
@@ -145,6 +154,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--title", default=None, help="default inferred from LO or HO campaign provenance")
     parser.add_argument("--simulation-label", help="override the plot's simulation label")
     parser.add_argument("--allow-missing-xsec", action="store_true")
+    parser.add_argument("--luminosity-fb", type=positive_float,
+                        help="integrated luminosity in fb^-1; add physical selected yields to CSV/HTML")
     return parser
 
 
@@ -266,10 +277,40 @@ def response_provenance(dat: dict[str, float | str]) -> dict[str, str | bool]:
     }
 
 
+def load_ho_signal_sidecar(sample_dir: Path, run_tag: str,
+                           weight_scale: float | None = None) -> dict | None:
+    """Require an ihixs rate only for a manifest-identified HO ggF signal."""
+    campaign = sample_dir / "campaign.json"
+    if not campaign.is_file():
+        return None
+    manifest = json.loads(campaign.read_text())
+    if not ho_normalization.is_ho_signal(manifest):
+        return None
+    if manifest.get("run_tag") != run_tag or manifest.get("sample") != sample_dir.name:
+        raise ValueError(f"HO campaign provenance mismatch in {campaign}")
+    path = sample_dir / f"normalization-{run_tag}.json"
+    if not path.is_file():
+        raise ValueError(f"HO signal requires ihixs normalization; run --stage normalize for {sample_dir}")
+    sidecar = ho_normalization.validate_sidecar(json.loads(path.read_text()), manifest,
+                                                weight_scale=weight_scale)
+    rate = manifest.get("rate_normalization", {})
+    if (rate.get("record_fingerprint") != sidecar["ihixs_record_sha256"]
+            or rate.get("sidecar_sha256") != ho_normalization.canonical_sha256(sidecar)):
+        raise ValueError(f"HO signal rate provenance changed; run --stage normalize for {sample_dir}")
+    if manifest.get("lhe") != sidecar.get("native_lhe"):
+        raise ValueError(f"HO native LHE provenance differs from the normalization sidecar: {path}")
+    return sidecar
+
+
 def parse_cross_section(sample_dir: Path, run_tag: str) -> tuple[float, float | None]:
+    ho_sidecar = load_ho_signal_sidecar(sample_dir, run_tag)
+    if ho_sidecar is not None:
+        return float(ho_sidecar["cross_section_pb"]), float(ho_sidecar["cross_section_error_pb"])
     normalization = sample_dir / f"normalization-{run_tag}.json"
     if normalization.exists():
         data = json.loads(normalization.read_text())
+        if data.get("normalization_kind") == "ihixs_n3lo":
+            raise ValueError(f"ihixs normalization requires a compatible HO campaign manifest: {normalization}")
         if data["run_tag"] != run_tag or data["sample"] != sample_dir.name:
             raise ValueError(f"normalization provenance mismatch in {normalization}")
         xsec = float(data["cross_section_pb"])
@@ -299,6 +340,21 @@ def parse_cross_section(sample_dir: Path, run_tag: str) -> tuple[float, float | 
             return float(match.group(1)), float(match.group(2))
 
     raise FileNotFoundError(f"could not find MG5 cross section for {sample_dir}")
+
+
+def validate_ho_analysis_summary(sample_dir: Path, dat_file: Path) -> None:
+    """Reject replaced analysis summaries under an existing rate sidecar."""
+    manifest = json.loads((sample_dir / "campaign.json").read_text())
+    data = {}
+    for line in dat_file.read_text().splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        parts = line.split(maxsplit=1)
+        if len(parts) != 2 or parts[0] in data:
+            raise ValueError(f"invalid or duplicate analysis summary field: {dat_file}")
+        data[parts[0]] = parts[1]
+    if not manifest.get("analysis") or data != manifest["analysis"]:
+        raise ValueError(f"HO analysis summary differs from its completed campaign: {dat_file}")
 
 
 def discover_sample_dirs(analysis_root: Path) -> list[tuple[str, Path]]:
@@ -342,6 +398,10 @@ def load_samples(args: argparse.Namespace) -> list[SampleResult]:
         top_file, dat_file = files
         dat = parse_key_value_dat(dat_file)
         provenance = response_provenance(dat)
+        ho_sidecar = load_ho_signal_sidecar(sample_dir, args.run_tag,
+                                           weight_scale=float(dat.get("weight_scale", 1.0)))
+        if ho_sidecar is not None:
+            validate_ho_analysis_summary(sample_dir, dat_file)
         try:
             cross_section_pb, cross_section_error_pb = parse_cross_section(sample_dir, args.run_tag)
         except FileNotFoundError as error:
@@ -355,6 +415,11 @@ def load_samples(args: argparse.Namespace) -> list[SampleResult]:
         sum_weight = float(dat.get("sum_weight", events_read))
         sum_diphoton_weight = float(dat.get("sum_diphoton_weight", selected_events))
         weight_scale = float(dat.get("weight_scale", 1.0))
+        if ho_sidecar is not None:
+            if not math.isfinite(sum_weight) or sum_weight <= 0:
+                raise ValueError(f"HO signal requires a positive inclusive signed weight sum: {dat_file}")
+            if not math.isfinite(sum_diphoton_weight):
+                raise ValueError(f"non-finite selected signed weight sum: {dat_file}")
         efficiency = sum_diphoton_weight / sum_weight if sum_weight > 0 else 0.0
         selected_xsec = cross_section_pb * weight_scale * efficiency
 
@@ -381,6 +446,11 @@ def load_samples(args: argparse.Namespace) -> list[SampleResult]:
                 efficiency=efficiency,
                 selected_cross_section_pb=selected_xsec,
                 histograms=parse_top_file(top_file),
+                normalization_kind="ihixs_n3lo" if ho_sidecar is not None else "generator",
+                native_cross_section_pb=(float(ho_sidecar["native_cross_section_pb"])
+                                         if ho_sidecar is not None else None),
+                ihixs_record_sha256=ho_sidecar["ihixs_record_sha256"] if ho_sidecar is not None else "",
+                rate_uncertainties=ho_sidecar["ihixs"]["uncertainties"] if ho_sidecar is not None else None,
             )
         )
     return samples
@@ -653,14 +723,20 @@ def plot_histogram(
     }
 
 
-def write_summary_csv(samples: Sequence[SampleResult], output_dir: Path) -> str:
+def expected_events(sample: SampleResult, luminosity_fb: float) -> float:
+    """Physical yield, independent of plotting normalization and signal magnification."""
+    if not math.isfinite(luminosity_fb) or luminosity_fb <= 0:
+        raise ValueError("luminosity must be finite and positive")
+    return 1000.0 * luminosity_fb * sample.selected_cross_section_pb
+
+
+def write_summary_csv(samples: Sequence[SampleResult], output_dir: Path,
+                      luminosity_fb: float | None = None) -> str:
     data_dir = output_dir / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
     path = data_dir / "sample_summary.csv"
     with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(
-            handle,
-            fieldnames=[
+        fieldnames = [
                 "sample",
                 "category",
                 "analysis",
@@ -679,12 +755,17 @@ def write_summary_csv(samples: Sequence[SampleResult], output_dir: Path) -> str:
                 "selected_cross_section_pb",
                 "top_file",
                 "dat_file",
-            ],
-        )
+            ]
+        has_ihixs = any(sample.normalization_kind == "ihixs_n3lo" for sample in samples)
+        if has_ihixs:
+            fieldnames += ["normalization_kind", "native_cross_section_pb", "ihixs_record_sha256",
+                           "rate_uncertainties_pb"]
+        if luminosity_fb is not None:
+            fieldnames += ["luminosity_fb", "expected_events"]
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()
         for sample in samples:
-            writer.writerow(
-                {
+            row = {
                     "sample": sample.name,
                     "category": sample.category,
                     "analysis": sample.analysis_name,
@@ -704,7 +785,17 @@ def write_summary_csv(samples: Sequence[SampleResult], output_dir: Path) -> str:
                     "top_file": sample.top_file,
                     "dat_file": sample.dat_file,
                 }
-            )
+            if has_ihixs:
+                row.update(normalization_kind=sample.normalization_kind,
+                           native_cross_section_pb=sample.native_cross_section_pb
+                           if sample.native_cross_section_pb is not None else "",
+                           ihixs_record_sha256=sample.ihixs_record_sha256,
+                           rate_uncertainties_pb=json.dumps(sample.rate_uncertainties, sort_keys=True)
+                           if sample.rate_uncertainties is not None else "")
+            if luminosity_fb is not None:
+                row.update(luminosity_fb=luminosity_fb,
+                           expected_events=expected_events(sample, luminosity_fb))
+            writer.writerow(row)
     return path.relative_to(output_dir).as_posix()
 
 
@@ -717,6 +808,7 @@ def write_html(
     samples: Sequence[SampleResult],
     plots: Sequence[dict[str, str | float]],
     summary_csv: str,
+    luminosity_fb: float | None = None,
 ) -> Path:
     zip_name = "gammagamma_report_assets.zip"
     shutil.make_archive(str(output_dir / "gammagamma_report_assets"), "zip", root_dir=output_dir, base_dir="plots")
@@ -737,6 +829,20 @@ def write_html(
             "profiles under one run tag. Check for partially rerun or stale outputs.</p>"
         )
 
+    has_ihixs = any(sample.normalization_kind == "ihixs_n3lo" for sample in samples)
+    normalization_heading = "<th>Rate normalization</th>" if has_ihixs else ""
+    yield_heading = "<th>Expected events</th>" if luminosity_fb is not None else ""
+    normalization_note = (
+        "HO ggF signal: NNLO+PS shapes normalized to N3LO QCD with aN3LO QCD, NLO QED PDFs. "
+        "Backgrounds retain their MC@NLO rates. Numerical integration errors and "
+        "scale/PDF rate uncertainties are separate in the summary CSV."
+        if has_ihixs else ""
+    )
+    luminosity_note = (f"Integrated luminosity: {luminosity_fb:g} fb^-1. "
+                       "Expected events use physical selected cross sections; plot magnification "
+                       "and unit-area normalization do not affect yields."
+                       if luminosity_fb is not None else "")
+
     sample_rows = "\n".join(
         f"""
         <tr>
@@ -753,6 +859,8 @@ def write_html(
           <td>{sample.selected_cross_section_pb:.6g}</td>
           <td>{int(sample.events_read)}</td>
           <td>{int(sample.selected_events)}</td>
+          {('<td>' + ('ihixs N3LO (ggF)' if sample.normalization_kind == 'ihixs_n3lo' else 'generator') + '</td>') if has_ihixs else ''}
+          {('<td>' + format(expected_events(sample, luminosity_fb), '.6g') + '</td>') if luminosity_fb is not None else ''}
         </tr>
         """
         for sample in ordered_samples(samples)
@@ -919,6 +1027,8 @@ def write_html(
     <h1>{html.escape(title)}</h1>
     <p>Run tag: {html.escape(run_tag)}. {html.escape(normalization_text)}</p>
     <p>{html.escape(detector_summary)}</p>
+    {('<p>' + html.escape(normalization_note) + '</p>') if normalization_note else ''}
+    {('<p>' + html.escape(luminosity_note) + '</p>') if luminosity_note else ''}
     {mixed_warning}
   </header>
   <main>
@@ -943,6 +1053,8 @@ def write_html(
             <th>&sigma;&times;&epsilon; [pb]</th>
             <th>Events read</th>
             <th>Diphoton events/hypotheses</th>
+            {normalization_heading}
+            {yield_heading}
           </tr>
         </thead>
         <tbody>
@@ -976,6 +1088,8 @@ def main(argv: Sequence[str]) -> int:
     campaigns = [json.loads((sample.sample_dir / "campaign.json").read_text())
                  for sample in samples if (sample.sample_dir / "campaign.json").exists()]
     simulation_label = args.simulation_label or ("Higher-order simulation" if campaigns else "LO simulation")
+    if not args.simulation_label and any(sample.normalization_kind == "ihixs_n3lo" for sample in samples):
+        simulation_label = "HO simulation, N3LO ggF normalization"
     energies = {2 * float(data["ebeam_gev"]) / 1000 for data in campaigns}
     if len(energies) > 1:
         die("cannot combine different beam energies in one report")
@@ -997,6 +1111,9 @@ def main(argv: Sequence[str]) -> int:
             f"xsec={sample.cross_section_pb:.6g} pb weight={sample.weight_scale:.6g} "
             f"eff={sample.efficiency:.6g} xsec*weight*eff={sample.selected_cross_section_pb:.6g} pb"
         )
+        if args.luminosity_fb is not None:
+            print(f"    expected events at {args.luminosity_fb:g} fb^-1: "
+                  f"{expected_events(sample, args.luminosity_fb):.6g}")
 
     titles = common_histogram_titles(samples)
     plots = [
@@ -1012,7 +1129,7 @@ def main(argv: Sequence[str]) -> int:
         )
         for title in titles
     ]
-    summary_csv = write_summary_csv(samples, output_dir)
+    summary_csv = write_summary_csv(samples, output_dir, luminosity_fb=args.luminosity_fb)
     index = write_html(
         output_dir,
         args.title,
@@ -1022,6 +1139,7 @@ def main(argv: Sequence[str]) -> int:
         samples=samples,
         plots=plots,
         summary_csv=summary_csv,
+        luminosity_fb=args.luminosity_fb,
     )
     log(f"Wrote report: {index}")
     return 0

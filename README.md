@@ -35,9 +35,15 @@ clone the existing repository, update it when needed, and work with the files.
 HiggsSSC/
   hgammagamma/ # h -> gamma gamma campaign and LO analysis outputs
     SSC_DETECTOR_RESPONSE.md # GEM response implementation and operating reference
+  hfourlepton/ # h -> ZZ* -> 4l LO campaign, unified response analysis, and reports
   analyze_lo_varfiles.py # repo-root cut/XGBoost analysis CLI for _var.root files
   paper/   # paper submodule -> HiggsAtSSC
 ```
+
+The four-lepton workflow has its own
+[`hfourlepton/README.md`](hfourlepton/README.md), including dry-run examples,
+external-LHE routing for future NLO production, detector-response profiles,
+normalization conventions, and reducible-background safeguards.
 
 ## Running Herwig On Timur
 

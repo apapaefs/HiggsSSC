@@ -15,6 +15,14 @@ are documented in [`TIMUR.md`](TIMUR.md).
 construction makes it appropriate as an inclusive `gg -> H` NNLO+PS signal
 sample. Do not treat it as requiring an analysis jet.
 
+The HO diphoton signal now requires an inclusive N3LO QCD normalization from
+[ihixs](https://github.com/dulatf/ihixs), linked as the pinned
+`external/ihixs` submodule. The event shapes remain HJMiNNLO NNLO+PS. This
+normalization applies only to `signal_gg_h_aa` in an HO campaign; backgrounds,
+LO analyses and the four-lepton analysis retain their existing rates.
+The new ihixs workflow and regression tests have not yet been run. Earlier
+validation results in `VALIDATION.md` and `TIMUR.md` predate this change.
+
 ## Processes And Conventions
 
 | Sample | Hard process and matching | Hard/shower PDF | Response |
@@ -64,6 +72,114 @@ single-jet fake choice and quark/gluon matching model, even with an extra
 NLO parton; its flavour and multiple-jet ambiguities remain detector-model
 systematics. See the response reference for its limitations.
 
+## Calculate The HO Signal Normalization
+
+Run the commands below yourself from the repository root, before an HO
+signal `analyze` or `all` stage. No numerical cross section is supplied as
+a placeholder. The analysis refuses to substitute the native LHE rate
+when the required ihixs record is absent or incompatible.
+
+Initialize the pinned source:
+
+```bash
+git submodule update --init external/ihixs
+```
+
+The wrapper needs CMake, a C/C++ compiler, LHAPDF 6, Boost headers and
+Cuba 4.2. Install Cuba in a prefix containing `include/cuba.h` and
+`lib/libcuba.a`, with compilers compatible with the LHAPDF installation.
+`--cuba-dir` selects that prefix; `--boost-dir` optionally selects the
+directory containing the `boost/` headers. Cuba was not found in the
+inspected Timur Herwig prefix, so provide your own installation. The
+wrapper makes separate upstream and production source/build copies;
+the pinned submodule is kept unchanged.
+
+On Timur, activate the runtime and install the additional PDF sets:
+
+```bash
+source /etc/profile.d/modules.sh
+module load herwig/stable
+mkdir -p /home/apapaefs/Projects/HiggsSSC-HO-inputs/lhapdf
+export LHAPDF_DATA_PATH=/home/apapaefs/Projects/HiggsSSC-HO-inputs/lhapdf:/home/shared/Herwig/share/LHAPDF
+lhapdf update
+lhapdf install NNPDF40_an3lo_as_01180_qed_mhou
+lhapdf install NNPDF40_nnlo_as_01180_qed
+lhapdf install PDF4LHC15_nnlo_100
+```
+
+The first set is the approximate N3LO QCD, NLO QED, five-flavour NNPDF4.0
+fit with `alpha_s(MZ) = 0.118`. It is the highest-order matched NNPDF4.0 QED
+choice used here. Member 0 is central; members 1--100 supply the PDF
+uncertainty. The NNLO QED set supplies comparison rates and remains the
+event-generation/shower PDF. PDF4LHC15 is used only for the upstream
+13 TeV benchmark. See the
+[NNPDF QED documentation](https://nnpdf.mi.infn.it/nnpdf4-0-qed/) and
+[aN3LO set metadata](https://lhapdfsets.web.cern.ch/current/NNPDF40_an3lo_as_01180_qed_mhou/NNPDF40_an3lo_as_01180_qed_mhou.info).
+
+Choose your actual Cuba prefix below. On the laptop replace the module
+option with `--herwig-env /path/to/Herwig/prefix`, and select compilers
+compatible with that stack. `--powheg-input` can point to the actual
+production `powheg.input`; its physics settings must match the tracked
+SSC reference card. Event counts, random seeds and integration statistics
+do not change the inclusive-rate profile.
+
+```bash
+CUBA_PREFIX=/path/to/your/cuba-4.2-prefix
+IHIXS_OPTIONS=(
+  --herwig-module herwig/stable
+  --lhapdf-dir /home/shared/Herwig
+  --cuba-dir "$CUBA_PREFIX"
+  --cc /usr/bin/gcc --cxx /usr/bin/g++ --jobs 8
+  --powheg-input hgammagamma/HOAnalysis/powheg-hjminnlo-ssc40-nnpdf40nnloqed.input
+)
+
+# Optional: inspect the 109-point plan without running or writing anything.
+python3 hgammagamma/run_ihixs_normalization.py --dry-run "${IHIXS_OPTIONS[@]}"
+
+python3 hgammagamma/run_ihixs_normalization.py --stage build "${IHIXS_OPTIONS[@]}"
+python3 hgammagamma/run_ihixs_normalization.py --stage benchmark "${IHIXS_OPTIONS[@]}"
+python3 hgammagamma/run_ihixs_normalization.py --stage calculate "${IHIXS_OPTIONS[@]}"
+```
+
+The benchmark reproduces the unmodified ihixs example's raw
+`eftn3lo = 45.1816 pb` at 13 TeV, within 0.5%; this is **not** the 40 TeV
+rate. Production uses `sqrt(s) = 40000 GeV`, `mH = 125 GeV`, an on-shell
+top mass of 173.2 GeV, the native POWHEG Fermi constant and unit conversion,
+and central `muR = muF = mH/2 = 62.5 GeV`. These fixed inclusive scales
+replace the native event-dependent MiNNLO scales for the total-rate
+calculation. The finite-mass Born rescaling, exact mass corrections,
+electroweak corrections and resummation are disabled to match the signal's
+pure HEFT hard model. In particular the wrapper reads the raw `eftn3lo`
+entry, not ihixs's Born-rescaled `Higgs XS`.
+
+The production source copy takes the hard coupling directly from
+`LHAPDF::PDF::alphasQ(muR)`, checked against the linked LHAPDF library for
+every run. This deliberately upgrades the native NNLO-PDF/HOPPET
+three-loop coupling to the aN3LO PDF's four-loop coupling. The wrapper
+also checks Cuba convergence and corrects ihixs's rounded prefactor to
+the native POWHEG convention. See
+[`ihixs-ssc40.json`](ihixs-ssc40.json) for the full settings and the
+[ihixs reference](https://arxiv.org/abs/1802.00827).
+
+The calculation runs seven scale points (central plus the standard
+six-point variations), all 100 PDF replicas, and NNLO/N3LO comparisons
+with the native NNLO PDF: 109 production integrations in total. Each must
+have a relative numerical error of at most 0.05%. Only after the benchmark,
+all integrations and provenance checks pass is the record written to:
+
+```text
+hgammagamma/HOAnalysis/normalization/ggf-ssc40-n3lo.json
+```
+
+Builds, inputs, logs, raw results and intermediate manifests are preserved
+under `HOAnalysis/normalization/ihixs-ssc40/`. Add `--resume` to repeat a
+benchmark or calculation after interruption; verified completed points
+are reused and interrupted directories are archived. Changed physics,
+PDF files or integration settings require a fresh `--work-dir` and
+`--record` path. Preserve the record and raw calculation directory
+together when transferring them between hosts. The signal sidecar also
+embeds the complete record so reports remain portable.
+
 ## Prepare And Run
 
 Run these commands from the repository root. The default `prepare` stage
@@ -91,6 +207,7 @@ Then run the signal and all three backgrounds:
 python3 hgammagamma/run_gammagamma_ho_campaign.py \
   --stage all --run-tag ho_run_01 --nevents 10000 --nb-core 4 \
   --herwig-module herwig/stable \
+  --signal-normalization hgammagamma/HOAnalysis/normalization/ggf-ssc40-n3lo.json \
   --signal-lhe "$PWD/hgammagamma/HOAnalysis/runs/ho_run_01/powheg/powheg-hjminnlo-merged.lhe"
 ```
 
@@ -121,7 +238,8 @@ even when requesting few events. `--run-samples backgrounds` selects only
 the three backgrounds; individual names or comma-separated lists also work.
 
 Other stages are `build` (MG5 process export only), `generate` (background
-LHE generation and signal LHE validation), `shower`, and `analyze`.
+LHE generation and signal LHE validation), `shower`, `analyze`, and
+`normalize` (existing HO signal rate only; see below).
 `--dry-run` shows the selected stages without writing files. To continue a
 campaign, repeat the identical configuration with `--resume`; completed
 stages are reused. Changed physics or runtime configuration requires a new
@@ -148,11 +266,37 @@ The LHE checker records positive/negative weight sums, sum of squared
 weights, effective event count, beam/PDF and matching provenance, and rejects
 incomplete files or mismatched inputs. HJMiNNLO can leave XSECUP and PDF IDs
 as `-1` in `<init>` with `IDWTUP = -4`. In that case the signed mean XWGTUP
-sets the production cross section, with its sampling error, and the PDF IDs
+sets the native production cross section, with its sampling error, and the PDF IDs
 come from the embedded POWHEG card. It never uses the absolute-weight sum as
 the physical cross section. For MG5, the integrated `<init>` cross section
 is used. The post-analysis additionally records negative-weight diagnostics
 and checks response-hypothesis weight closure.
+
+For the HO signal, the native LHE rate is retained as a diagnostic. The
+sidecar's production cross section comes from the validated ihixs record.
+The runner checks the 40 TeV, 125 GeV, native NNLO QED PDF and pure HEFT
+settings before accepting that rate. Negative event weights are retained;
+the absolute-weight sum never supplies a physical efficiency or rate.
+The signal normalization record has a separate fingerprint, so changing
+the inclusive rate does not invalidate completed generation and showers.
+
+To update an already analyzed HO run without rebuilding, regenerating,
+showering or rerunning the detector analysis, use:
+
+```bash
+RUN_TAG=ho_timur_smoke  # replace with your completed HO run tag
+python3 hgammagamma/run_gammagamma_ho_campaign.py \
+  --stage normalize \
+  --output-dir "hgammagamma/HOAnalysis/runs/$RUN_TAG" \
+  --run-tag "$RUN_TAG" --run-samples signal_gg_h_aa \
+  --signal-normalization hgammagamma/HOAnalysis/normalization/ggf-ssc40-n3lo.json
+```
+
+This reads the event count, BR and LHE path from the existing manifest,
+checks the saved analysis and inputs, then updates only the signal
+normalization sidecar and campaign rate provenance. It needs neither
+`--resume` nor a Herwig runtime option. Old native-rate HO sidecars must
+be migrated this way before reporting or resuming their analysis.
 
 Generate the usual report using the HO campaign as its analysis root:
 
@@ -161,16 +305,50 @@ python3 hgammagamma/make_gammagamma_report.py \
   --analysis-root hgammagamma/HOAnalysis/runs/ho_run_01 \
   --run-tag ho_run_01 \
   --output-dir hgammagamma/HOAnalysis/plots/ho_run_01 \
-  --no-density --normalization event_xsec
+  --no-density --normalization event_xsec --luminosity-fb 100
 ```
 
 The report reads the HO normalization sidecars rather than requiring a
 MadGraph LO banner. The selected rate is
 `sigma_production * weight_scale * sum_selected_signed_weight / sum_signed_weight`.
+For the HO signal, `sigma_production` is the inclusive ihixs N3LO rate and
+`weight_scale` is the physical diphoton BR, included exactly once. With
+`--luminosity-fb L`, the HTML and summary CSV give physical selected yields
+as `1000 * L * sigma_selected_pb`. Replace 100 in the example with your
+chosen luminosity in inverse femtobarns. Plot signal magnification and
+unit-area display options do not change these yields. The summary records
+the native LHE rate, ihixs fingerprint and separate scale/PDF uncertainties;
+the cross-section error column contains numerical integration error only.
+These uncertainties describe the inclusive rate; they do not include
+acceptance, BR or detector uncertainties.
 Small samples can have negative histogram bins; increasing statistics is
 necessary before interpreting efficiencies or distributions. Existing LO
 analysis cards with K-factors, or classifiers requiring positive training
 weights, should not be reused blindly for these samples.
+
+## Tests To Run Yourself
+
+The new Python tests exercise raw-EFT parsing, completeness/provenance,
+HO-only normalization, migration, signed weights, BR handling and yields.
+They need no ihixs build, generators or ROOT:
+
+```bash
+python3 -m unittest discover -s tests -p 'test_ihixs_normalization.py' -v
+python3 -m unittest discover -s tests -p 'test_ho_normalization_*.py' -v
+```
+
+Then run the existing gamma-gamma and HO regression suites with the
+runtime/dependencies described in `VALIDATION.md`:
+
+```bash
+python3 -m unittest discover -s tests -p 'test_gammagamma*.py' -v
+```
+
+Start the new normalization and analysis workflow with a separate small
+signal pilot before the full campaign. The upstream benchmark and all
+109 integrations are required before a production normalization record
+is accepted. No builds, tests, integrations or analyses were run while
+implementing this change.
 
 Configuration references are the installed Herwig 7.3 LHE examples and the
 MG5 3.5.15 `Template/NLO/Cards/run_card.dat` and
@@ -488,5 +666,5 @@ handles `H -> gamma gamma` in Herwig and includes the physical branching
 ratio once in the response analysis, as specified above.
 
 For rate comparisons, do not apply the simple LO `ggH` K-factor used by the
-current `LOAnalysis` signal sample. `HJMiNNLO` is already the higher-order
-production prediction.
+current `LOAnalysis` signal sample. The HO signal's event shapes come from
+HJMiNNLO and its inclusive production rate comes from the ihixs N3LO record.

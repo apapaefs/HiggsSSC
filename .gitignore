@@ -2,6 +2,10 @@
 /LTS_MG5aMC_v*.tgz
 /MG5_aMC_v*_*/
 
+# Local POWHEG installation and generated MadGraph parser cache.
+/POWHEG-BOX-V2/
+/py.py
+
 # Generated LO gamma-gamma campaign outputs.
 /hgammagamma/LOAnalysis/Signal/events/
 /hgammagamma/LOAnalysis/Backgrounds/events/
@@ -15,6 +19,16 @@
 /hgammagamma/LOAnalysis/Code/HwSimPostAnalysis_objects
 /hgammagamma/LOAnalysis/Code/HwSimPostAnalysis_objects_jetfinding
 
+# Generated LO four-lepton campaign and report outputs.
+/hfourlepton/runs/
+/hfourlepton/reports/
+
+# Local four-lepton analysis build products.
+/hfourlepton/LOAnalysis/Code/*.o
+/hfourlepton/LOAnalysis/Code/HwSimPostAnalysis_fourlepton
+/hfourlepton/LOAnalysis/Code/make_synthetic_hw_sim_fourlepton
+/hfourlepton/LOAnalysis/Code/test_fourlepton_core
+
 # Python caches.
 __pycache__/
 *.py[cod]
@@ -23,3 +37,6 @@ __pycache__/
 /hgammagamma/HOAnalysis/runs/
 /hgammagamma/HOAnalysis/plots/
 /hgammagamma/ho-analysis-build.log
+
+# Generated ihixs builds, scans and normalization records (settings are tracked).
+/hgammagamma/HOAnalysis/normalization/
