@@ -94,6 +94,36 @@ inspected Timur Herwig prefix, so provide your own installation. The
 wrapper makes separate upstream and production source/build copies;
 the pinned submodule is kept unchanged.
 
+On Timur, install [Cuba 4.2.2](https://feynarts.de/cuba/) in your own
+prefix before building ihixs. Run this in a separate shell, or return to
+the HiggsSSC repository afterwards:
+
+```bash
+source /etc/profile.d/modules.sh
+module load herwig/stable
+CUBA_PREFIX="$HOME/.local/cuba-4.2.2-gcc11"
+mkdir -p "$HOME/.local/src"
+cd "$HOME/.local/src"
+curl -fL https://feynarts.de/cuba/Cuba-4.2.2.tar.gz -o Cuba-4.2.2.tar.gz
+tar -xzf Cuba-4.2.2.tar.gz
+cd Cuba-4.2.2
+
+CC=/usr/bin/gcc CFLAGS="-O2 -fPIC" ./configure \
+  --prefix="$CUBA_PREFIX" \
+  --libdir="$CUBA_PREFIX/lib" \
+  --includedir="$CUBA_PREFIX/include" \
+  --with-real=8
+make -j1 lib
+make -j1 install TOOLS_DEFAULT=
+ls -l "$CUBA_PREFIX/include/cuba.h" "$CUBA_PREFIX/lib/libcuba.a"
+```
+
+The standard double-precision interface (`--with-real=8`) matches ihixs.
+Build Cuba serially: its archive-member recipes can update the same
+`libcuba.a` concurrently. `TOOLS_DEFAULT=` skips the optional Qt viewer.
+These commands install a library dependency; they do not calculate a
+Higgs cross section.
+
 On Timur, activate the runtime and install the additional PDF sets:
 
 ```bash
@@ -124,7 +154,7 @@ SSC reference card. Event counts, random seeds and integration statistics
 do not change the inclusive-rate profile.
 
 ```bash
-CUBA_PREFIX=/path/to/your/cuba-4.2-prefix
+CUBA_PREFIX="$HOME/.local/cuba-4.2.2-gcc11"
 IHIXS_OPTIONS=(
   --herwig-module herwig/stable
   --lhapdf-dir /home/shared/Herwig
@@ -140,6 +170,16 @@ python3 hgammagamma/run_ihixs_normalization.py --stage build "${IHIXS_OPTIONS[@]
 python3 hgammagamma/run_ihixs_normalization.py --stage benchmark "${IHIXS_OPTIONS[@]}"
 python3 hgammagamma/run_ihixs_normalization.py --stage calculate "${IHIXS_OPTIONS[@]}"
 ```
+
+If configuration reports `Cuba not found`, inspect
+`HOAnalysis/normalization/ihixs-ssc40/build-upstream/configure.log` and
+check that `--cuba-dir` points to the installed prefix above. A literal
+`/path/to/your/cuba-prefix` is a placeholder and will not work. After
+installing Cuba, repeat `--stage build` in the same work directory;
+the failed configure has not produced a completed build manifest.
+The message `Prepared 109 integrations` means input cards were written,
+not that the integrations ran. LHAPDF's Python `tarfile` extraction
+warnings are separate from the CMake dependency failure.
 
 The benchmark reproduces the unmodified ihixs example's raw
 `eftn3lo = 45.1816 pb` at 13 TeV, within 0.5%; this is **not** the 40 TeV

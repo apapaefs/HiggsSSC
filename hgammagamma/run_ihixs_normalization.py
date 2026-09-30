@@ -337,6 +337,18 @@ def source_inventory(args):
     return paths, hashes
 
 
+def validate_cuba_prefix(prefix):
+    """Explain invalid explicit prefixes before writing a build plan."""
+    if prefix is None:
+        return  # CMake can discover a system installation.
+    headers = (prefix / "cuba.h", prefix / "include/cuba.h")
+    libraries = [directory / name for directory in (prefix, prefix / "lib")
+                 for name in ("libcuba.a", "libcuba.so", "libcuba.dylib")]
+    if not any(path.is_file() for path in headers) or not any(path.is_file() for path in libraries):
+        raise ValueError(f"--cuba-dir {prefix} is not a Cuba installation: expected cuba.h and libcuba. "
+                         "Install Cuba 4.2 and use its real prefix; see HOAnalysis/README.md.")
+
+
 def build(args, settings):
     paths, hashes = source_inventory(args)
     source_hash = norm.canonical_sha256(hashes)
@@ -597,6 +609,8 @@ def main(argv=None):
     if args.dry_run:
         prepare(args, settings)
         return 0
+    if args.stage == "build":
+        validate_cuba_prefix(args.cuba_dir)
     args.work_dir.mkdir(parents=True, exist_ok=True)
     with (args.work_dir / ".normalization.lock").open("a") as lock:
         try:
