@@ -10,6 +10,14 @@ The checked local configuration, test results and remaining validation work
 are recorded in [`VALIDATION.md`](VALIDATION.md).
 The synchronized Timur checkout, input paths, and 100,000-event command
 are documented in [`TIMUR.md`](TIMUR.md).
+On Timur, use `/home/apapaefs/Projects/HiggsSSC` for the LO and HO analyses,
+ihixs, inputs and reports. The HO LHE/PDF inputs are in
+`hgammagamma/HOAnalysis/inputs/`, the normalization calculation is in
+`hgammagamma/HOAnalysis/normalization/`, and campaigns and reports are in
+`HOAnalysis/runs/` and `HOAnalysis/plots/`. These generated files and the
+local MG5 installation are ignored by Git; source and settings share the
+same GitHub repository. The ihixs source remains the pinned
+`external/ihixs` submodule within this checkout.
 
 `HJ/HJMiNNLO` is built from a Higgs-plus-jet process, but the MiNNLOPS
 construction makes it appropriate as an inclusive `gg -> H` NNLO+PS signal
@@ -129,8 +137,9 @@ On Timur, activate the runtime and install the additional PDF sets:
 ```bash
 source /etc/profile.d/modules.sh
 module load herwig/stable
-mkdir -p /home/apapaefs/Projects/HiggsSSC-HO-inputs/lhapdf
-export LHAPDF_DATA_PATH=/home/apapaefs/Projects/HiggsSSC-HO-inputs/lhapdf:/home/shared/Herwig/share/LHAPDF
+cd /home/apapaefs/Projects/HiggsSSC
+mkdir -p hgammagamma/HOAnalysis/inputs/lhapdf
+export LHAPDF_DATA_PATH="$PWD/hgammagamma/HOAnalysis/inputs/lhapdf:/home/shared/Herwig/share/LHAPDF"
 lhapdf update
 lhapdf install NNPDF40_an3lo_as_01180_qed_mhou
 lhapdf install NNPDF40_nnlo_as_01180_qed
@@ -324,7 +333,7 @@ To update an already analyzed HO run without rebuilding, regenerating,
 showering or rerunning the detector analysis, use:
 
 ```bash
-RUN_TAG=ho_timur_smoke  # replace with your completed HO run tag
+RUN_TAG=ho_run_01  # replace with your completed HO run tag at its original location
 python3 hgammagamma/run_gammagamma_ho_campaign.py \
   --stage normalize \
   --output-dir "hgammagamma/HOAnalysis/runs/$RUN_TAG" \
