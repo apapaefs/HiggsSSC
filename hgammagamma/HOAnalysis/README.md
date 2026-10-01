@@ -279,6 +279,15 @@ It also resolves `fastjet-config` and `lhapdf-config` inside the selected
 runtime and records their absolute paths in `cards/runtime-*.mg5`.
 For resumed exports it also updates these paths in the process-local
 `Cards/amcatnlo_configuration.txt`, which MG5 reloads at launch.
+MadLoop needs loop-reduction libraries for the NLO virtual corrections.
+MG5 can try downloading optional Ninja and Collier libraries at the first
+loop-process export, even when Ninja is already installed elsewhere.
+Configure the local MG5 installation's `input/mg5_configuration.txt` with
+the installed Ninja **library directory**, containing `libninja.a` and
+the OneLOop library, and the corresponding `../include/mninja.mod`.
+The installed library paths and recovery command for Timur are documented
+in [`TIMUR.md`](TIMUR.md#recover-from-the-ninja-installer-error).
+See [MG5's loop-library selection](https://github.com/mg5amcnlo/mg5amcnlo/blob/3.x/madgraph/interface/loop_interface.py).
 
 For a first test, use a separate tag with `--nevents 30`. The signal may
 consume a prefix of a larger merged file; its reference cross section is

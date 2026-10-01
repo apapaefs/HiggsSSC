@@ -111,7 +111,15 @@ Run 100,000 events per sample with the same options:
 
 ```bash
 python3 hgammagamma/run_gammagamma_ho_campaign.py \
-  --stage all --run-tag ho_100k_02 --nevents 100000 \
+  --stage generate --run-tag ho_100k_02 --nevents 100000 \
+  "${HO_OPTIONS[@]}" --resume
+
+python3 hgammagamma/run_gammagamma_ho_campaign.py \
+  --stage shower --run-tag ho_100k_02 --nevents 100000 \
+  "${HO_OPTIONS[@]}" --resume
+
+python3 hgammagamma/run_gammagamma_ho_campaign.py \
+  --stage analyze --run-tag ho_100k_02 --nevents 100000 \
   "${HO_OPTIONS[@]}" --resume
 
 python3 hgammagamma/make_gammagamma_report.py \
@@ -125,8 +133,11 @@ This showers 100,000 existing signal events and generates 100,000 MC@NLO
 events for each of prompt gamma-gamma, gamma+jet and Drell--Yan before
 showering and applying the SSC/GEM response. The event count is before
 detector selection. Samples run sequentially; MG5 uses up to eight cores.
-The `all` stage builds the analysis executable and background processes
-as needed. The runner initializes the module system in its subprocesses.
+Run the commands in order, waiting for each to finish successfully.
+The `generate` stage builds background processes as needed; `analyze`
+builds the analysis executable. The signal LHE already exists, so
+`generate` validates it rather than generating another signal sample.
+The runner initializes the module system in its subprocesses.
 The explicit C++ compiler removes the module's `-std=c++14` suffix from
 MG5's compiler executable setting.
 
@@ -142,3 +153,45 @@ applied once. Yields use your specified luminosity.
 The physics limitations and earlier validation status are in
 [`README.md`](README.md) and [`VALIDATION.md`](VALIDATION.md). No builds,
 tests, integrations or analyses were run while consolidating the checkout.
+
+## Recover From The Ninja Installer Error
+
+The first gamma+jet export on Timur failed while downloading
+`HEPToolsInstaller_V168.tar.gz`: the incomplete archive left no
+`HEPToolInstaller.py`, so the automatic Ninja installation failed.
+There was no exported gamma+jet `mg5_process` directory. The signal and
+prompt diphoton samples had already completed `generate` and were preserved.
+
+Timur already has a Ninja installation with MG5's required library and
+Fortran-module layout in the Herwig stack. The repository-local
+`MG5_aMC_v3_5_15/input/mg5_configuration.txt` was backed up and configured
+with these settings:
+
+```text
+ninja = /home/shared/Herwig/opt/MG5_aMC_v3_5_1/HEPTools/ninja/lib
+collier = None
+```
+
+The Ninja library directory contains `libninja.a`, the OneLOop library,
+and the expected Fortran module/header files in `../include/`. Selecting
+this existing library avoids the failed automatic download. The bundled
+CutTools and IREGI sources remain available. This is a site-local MG5
+runtime setting; the generator installation and configuration backups
+are ignored by Git. No campaign cards, fingerprints or completed LHE
+files were changed by the repair.
+
+After applying the common shell setup above, retry the same production
+generation command:
+
+```bash
+python3 hgammagamma/run_gammagamma_ho_campaign.py \
+  --stage generate --run-tag ho_100k_02 --nevents 100000 \
+  "${HO_OPTIONS[@]}" --resume
+```
+
+This reuses the completed signal and prompt diphoton stages, then retries
+gamma+jet and continues to Drell--Yan. Once it succeeds, run `shower`,
+`analyze` and the report command above with the same options. There is
+no need for a new run tag or a repeat ihixs calculation. Library files
+and configuration were inspected; no dependency build, generator,
+analysis or tests were run while preparing this repair.
