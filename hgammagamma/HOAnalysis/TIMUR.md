@@ -214,6 +214,9 @@ closed ROOT files. It saves separate source/attempted/generated/ROOT
 counts and hashes before marking the shower stage complete. An arbitrary
 truncated file or unrelated failure is still refused. This preserves the
 existing event file, original requested count and generation fingerprint.
+The card audit counts the two `set ...:Cuts` assignments. The separate
+`create ThePEG::Cuts /Herwig/Cuts/NoCuts` declaration creates the object
+and is not a third cut assignment.
 
 In the same shell with the common `HO_OPTIONS` above, run:
 

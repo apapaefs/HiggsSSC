@@ -4,6 +4,7 @@ import copy
 import gzip
 import math
 from pathlib import Path
+from string import Template
 from tempfile import TemporaryDirectory
 import unittest
 
@@ -107,6 +108,31 @@ class ShowerCompletionTests(unittest.TestCase):
             self.assertIs(completion.validate_completion(record, manifest, directory), record)
             self.assertAlmostEqual(completion.normalization_denominator(manifest, 1.6 * .00227, .00227),
                                    1.6 * .00227)
+
+    def test_production_card_distinguishes_cuts_creation_from_two_settings(self):
+        with TemporaryDirectory() as directory:
+            fixture = self.fixture(directory)
+            template = Path(__file__).resolve().parents[1] / "hgammagamma/HOAnalysis/HW-LHE.in"
+            card = Template(template.read_text()).substitute(
+                lhe_file=fixture[1].resolve(), pdf_name="NNPDF40_nnlo_as_01180_qed",
+                matching_settings="", decay_settings="", nevents=3, seed=101,
+                sample_name=SAMPLE)
+            (fixture[0] / f"{SAMPLE}.in").write_text(card)
+            fixture[3]["configuration"]["herwig_card"] = card
+            record, manifest = self.build(fixture)
+            self.assertEqual(record["saved_events"], 3)
+            self.assertIs(completion.validate_completion(record, manifest, directory), record)
+
+    def test_cuts_creation_does_not_replace_a_missing_or_changed_setting(self):
+        for change in ("", "set LesHouchesReader:Cuts /Herwig/Cuts/OtherCuts\n"):
+            with self.subTest(change=change), TemporaryDirectory() as directory:
+                fixture = self.fixture(directory)
+                path = fixture[0] / f"{SAMPLE}.in"
+                card = "create ThePEG::Cuts /Herwig/Cuts/NoCuts\n" + path.read_text()
+                card = card.replace("set LesHouchesReader:Cuts /Herwig/Cuts/NoCuts\n", change)
+                path.write_text(card)
+                with self.assertRaisesRegex(ValueError, "NoCuts on handler and reader"):
+                    self.build(fixture)
 
     def test_exhausted_source_retains_failed_signed_weights_in_denominator(self):
         with TemporaryDirectory() as directory:

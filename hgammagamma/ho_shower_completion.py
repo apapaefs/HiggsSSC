@@ -245,7 +245,8 @@ def _audit_source_card(path):
             raise ValueError(f"unsupported {key} for signed source weights")
     if any(re.search(r":(?:Reweights|Preweights|CKKWHandler|CacheFileName)\s", line) for line in commands):
         raise ValueError("reweighted or cached LHE input is unsupported")
-    cuts = [line.split()[-1] for line in commands if re.search(r":Cuts\s", line)]
+    # The class declaration "create ThePEG::Cuts ..." is not a Cuts setting.
+    cuts = [line.split()[-1] for line in commands if re.match(r"set\s+\S+:Cuts\s", line)]
     if len(cuts) != 2 or any(value != "/Herwig/Cuts/NoCuts" for value in cuts):
         raise ValueError("source weight proof requires NoCuts on handler and reader")
     return str(source_path.resolve())
