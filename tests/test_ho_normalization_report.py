@@ -32,6 +32,27 @@ class HONormalizationReportTests(unittest.TestCase):
         self.assertEqual(report.expected_events(sample, 1.), 227.)
         self.assertEqual(report.expected_events(sample, 10.), 2270.)
 
+    def test_event_cross_section_uses_signed_source_population_after_shower_loss(self):
+        sample = self.sample()
+        sample.normalization_sum_weight = 2.0 * sample.sum_weight
+        histogram = SimpleNamespace(y=[sample.sum_diphoton_weight, -sample.sum_diphoton_weight])
+        scaled = report.scaled_histogram(histogram, sample, "event_xsec", False)
+        self.assertAlmostEqual(scaled[0], 0.1135)
+        self.assertAlmostEqual(scaled[1], -0.1135)
+
+    def test_summary_exposes_saved_weights_and_source_normalization_separately(self):
+        with TemporaryDirectory() as tmp:
+            sample = self.sample()
+            sample.normalization_sum_weight = 2.0 * sample.sum_weight
+            sample.shower_quality = {"attempted_events": 12, "saved_events": 10,
+                                     "discarded_events": 2, "termination": "source_exhausted"}
+            report.write_summary_csv([sample], Path(tmp), luminosity_fb=100.)
+            with (Path(tmp) / "data/sample_summary.csv").open() as handle:
+                row = next(csv.DictReader(handle))
+            self.assertEqual(float(row["sum_weight"]), sample.sum_weight)
+            self.assertEqual(float(row["normalization_sum_weight"]), sample.normalization_sum_weight)
+            self.assertEqual(json.loads(row["shower_quality"])["discarded_events"], 2)
+
     def test_signed_selected_yields_remain_signed(self):
         self.assertEqual(report.expected_events(self.sample(selected_pb=-0.1), 2.), -200.)
 
@@ -111,6 +132,20 @@ class HONormalizationReportTests(unittest.TestCase):
                 "cross_section_pb": 50., "cross_section_error_pb": 1.,
             }))
             self.assertEqual(report.parse_cross_section(directory, "test"), (50., 1.))
+
+    def test_shower_sidecar_cannot_fall_back_when_completion_record_is_missing(self):
+        with TemporaryDirectory() as tmp:
+            directory = Path(tmp) / "bkg_prompt_aa"
+            directory.mkdir()
+            (directory / "normalization-test.json").write_text(json.dumps({
+                "run_tag": "test", "sample": directory.name, "cross_section_pb": 50.,
+                "shower_completion_sha256": "a" * 64,
+            }))
+            with self.assertRaisesRegex(ValueError, "matching shower completion"):
+                report.parse_cross_section(directory, "test")
+            (directory / "campaign.json").write_text(json.dumps({"sample": directory.name}))
+            with self.assertRaisesRegex(ValueError, "matching shower completion"):
+                report.parse_cross_section(directory, "test")
 
     def test_ihixs_sidecar_cannot_be_reused_for_lo_or_backgrounds(self):
         with TemporaryDirectory() as tmp:

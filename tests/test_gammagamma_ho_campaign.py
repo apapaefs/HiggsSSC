@@ -6,6 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from hgammagamma import run_gammagamma_ho_campaign as ho
 from hgammagamma import make_gammagamma_report as report
@@ -202,6 +203,49 @@ class HigherOrderCampaignTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "shared MG5 configuration"):
                 ho.configure_mg5_runtime(process, paths)
             self.assertEqual(shared.read_text(), "fastjet = shared\n")
+
+    def test_resume_shower_preserves_existing_events_and_invokes_only_recovery(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "signal.lhe"
+            path.write_text(lhe_text(True))
+            args = self.args(tmp, "--signal-lhe", str(path), "--resume")
+            sample = ho.SAMPLES[0]
+            manifest = ho.prepare(args, sample)
+            manifest["lhe"] = ho.inspect_lhe(path, sample, args)
+            root = ho.sample_dir(args, sample) / "herwig/events/signal.root"
+            root.parent.mkdir()
+            root.write_bytes(b"preserved ROOT event bytes")
+            original = root.read_bytes()
+            def recover(_args, _sample, state, termination):
+                self.assertEqual(termination, "source_exhausted")
+                state["shower_completion"] = {"saved_events": 2}
+            with patch.object(ho, "record_shower_completion", side_effect=recover) as recovery, \
+                    patch.object(ho, "command") as command:
+                ho.shower(args, sample, manifest)
+            recovery.assert_called_once()
+            command.assert_not_called()
+            self.assertEqual(root.read_bytes(), original)
+            self.assertNotIn("shower", manifest["completed"])
+
+    def test_unrelated_shower_error_is_not_reclassified_as_input_exhaustion(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "signal.lhe"
+            path.write_text(lhe_text(True))
+            args = self.args(tmp, "--signal-lhe", str(path), "--resume")
+            sample = ho.SAMPLES[0]
+            manifest = ho.prepare(args, sample)
+            manifest["lhe"] = ho.inspect_lhe(path, sample, args)
+            directory = ho.sample_dir(args, sample) / "herwig"
+            def failure(_args, argv, _cwd, _log):
+                if argv[1] == "run":
+                    (directory / "run.log").write_text("Segmentation fault\n")
+                    raise RuntimeError("generator/build error")
+            with patch.object(ho, "command", side_effect=failure), \
+                    patch.object(ho, "record_shower_completion") as recovery:
+                with self.assertRaisesRegex(RuntimeError, "generator/build error"):
+                    ho.shower(args, sample, manifest)
+            recovery.assert_not_called()
+            self.assertNotIn("shower_completion", manifest)
 
 
 if __name__ == "__main__":

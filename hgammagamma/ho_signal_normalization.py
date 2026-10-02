@@ -278,6 +278,8 @@ def signal_sidecar(record_path, manifest, native_lhe, weight_scale):
               "native_cross_section_error_pb": native_lhe["cross_section_error_pb"],
               "native_lhe": copy.deepcopy(native_lhe),
               "ihixs_record_sha256": record["fingerprint"], "ihixs": copy.deepcopy(record)}
+    if "shower_completion" in manifest:
+        result["shower_completion_sha256"] = manifest["shower_completion"]["fingerprint"]
     return validate_sidecar(result, manifest, weight_scale)
 
 
@@ -291,6 +293,10 @@ def validate_sidecar(sidecar, manifest, weight_scale=None):
             raise ValueError("sidecar record digest differs from its embedded record")
         if sidecar["sample"] != manifest["sample"] or sidecar["run_tag"] != manifest["run_tag"]:
             raise ValueError("sidecar campaign identity does not match")
+        if "shower_completion" in manifest and sidecar.get("shower_completion_sha256") != manifest["shower_completion"]["fingerprint"]:
+            raise ValueError("sidecar shower population differs from the campaign")
+        if "shower_completion" not in manifest and "shower_completion_sha256" in sidecar:
+            raise ValueError("sidecar shower population lacks its campaign completion record")
         _equal_number(sidecar["cross_section_pb"], record["cross_section_pb"], "sidecar cross section")
         _equal_number(sidecar["cross_section_error_pb"], record["cross_section_error_pb"], "sidecar error")
         br = finite_number(sidecar["weight_scale"], "sidecar BR", positive=True)

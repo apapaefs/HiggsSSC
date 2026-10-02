@@ -302,7 +302,11 @@ LHE generation and signal LHE validation), `shower`, `analyze`, and
 campaign, repeat the identical configuration with `--resume`; completed
 stages are reused. Changed physics or runtime configuration requires a new
 tag or output directory. Existing partial ROOT shower products are preserved
-and are never silently overwritten; inspect them before choosing a new run.
+and are never silently overwritten. A finalized shower that consumed its
+entire finite LHE input can be recovered with `--stage shower --resume`
+after auditing its end-of-file exception, Herwig statistics, source weights
+and ROOT files. Other partial or interrupted outputs remain blocked for
+inspection.
 
 Outputs live under `HOAnalysis/runs/RUN_TAG/{Signal,Backgrounds}/events/SAMPLE/`.
 Each sample has its generator cards, logs, `campaign.json`, Herwig ROOT
@@ -310,6 +314,13 @@ files, analysis `.dat`/`.top`/`_var.root` outputs, and
 `normalization-RUN_TAG.json`. `--output-dir` can relocate the campaign.
 The shared analysis executable is built from `LOAnalysis/Code`; the LO
 campaign directories and their results are not used as HO outputs.
+New showers also record `shower_completion` in the campaign manifest.
+This keeps the requested success target, attempted LHE records, saved
+ROOT entries and discarded events separate. `HwSim:OnTheFlyAnalysis No`
+saves every delivered event; its historical "pass basic cuts" footer is
+the saved-event count in this mode. The analysis must read exactly the
+recorded saved count, which can be smaller than `--nevents` after shower
+failures. The original event request and generation fingerprint are retained.
 
 ## Normalization And Reports
 
@@ -368,7 +379,15 @@ python3 hgammagamma/make_gammagamma_report.py \
 
 The report reads the HO normalization sidecars rather than requiring a
 MadGraph LO banner. The selected rate is
-`sigma_production * weight_scale * sum_selected_signed_weight / sum_signed_weight`.
+`sigma_production * weight_scale * sum_selected_signed_weight / normalization_sum_weight`.
+For a new shower, `normalization_sum_weight` is the signed weight sum of
+all attempted source LHE records in the same Herwig/BR weight convention
+as the analysis. The reader scans the full file to determine its weight
+maximum; only consumed records enter the denominator. Discarded shower
+events therefore have zero simulated response rather than being silently
+removed from the normalization population. No unweighted count correction
+is applied. Existing campaigns without the new provenance retain their
+saved-analysis denominator and exact requested-count checks.
 For the HO signal, `sigma_production` is the inclusive ihixs N3LO rate and
 `weight_scale` is the physical diphoton BR, included exactly once. With
 `--luminosity-fb L`, the HTML and summary CSV give physical selected yields
@@ -377,6 +396,14 @@ chosen luminosity in inverse femtobarns. Plot signal magnification and
 unit-area display options do not change these yields. The summary records
 the native LHE rate, ihixs fingerprint and separate scale/PDF uncertainties;
 the cross-section error column contains numerical integration error only.
+New manifests also supply the source denominator and shower event counts,
+exception statistics and momentum-consistency diagnostics. These losses
+are distinct from detector selection. Failed decays and consistency
+warnings remain simulation-quality issues even when the finite input
+has been completely processed.
+Reports for these campaigns verify the recorded LHE, Herwig card, logs
+and ROOT files at their original paths; run them from the canonical
+Timur checkout with those artifacts present.
 These uncertainties describe the inclusive rate; they do not include
 acceptance, BR or detector uncertainties.
 Small samples can have negative histogram bins; increasing statistics is
@@ -393,6 +420,7 @@ They need no ihixs build, generators or ROOT:
 ```bash
 python3 -m unittest discover -s tests -p 'test_ihixs_normalization.py' -v
 python3 -m unittest discover -s tests -p 'test_ho_normalization_*.py' -v
+python3 -m unittest discover -s tests -p 'test_ho_shower_completion.py' -v
 ```
 
 Then run the existing gamma-gamma and HO regression suites with the

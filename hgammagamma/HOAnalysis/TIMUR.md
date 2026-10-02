@@ -195,3 +195,59 @@ gamma+jet and continues to Drell--Yan. Once it succeeds, run `shower`,
 no need for a new run tag or a repeat ihixs calculation. Library files
 and configuration were inspected; no dependency build, generator,
 analysis or tests were run while preparing this repair.
+
+## Recover A Finalized Shower At End Of The LHE File
+
+The signal shower in `ho_100k_02` consumed all 100,000 LHE records and
+saved 99,994 events. Six `D_s0(2590)+/-` decays failed, so Herwig discarded
+those events and reached the end of the finite file while trying to fill
+its target of 100,000 successful events. It reported
+`More events requested than available in LesHouchesReader` after HwSim
+had finalized the ROOT file. Metadata inspection confirmed that the
+latest `Data` tree has 99,994 entries and the file is neither corrupt nor
+marked as recovered by ROOT.
+
+The runner now audits this specific termination with `--resume`. It
+requires the unchanged complete LHE, final Herwig/HwSim statistics, the
+single expected EOF run error, matching discard counts and readable
+closed ROOT files. It saves separate source/attempted/generated/ROOT
+counts and hashes before marking the shower stage complete. An arbitrary
+truncated file or unrelated failure is still refused. This preserves the
+existing event file, original requested count and generation fingerprint.
+
+In the same shell with the common `HO_OPTIONS` above, run:
+
+```bash
+cd /home/apapaefs/Projects/HiggsSSC
+git pull --ff-only origin main
+
+python3 hgammagamma/run_gammagamma_ho_campaign.py \
+  --stage shower --run-tag ho_100k_02 --nevents 100000 \
+  "${HO_OPTIONS[@]}" --resume
+```
+
+The signal is audited and adopted without rerunning it, then the three
+background showers proceed. Do not delete the signal ROOT file or change
+`--nevents` to the saved count. After this command succeeds, use the
+`analyze` and report commands above. The ihixs normalization record is
+required before analysis; no new ihixs calculation is needed.
+
+For new showers, yields use the signed sum of all consumed LHE weights
+in Herwig's weight convention, including records discarded during
+showering. Their detector response is unavailable and is recorded as
+zero simulated response; the surviving sample is not rescaled by an
+unweighted event-count fraction. The report separates saved weights,
+source normalization and shower-quality diagnostics. The existing signal
+log also records momentum-consistency warnings, with a maximum violation
+of about 4.12 TeV, independently of the six failed decays. Recovery
+preserves these diagnostics; it does not correct those simulation issues.
+
+The recovery and signed-weight tests are provided for you to run:
+
+```bash
+python3 -m unittest discover -s tests -p 'test_ho_shower_completion.py' -v
+python3 -m unittest discover -s tests -p 'test_gammagamma_ho_campaign.py' -v
+python3 -m unittest discover -s tests -p 'test_ho_normalization_*.py' -v
+```
+
+No showers, analysis, builds or tests were run while preparing this repair.

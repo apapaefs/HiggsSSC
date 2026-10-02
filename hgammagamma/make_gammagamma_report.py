@@ -28,8 +28,10 @@ from typing import Iterable, Sequence
 
 try:
     from . import ho_signal_normalization as ho_normalization
+    from . import ho_shower_completion as ho_shower
 except ImportError:
     import ho_signal_normalization as ho_normalization
+    import ho_shower_completion as ho_shower
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -72,6 +74,8 @@ class SampleResult:
     native_cross_section_pb: float | None = None
     ihixs_record_sha256: str = ""
     rate_uncertainties: dict[str, float] | None = None
+    normalization_sum_weight: float | None = None
+    shower_quality: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -309,6 +313,11 @@ def parse_cross_section(sample_dir: Path, run_tag: str) -> tuple[float, float | 
     normalization = sample_dir / f"normalization-{run_tag}.json"
     if normalization.exists():
         data = json.loads(normalization.read_text())
+        if "shower_completion_sha256" in data:
+            campaign = sample_dir / "campaign.json"
+            manifest = json.loads(campaign.read_text()) if campaign.is_file() else {}
+            if manifest.get("shower_completion", {}).get("fingerprint") != data["shower_completion_sha256"]:
+                raise ValueError(f"normalization lacks its matching shower completion record: {normalization}")
         if data.get("normalization_kind") == "ihixs_n3lo":
             raise ValueError(f"ihixs normalization requires a compatible HO campaign manifest: {normalization}")
         if data["run_tag"] != run_tag or data["sample"] != sample_dir.name:
@@ -419,12 +428,36 @@ def load_samples(args: argparse.Namespace) -> list[SampleResult]:
         sum_weight = float(dat.get("sum_weight", events_read))
         sum_diphoton_weight = float(dat.get("sum_diphoton_weight", selected_events))
         weight_scale = float(dat.get("weight_scale", 1.0))
+        normalization_sum_weight = sum_weight
+        shower_quality = None
+        campaign = sample_dir / "campaign.json"
+        if campaign.is_file():
+            manifest = json.loads(campaign.read_text())
+            sidecar_path = sample_dir / f"normalization-{args.run_tag}.json"
+            sidecar = json.loads(sidecar_path.read_text()) if sidecar_path.is_file() else {}
+            if "shower_completion" not in manifest and "shower_completion_sha256" in sidecar:
+                raise ValueError(f"rate sidecar lacks its shower completion record: {sample_dir}")
+            if "shower_completion" in manifest:
+                completion = manifest["shower_completion"]
+                ho_shower.validate_completion(completion, manifest, directory=sample_dir)
+                if sidecar.get("shower_completion_sha256") != completion["fingerprint"]:
+                    raise ValueError(f"rate sidecar differs from the saved shower population: {sample_dir}")
+                if events_read != ho_shower.expected_analysis_events(manifest):
+                    raise ValueError(f"analysis event count differs from the saved shower: {dat_file}")
+                validate_ho_analysis_summary(sample_dir, dat_file)
+                normalization_sum_weight = ho_shower.normalization_denominator(manifest, sum_weight, weight_scale)
+                shower_quality = {
+                    key: completion[key] for key in ("termination", "requested_events", "lhe_events",
+                        "attempted_events", "generated_events", "saved_events", "discarded_events",
+                        "exception_counts")
+                }
+                shower_quality["max_momentum_violation_mev"] = completion.get("max_momentum_violation_mev")
         if ho_sidecar is not None:
             if not math.isfinite(sum_weight) or sum_weight <= 0:
                 raise ValueError(f"HO signal requires a positive inclusive signed weight sum: {dat_file}")
             if not math.isfinite(sum_diphoton_weight):
                 raise ValueError(f"non-finite selected signed weight sum: {dat_file}")
-        efficiency = sum_diphoton_weight / sum_weight if sum_weight > 0 else 0.0
+        efficiency = sum_diphoton_weight / normalization_sum_weight if normalization_sum_weight > 0 else 0.0
         selected_xsec = cross_section_pb * weight_scale * efficiency
 
         samples.append(
@@ -455,6 +488,8 @@ def load_samples(args: argparse.Namespace) -> list[SampleResult]:
                                          if ho_sidecar is not None else None),
                 ihixs_record_sha256=ho_sidecar["ihixs_record_sha256"] if ho_sidecar is not None else "",
                 rate_uncertainties=ho_sidecar["ihixs"]["uncertainties"] if ho_sidecar is not None else None,
+                normalization_sum_weight=normalization_sum_weight,
+                shower_quality=shower_quality,
             )
         )
     return samples
@@ -491,9 +526,11 @@ def scaled_histogram(histogram: Histogram, sample: SampleResult, normalization: 
     if not density and normalization == "event_xsec":
         # An NLO histogram can have a zero or negative selected sum even
         # though its inclusive denominator is positive. Preserve every bin.
-        if sample.sum_weight <= 0:
+        denominator = getattr(sample, "normalization_sum_weight", None)
+        denominator = sample.sum_weight if denominator is None else denominator
+        if denominator <= 0:
             raise ValueError(f"non-positive signed normalization for {sample.name}")
-        return [value / sample.sum_weight * sample.cross_section_pb * sample.weight_scale
+        return [value / denominator * sample.cross_section_pb * sample.weight_scale
                 for value in histogram.y]
     if total <= 0 and any(histogram.y) and (density or normalization == "unit_area"):
         raise ValueError(f"cannot unit-normalize non-positive signed histogram for {sample.name}; "
@@ -764,6 +801,9 @@ def write_summary_csv(samples: Sequence[SampleResult], output_dir: Path,
         if has_ihixs:
             fieldnames += ["normalization_kind", "native_cross_section_pb", "ihixs_record_sha256",
                            "rate_uncertainties_pb"]
+        has_shower_quality = any(sample.shower_quality is not None for sample in samples)
+        if has_shower_quality:
+            fieldnames += ["normalization_sum_weight", "shower_quality"]
         if luminosity_fb is not None:
             fieldnames += ["luminosity_fb", "expected_events"]
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
@@ -796,6 +836,11 @@ def write_summary_csv(samples: Sequence[SampleResult], output_dir: Path,
                            ihixs_record_sha256=sample.ihixs_record_sha256,
                            rate_uncertainties_pb=json.dumps(sample.rate_uncertainties, sort_keys=True)
                            if sample.rate_uncertainties is not None else "")
+            if has_shower_quality:
+                row.update(normalization_sum_weight=sample.normalization_sum_weight
+                           if sample.normalization_sum_weight is not None else sample.sum_weight,
+                           shower_quality=json.dumps(sample.shower_quality, sort_keys=True)
+                           if sample.shower_quality is not None else "")
             if luminosity_fb is not None:
                 row.update(luminosity_fb=luminosity_fb,
                            expected_events=expected_events(sample, luminosity_fb))
@@ -834,6 +879,15 @@ def write_html(
         )
 
     has_ihixs = any(sample.normalization_kind == "ihixs_n3lo" for sample in samples)
+    has_shower_quality = any(sample.shower_quality is not None for sample in samples)
+    shower_heading = "<th>Shower attempts / saved / discarded</th>" if has_shower_quality else ""
+    shower_note = (
+        "Shower bookkeeping: normalization uses the signed weights of all consumed LHE records. "
+        "Events discarded during showering have no simulated detector response; they are not counted "
+        "as detector-cut failures or silently renormalized away. The CSV records exception counts "
+        "and momentum-consistency diagnostics alongside the event counts."
+        if has_shower_quality else ""
+    )
     normalization_heading = "<th>Rate normalization</th>" if has_ihixs else ""
     yield_heading = "<th>Expected events</th>" if luminosity_fb is not None else ""
     normalization_note = (
@@ -863,6 +917,7 @@ def write_html(
           <td>{sample.selected_cross_section_pb:.6g}</td>
           <td>{int(sample.events_read)}</td>
           <td>{int(sample.selected_events)}</td>
+          {('<td>' + (str(sample.shower_quality['attempted_events']) + ' / ' + str(sample.shower_quality['saved_events']) + ' / ' + str(sample.shower_quality['discarded_events']) if sample.shower_quality is not None else 'historical') + '</td>') if has_shower_quality else ''}
           {('<td>' + ('ihixs N3LO (ggF)' if sample.normalization_kind == 'ihixs_n3lo' else 'generator') + '</td>') if has_ihixs else ''}
           {('<td>' + format(expected_events(sample, luminosity_fb), '.6g') + '</td>') if luminosity_fb is not None else ''}
         </tr>
@@ -1033,6 +1088,7 @@ def write_html(
     <p>{html.escape(detector_summary)}</p>
     {('<p>' + html.escape(normalization_note) + '</p>') if normalization_note else ''}
     {('<p>' + html.escape(luminosity_note) + '</p>') if luminosity_note else ''}
+    {('<p>' + html.escape(shower_note) + '</p>') if shower_note else ''}
     {mixed_warning}
   </header>
   <main>
@@ -1057,6 +1113,7 @@ def write_html(
             <th>&sigma;&times;&epsilon; [pb]</th>
             <th>Events read</th>
             <th>Diphoton events/hypotheses</th>
+            {shower_heading}
             {normalization_heading}
             {yield_heading}
           </tr>

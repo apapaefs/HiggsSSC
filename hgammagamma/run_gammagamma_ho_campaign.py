@@ -26,14 +26,58 @@ from types import SimpleNamespace
 try:
     from . import run_gammagamma_campaign as lo
     from . import ho_signal_normalization as signal_normalization
+    from . import ho_shower_completion as shower_completion
 except ImportError:
     import run_gammagamma_campaign as lo
     import ho_signal_normalization as signal_normalization
+    import ho_shower_completion as shower_completion
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 HO_DIR = SCRIPT_DIR / "HOAnalysis"
 ANALYSIS_DIR = SCRIPT_DIR / "LOAnalysis" / "Code"
 ANALYSIS_EXE = ANALYSIS_DIR / "HwSimPostAnalysis_gammagamma_SSC"
+
+# Read only the saved event count and nominal-weight branch. This never
+# invokes the detector-response analysis or modifies a ROOT file.
+ROOT_METADATA_SCRIPT = r'''
+import json, math, sys
+from pathlib import Path
+import ROOT
+ROOT.gROOT.SetBatch(True)
+metadata = []
+for filename in sys.argv[1:]:
+    path = Path(filename)
+    before = path.stat()
+    handle = ROOT.TFile.Open(str(path), "READ")
+    if not handle or handle.IsZombie() or handle.TestBit(ROOT.TFile.kRecovered):
+        raise ValueError("missing, corrupt or recovered ROOT file: " + str(path))
+    tree = handle.Get("Data")
+    if not tree or not tree.InheritsFrom("TTree"):
+        raise ValueError("missing HwSim Data tree: " + str(path))
+    branch = tree.GetBranch("evweight")
+    leaf = tree.GetLeaf("evweight")
+    if not branch or not leaf:
+        raise ValueError("missing HwSim nominal weight branch: " + str(path))
+    entries = int(tree.GetEntries())
+    weights = []
+    for index in range(entries):
+        if branch.GetEntry(index) <= 0:
+            raise ValueError("unreadable nominal weight entry in " + str(path))
+        value = float(leaf.GetValue())
+        if not math.isfinite(value):
+            raise ValueError("non-finite nominal weight in " + str(path))
+        weights.append(value)
+    handle.Close()
+    after = path.stat()
+    if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+        raise ValueError("ROOT file changed during inspection: " + str(path))
+    metadata.append({"path": str(path), "entries": entries,
+                     "sum_weight": math.fsum(weights),
+                     "sum_abs_weight": math.fsum(abs(w) for w in weights),
+                     "sum_weight_squared": math.fsum(w*w for w in weights),
+                     "size": after.st_size, "mtime_ns": after.st_mtime_ns})
+print(json.dumps(metadata, allow_nan=False))
+'''
 
 
 @dataclass(frozen=True)
@@ -247,6 +291,8 @@ def write_text(path, value, args):
     if args.dry_run:
         print(f"+ write {path}\n{value}", end="" if value.endswith("\n") else "\n")
     else:
+        if path.is_file() and path.read_text() == value:
+            return
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(path.name + ".tmp")
         temporary.write_text(value)
@@ -310,10 +356,14 @@ def prepare(args, sample):
         manifest = old
     elif directory.exists() and any(directory.iterdir()):
         raise ValueError(f"unmanaged non-empty sample directory: {directory}")
+    persisted_card = directory / "herwig" / f"{sample.name}.in"
+    if any((directory / "herwig/events").glob("**/*.root")) and (
+            not persisted_card.is_file() or persisted_card.read_text() != herwig):
+        raise ValueError(f"persisted Herwig card differs from existing ROOT products in {directory}; preserve them for inspection")
     if not sample.signal:
         write_text(directory / "cards/process.mg5", process, args)
         write_text(directory / "cards/launch.mg5", launch, args)
-    write_text(directory / "herwig" / f"{sample.name}.in", herwig, args)
+    write_text(persisted_card, herwig, args)
     write_json(manifest_path, manifest, args)
     return manifest
 
@@ -571,16 +621,63 @@ def shower(args, sample, manifest):
         if "lhe" in manifest and metadata != manifest["lhe"]:
             raise ValueError("LHE changed since the previous stage; use a new run tag")
         manifest["lhe"] = metadata
-        # Never overwrite a recoverable partial shower.
+        # Adopt only a finalized shower that demonstrably consumed the
+        # complete finite input. Other partial outputs remain untouched.
         if list((herwig_dir / "events").glob("**/*.root")):
+            if args.resume:
+                record_shower_completion(args, sample, manifest, "source_exhausted")
+                print(f"Recovered finalized finite-LHE shower: {sample.name} "
+                      f"({manifest['shower_completion']['saved_events']} saved events)")
+                return
             raise ValueError(f"existing HwSim events in {herwig_dir}; use analyze or a new run tag")
         (herwig_dir / "events").mkdir(exist_ok=True)
         save_manifest(args, sample, manifest)
     command(args, [args.herwig, "--version"], herwig_dir, "version.log")
     command(args, [args.herwig, "read", f"{sample.name}.in"], herwig_dir, "read.log")
-    command(args, [args.herwig, "run", f"{sample.name}.run", f"-N{args.nevents}"], herwig_dir, "run.log")
+    try:
+        command(args, [args.herwig, "run", f"{sample.name}.run", f"-N{args.nevents}"], herwig_dir, "run.log")
+    except RuntimeError:
+        if args.dry_run or "More events requested than available in LesHouchesReader" not in (
+                herwig_dir / "run.log").read_text(errors="replace"):
+            raise
+        record_shower_completion(args, sample, manifest, "source_exhausted")
+        print(f"Consumed the complete finite LHE input: {sample.name}; "
+              f"saved {manifest['shower_completion']['saved_events']} events, "
+              f"discarded {manifest['shower_completion']['discarded_events']} during showering")
+        return
     if not args.dry_run:
-        manifest["root_files"] = root_inventory(directory)
+        record_shower_completion(args, sample, manifest, "requested_events")
+
+
+def record_shower_completion(args, sample, manifest, termination):
+    directory = sample_dir(args, sample)
+    herwig_dir = directory / "herwig"
+    card = manifest.get("configuration", {}).get("herwig_card", "")
+    required = ("set LesHouchesHandler:WeightOption VarNegWeight",
+                "set LesHouchesReader:AllowedToReOpen No",
+                "set /Herwig/Analysis/HwSim:OnTheFlyAnalysis No",
+                "set LesHouchesReader:Cuts /Herwig/Cuts/NoCuts")
+    if any(line not in card.splitlines() for line in required):
+        raise ValueError("shower recovery requires the recorded unfiltered, non-recycling signed-weight card")
+    if re.search(r"(?m)^\s*(?:set|insert)\s+\S+:(?:MaxScan|NormalizeWeights|NormWeight|WeightNormalization|Reweights|Preweights)\b", card):
+        raise ValueError("unsupported shower weight customization; preserve these products for manual inspection")
+    if (herwig_dir / f"{sample.name}.in").read_text() != card:
+        raise ValueError("persisted Herwig card differs from the campaign configuration")
+    inventory = root_inventory(directory)
+    command(args, [args.mg5_python, "-c", ROOT_METADATA_SCRIPT,
+                   *[entry["path"] for entry in inventory]], herwig_dir, "root-metadata.log")
+    metadata = json.loads((herwig_dir / "root-metadata.log").read_text().splitlines()[-1])
+    if root_inventory(directory) != inventory:
+        raise ValueError("ROOT outputs changed while recording shower completion")
+    completion = shower_completion.build_completion(
+        herwig_dir, sample.name, args.nevents, manifest["lhe"]["events"], metadata, termination)
+    completion["source_weights"] = shower_completion.source_weight_summary(
+        lhe_path(args, sample), completion["attempted_events"])
+    completion["fingerprint"] = shower_completion.completion_fingerprint(completion)
+    shower_completion.validate_completion(
+        completion, {**manifest, "root_files": inventory}, directory=directory)
+    manifest["root_files"] = inventory
+    manifest["shower_completion"] = completion
 
 
 def root_inventory(directory):
@@ -722,7 +819,9 @@ def normalize_existing(args, sample):
     current = inspect_lhe(existing_args.signal_lhe, sample, existing_args)
     if current != manifest.get("lhe"):
         raise ValueError("LHE changed since the completed analyze stage")
-    analysis_summary(directory, existing_args.run_tag, existing_args.nevents,
+    if "shower_completion" in manifest:
+        shower_completion.validate_completion(manifest["shower_completion"], manifest, directory=directory)
+    analysis_summary(directory, existing_args.run_tag, shower_completion.expected_analysis_events(manifest),
                      existing_args.higgs_br, manifest.get("analysis"))
     validate_root_inventory(directory, manifest, allow_legacy_snapshot=True)
     if record is None:
@@ -761,6 +860,8 @@ def verify_completed(args, sample, stage, manifest):
         if current != manifest.get("lhe"):
             raise ValueError(f"LHE changed since completed {stage}: {directory}")
     if stage in ("shower", "analyze"):
+        if "shower_completion" in manifest:
+            shower_completion.validate_completion(manifest["shower_completion"], manifest, directory=directory)
         if sample.signal:
             validate_root_inventory(directory, manifest)
         elif root_inventory(directory) != manifest.get("root_files"):
@@ -772,8 +873,13 @@ def verify_completed(args, sample, stage, manifest):
                 raise ValueError(f"completed analysis output is missing: {prefix}{suffix}")
         if not (directory / f"normalization-{args.run_tag}.json").is_file():
             raise ValueError(f"completed analysis normalization is missing in {directory}")
+        sidecar = json.loads((directory / f"normalization-{args.run_tag}.json").read_text())
+        completion = manifest.get("shower_completion", {})
+        if (completion or "shower_completion_sha256" in sidecar) and (
+                sidecar.get("shower_completion_sha256") != completion.get("fingerprint")):
+            raise ValueError(f"completed analysis sidecar differs from its shower population: {directory}")
         if sample.signal:
-            analysis_summary(directory, args.run_tag, args.nevents, args.higgs_br,
+            analysis_summary(directory, args.run_tag, shower_completion.expected_analysis_events(manifest), args.higgs_br,
                              manifest.get("analysis"))
             verify_signal_rate(args, sample, manifest)
 
@@ -791,6 +897,8 @@ def analyze(args, sample, manifest):
     if not roots and not args.dry_run:
         raise ValueError(f"no HwSim ROOT files in {directory}")
     if not args.dry_run:
+        if "shower_completion" in manifest:
+            shower_completion.validate_completion(manifest["shower_completion"], manifest, directory=directory)
         inventory = root_inventory(directory)
         if "root_files" in manifest and inventory != manifest["root_files"]:
             raise ValueError("HwSim ROOT inputs changed since showering")
@@ -804,25 +912,31 @@ def analyze(args, sample, manifest):
     if not args.dry_run:
         dat_path = root_input.with_name(root_input.stem + f"-{args.run_tag}.dat")
         data = dict(line.split(maxsplit=1) for line in dat_path.read_text().splitlines() if line.strip())
-        if int(data["events_read"]) != args.nevents:
-            raise ValueError(f"HwSim event count {data['events_read']} differs from requested {args.nevents}")
+        expected_events = shower_completion.expected_analysis_events(manifest)
+        if int(data["events_read"]) != expected_events:
+            raise ValueError(f"HwSim event count {data['events_read']} differs from saved/requested {expected_events}")
         if number(data["sum_weight"]) <= 0:
             raise ValueError("non-positive signed analysis weight sum; increase the pilot statistics")
         if sample.signal:
-            data = analysis_summary(directory, args.run_tag, args.nevents, args.higgs_br)
+            data = analysis_summary(directory, args.run_tag, expected_events, args.higgs_br)
+        if "shower_completion" in manifest:
+            shower_completion.normalization_denominator(manifest, number(data["sum_weight"]), weight_scale)
         manifest["analysis"] = data
         if "lhe" not in manifest:
             manifest["lhe"] = inspect_lhe(lhe_path(args, sample), sample, args)
         if sample.signal:
             write_signal_normalization(args, sample, manifest, manifest["lhe"], weight_scale)
         else:
-            write_json(directory / f"normalization-{args.run_tag}.json", {
+            normalization = {
                 "run_tag": args.run_tag, "sample": sample.name,
                 "cross_section_pb": manifest["lhe"]["cross_section_pb"],
                 "cross_section_error_pb": manifest["lhe"]["cross_section_error_pb"],
                 "source": manifest["lhe"]["normalization_source"] + ": before detector response and BR",
                 "weight_scale": weight_scale,
-            }, args)
+            }
+            if "shower_completion" in manifest:
+                normalization["shower_completion_sha256"] = manifest["shower_completion"]["fingerprint"]
+            write_json(directory / f"normalization-{args.run_tag}.json", normalization, args)
 
 
 def run_campaign(args):
@@ -843,6 +957,16 @@ def run_campaign(args):
             if "analyze" in previous.get("completed", []):
                 verify_signal_rate(args, signal, previous)
     if args.stage in ("analyze", "all"):
+        if not args.dry_run:
+            for sample in samples:
+                path = sample_dir(args, sample) / "campaign.json"
+                if path.is_file():
+                    existing = json.loads(path.read_text())
+                    if "shower_completion" in existing:
+                        shower_completion.validate_completion(existing["shower_completion"], existing,
+                                                               directory=sample_dir(args, sample))
+                    elif args.stage == "analyze" and "shower" not in existing.get("completed", []):
+                        raise ValueError("shower is not recorded as complete; run --stage shower --resume first")
         command(args, ["make", "-C", ANALYSIS_DIR, ANALYSIS_EXE.name,
                        f"CPP={args.analysis_cxx}", f"CXX={args.analysis_cxx}",
                        "FASTJET_CPPFLAGS=", "FASTJET_LDFLAGS="],
