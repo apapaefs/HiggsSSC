@@ -83,7 +83,7 @@ HO_OPTIONS=(
 Optionally run the Python regression suites yourself before the campaign:
 
 ```bash
-python3 -m unittest discover -s tests -p 'test_ihixs_normalization.py' -v
+python3 -m unittest discover -s tests -p 'test_ihixs*.py' -v
 python3 -m unittest discover -s tests -p 'test_ho_normalization_*.py' -v
 python3 -m unittest discover -s tests -p 'test_gammagamma*.py' -v
 ```
@@ -300,3 +300,78 @@ must still finish all 109 points before creating `ggf-ssc40-n3lo.json`.
 Then use the analysis and report commands above. The mocked regression
 tests are in `tests/test_ihixs_normalization.py` for you to run; no
 calculations, builds or tests were run while preparing this update.
+
+## Recover ihixs After A Parser Heap Abort
+
+The resumed `ihixs-ssc40-refined01` calculation completed all seven scale
+points and 100 PDF replicas, including two precision refinements. Its
+`nnlo_native` attempt printed the NNLO result and wrote `ihixs.out`, then
+aborted with return code `-6` (`SIGABRT`) and
+`corrupted size vs. prev_size`. The two native-PDF comparison points are
+still needed. The aborted output cannot be adopted as a completed run.
+
+Static inspection found two bounds errors in the pinned option parser:
+its option-name allocation omits space for the terminating NUL byte, and
+its terminating option entry is written past the allocated array. These
+are a possible cause of the heap abort. `--repair-parser` applies only
+those two corrections in separate source copies. The physics cards,
+PDFs, hard alpha_s and integration settings stay the same. This option
+recovers an existing work directory with an original completed build
+manifest; the default build and pinned submodule remain unchanged.
+
+Keep the original refined settings and work directory. The repair adds
+`parser-repair/` inside that directory, with separate `source-upstream`,
+`source-lhapdf`, `build-upstream`, `build-lhapdf`, `build-manifest.json`,
+`benchmark.json` and `runs/benchmark/`. The original builds, benchmark and
+107 verified completed points remain intact. With `--resume`, the failed
+`nnlo_native` directory is archived before retrying; unfinished and new
+points use the repaired production executable. The final record retains
+both benchmarks and the hashes for the original and repaired builds and
+selected production attempts. `calculate` also runs a repaired 40 TeV
+central check in `parser-repair/runs/central_check/` (or a separate
+`central_check__precision_N/` directory), requiring a numerical
+error of at most 0.05% and agreement with the cached central result within
+that same relative tolerance. Both central results are recorded; a
+mismatch stops publication. Thus this recovery reuses the 107 completed
+points and runs one central verification, the two unfinished comparisons
+and a fresh 13 TeV benchmark.
+
+Run the following yourself on Timur. The loop stops at the first failure
+without closing your shell. It builds and benchmarks the separate repair
+before resuming the outstanding calculations:
+
+```bash
+cd /home/apapaefs/Projects/HiggsSSC
+git pull --ff-only origin main
+source /etc/profile.d/modules.sh
+module load herwig/stable
+export LHAPDF_DATA_PATH="$PWD/hgammagamma/HOAnalysis/inputs/lhapdf:/home/shared/Herwig/share/LHAPDF"
+
+for ihixs_stage in build benchmark calculate; do
+  IHIXS_REPAIR_STAGE=()
+  if [ "$ihixs_stage" = calculate ]; then
+    IHIXS_REPAIR_STAGE=(--refine-failed)
+  fi
+  python3 hgammagamma/run_ihixs_normalization.py \
+    --stage "$ihixs_stage" --repair-parser --resume "${IHIXS_REPAIR_STAGE[@]}" \
+    --settings hgammagamma/HOAnalysis/normalization/ihixs-ssc40-refined01-settings.json \
+    --work-dir hgammagamma/HOAnalysis/normalization/ihixs-ssc40-refined01 \
+    --herwig-module herwig/stable --lhapdf-dir /home/shared/Herwig \
+    --cuba-dir "$HOME/.local/cuba-4.2.2-gcc11" --cc cc --cxx c++ --jobs 8 || break
+done
+```
+
+The final `ggf-ssc40-n3lo.json` is written only after all 109 points,
+both benchmarks, the central comparison and the unchanged 0.05% error
+requirement pass. Preserve the original work directory and its
+`parser-repair/` tree with that record.
+This repair remains unverified until you run the build, benchmark and
+calculation. No builds, tests, integrations or analyses were run while
+preparing it.
+
+The ihixs regression pattern includes the original normalization tests and
+the new parser-repair and record-provenance tests. Run it yourself:
+
+```bash
+python3 -m unittest discover -s tests -p 'test_ihixs*.py' -v
+```

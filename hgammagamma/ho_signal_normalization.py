@@ -61,6 +61,93 @@ def _hash(value, name):
         raise ValueError(f"{name} is not a SHA256 digest")
 
 
+def _validate_benchmark(benchmark, production_executable, name="benchmark"):
+    """Bind a published-example check to its production executable."""
+    if not isinstance(benchmark, dict) or benchmark.get("passed") is not True:
+        raise ValueError(f"{name} validation must pass")
+    if benchmark["ihixs_commit"] != IHIXS_COMMIT:
+        raise ValueError(f"{name} used a different ihixs source")
+    for key in ("executable_sha256", "production_executable_sha256", "input_sha256", "output_sha256"):
+        _hash(benchmark[key], f"{name} {key}")
+    if benchmark["production_executable_sha256"] != production_executable:
+        raise ValueError(f"{name} validation refers to a different production build")
+    if benchmark["result_key"] != "eftn3lo" or benchmark["pdf_set"] != "PDF4LHC15_nnlo_100":
+        raise ValueError(f"{name} is not the published raw-EFT example")
+    _equal_number(benchmark["expected_pb"], 45.1816, f"{name} reference")
+    tolerance = finite_number(benchmark["relative_tolerance"], f"{name} tolerance", positive=True)
+    sigma = finite_number(benchmark["raw_cross_section_pb"], f"{name} rate", positive=True)
+    error = finite_number(benchmark["raw_cross_section_error_pb"], f"{name} error", nonnegative=True)
+    if tolerance > .005 or abs(sigma / 45.1816 - 1.) > tolerance or error / sigma > .0005:
+        raise ValueError(f"published ihixs {name} tolerance failed")
+
+
+def _validate_parser_repair_central(check, record, central, repair):
+    """Check the repaired binary against the preserved original central rate."""
+    if central["build_variant"] != "lhapdf":
+        raise ValueError("parser repair central baseline must use the original production build")
+    if not isinstance(check, dict) or check.get("passed") is not True:
+        raise ValueError("parser repair central validation must pass")
+    expected = {"result_key": "eftn3lo", "qcd_order": "N3LO", "pdf_set": PDF_SET,
+                "pdf_member": 0, "build_variant": "lhapdf-parser-repair"}
+    for key, value in expected.items():
+        if check[key] != value:
+            raise ValueError(f"parser repair central has incompatible {key}")
+    for key in ("mur_gev", "muf_gev"):
+        _equal_number(check[key], 62.5, f"parser repair central {key}")
+    for key in ("input_sha256", "output_sha256", "pdf_info_sha256", "pdf_member_sha256",
+                "executable_sha256"):
+        _hash(check[key], f"parser repair central {key}")
+    if check["executable_sha256"] != repair["executable_sha256"]:
+        raise ValueError("parser repair central used a different repaired executable")
+    for key in ("pdf_info_sha256", "pdf_member_sha256"):
+        if check[key] != central[key]:
+            raise ValueError("parser repair central PDF hashes differ from the original central")
+    for key in ("cross_section_pb", "cross_section_error_pb"):
+        _equal_number(check[f"original_{key}"], central[key], f"parser repair central original {key}")
+    tolerance = record["numerical_relative_tolerance"]
+    _equal_number(check["relative_tolerance"], tolerance, "parser repair central tolerance")
+    sigma = finite_number(check["cross_section_pb"], "parser repair central rate", positive=True)
+    error = finite_number(check["cross_section_error_pb"], "parser repair central error", nonnegative=True)
+    difference = abs(sigma / central["cross_section_pb"] - 1.)
+    _equal_number(check["relative_difference"], difference, "parser repair central relative difference")
+    if difference > tolerance or error / sigma > tolerance:
+        raise ValueError("parser repair central numerical agreement failed")
+    pdf = record["pdfs"][f"{PDF_SET}/0"]
+    for observed, expected_as in ((check["alpha_s_mur"], central["pdf_alpha_s_mur"]),
+                                 (check["pdf_alpha_s_mur"], central["pdf_alpha_s_mur"]),
+                                 (check["alpha_s_at_91_1876"], pdf["alpha_s_91_1876"])):
+        if not math.isclose(finite_number(observed, "parser repair central alpha_s", positive=True),
+                            expected_as, rel_tol=1e-7, abs_tol=1e-10):
+            raise ValueError("parser repair central alpha_s differs from its PDF")
+    multiplier = GF * math.pi / (math.sqrt(2.) * 288.) * 389379660. / 35.0309
+    for raw_key, key, nonnegative in (("raw_cross_section_pb", "cross_section_pb", False),
+                                     ("raw_cross_section_error_pb", "cross_section_error_pb", True)):
+        raw = finite_number(check[raw_key], f"parser repair central {raw_key}",
+                            positive=not nonnegative, nonnegative=nonnegative)
+        _equal_number(raw * multiplier, check[key], f"parser repair central GF-corrected {key}")
+    refinements = check["precision_refinements"]
+    if isinstance(refinements, bool) or not isinstance(refinements, int) or not 0 <= refinements <= 3:
+        raise ValueError("parser repair central precision refinements are invalid")
+    suffix = f"__precision_{refinements}" if refinements else ""
+    if check["run_directory"] != f"parser-repair/runs/central_check{suffix}":
+        raise ValueError("parser repair central run directory disagrees with its refinement")
+    expected_integration = copy.deepcopy(central["integration"] if "integration" in central
+                                          else record["provenance"]["settings"]["integration"])
+    if not isinstance(expected_integration, dict):
+        raise ValueError("parser repair central original integration settings are missing")
+    if refinements:
+        base_epsrel = finite_number(expected_integration["epsrel"], "original integration epsrel", positive=True)
+        finite_number(expected_integration["epsabs"], "original integration epsabs", nonnegative=True)
+        epsrel = min(base_epsrel / 10., 1e-6) / 10. ** (refinements - 1)
+        expected_integration["epsrel"] = epsrel
+        expected_integration["epsabs"] *= epsrel / base_epsrel
+    integration = check["integration"]
+    if not isinstance(integration, dict) or set(integration) != set(expected_integration):
+        raise ValueError("parser repair central integration settings are incomplete")
+    for key, value in expected_integration.items():
+        _equal_number(integration[key], value, f"parser repair central integration {key}")
+
+
 def validate_record(record):
     """Check calculation completeness and provenance without requiring old paths."""
     if not isinstance(record, dict):
@@ -103,21 +190,28 @@ def validate_record(record):
         validations = record["validations"]
         if validations["benchmark"]["passed"] is not True or validations["alpha_s"]["passed"] is not True:
             raise ValueError("ihixs benchmark and PDF alpha_s validation must pass")
-        benchmark = validations["benchmark"]
-        if benchmark["ihixs_commit"] != IHIXS_COMMIT:
-            raise ValueError("benchmark used a different ihixs source")
-        for key in ("executable_sha256", "input_sha256", "output_sha256"):
-            _hash(benchmark[key], f"benchmark {key}")
-        if benchmark["production_executable_sha256"] != provenance["executable_sha256"]:
-            raise ValueError("benchmark validation refers to a different production build")
-        if benchmark["result_key"] != "eftn3lo" or benchmark["pdf_set"] != "PDF4LHC15_nnlo_100":
-            raise ValueError("benchmark is not the published raw-EFT example")
-        _equal_number(benchmark["expected_pb"], 45.1816, "benchmark reference")
-        btol = finite_number(benchmark["relative_tolerance"], "benchmark tolerance", positive=True)
-        bsigma = finite_number(benchmark["raw_cross_section_pb"], "benchmark rate", positive=True)
-        berr = finite_number(benchmark["raw_cross_section_error_pb"], "benchmark error", nonnegative=True)
-        if btol > .005 or abs(bsigma / 45.1816 - 1.) > btol or berr / bsigma > .0005:
-            raise ValueError("published ihixs benchmark tolerance failed")
+        _validate_benchmark(validations["benchmark"], provenance["executable_sha256"])
+        executables = {"lhapdf": provenance["executable_sha256"]}
+        has_parser_repair = "parser_repair" in provenance
+        if has_parser_repair:
+            repair = provenance["parser_repair"]
+            if not isinstance(repair, dict) or repair["ihixs_commit"] != IHIXS_COMMIT:
+                raise ValueError("parser repair used a different ihixs source")
+            for key in ("source_sha256", "adapter_sha256", "parser_patch_sha256",
+                        "executable_sha256", "build_manifest_sha256"):
+                _hash(repair[key], f"parser repair {key}")
+            for key in ("source_sha256", "adapter_sha256"):
+                if repair[key] != provenance[key]:
+                    raise ValueError(f"parser repair {key} differs from the original build")
+            _validate_benchmark(validations["parser_repair_benchmark"], repair["executable_sha256"],
+                                "parser repair benchmark")
+            benchmark_patch = validations["parser_repair_benchmark"]["parser_patch_sha256"]
+            _hash(benchmark_patch, "parser repair benchmark parser_patch_sha256")
+            if benchmark_patch != repair["parser_patch_sha256"]:
+                raise ValueError("parser repair benchmark used a different parser patch")
+            executables["lhapdf-parser-repair"] = repair["executable_sha256"]
+        elif "parser_repair_benchmark" in validations or "parser_repair_central" in validations:
+            raise ValueError("parser repair validation lacks its build provenance")
         if validations["alpha_s"]["checked_runs"] != 109:
             raise ValueError("alpha_s validation did not cover all calculation points")
         # The central, six noncentral scales, all replicas and two order/PDF
@@ -132,6 +226,15 @@ def validate_record(record):
             if label not in by_label:
                 raise ValueError(f"ihixs record is missing {label}")
         for run in runs:
+            # Historical records omit both fields. Mixed-build records must
+            # identify every run, including those retained from the base build.
+            if has_parser_repair or "executable_sha256" in run or "build_variant" in run:
+                _hash(run["executable_sha256"], "run executable hash")
+                variant = run["build_variant"]
+                if not isinstance(variant, str) or variant not in executables:
+                    raise ValueError(f"{run['label']} has an unknown build variant")
+                if run["executable_sha256"] != executables[variant]:
+                    raise ValueError(f"{run['label']} executable differs from its build variant")
             val = finite_number(run["cross_section_pb"], "run cross section", positive=True)
             err = finite_number(run["cross_section_error_pb"], "run numerical error", nonnegative=True)
             if err / val > tolerance:
@@ -164,6 +267,9 @@ def validate_record(record):
                 raise ValueError("run alpha_s(MZ) differs from the PDF reference")
         _equal_number(by_label["central"]["cross_section_pb"], sigma, "central result")
         _equal_number(by_label["central"]["cross_section_error_pb"], error, "central error")
+        if has_parser_repair:
+            _validate_parser_repair_central(validations["parser_repair_central"], record,
+                                            by_label["central"], repair)
         for run, point in zip([by_label["central"], *[by_label[f"scale_{i}"] for i in range(1, 7)]], SCALE_POINTS):
             _equal_number(run["mur_gev"], 62.5 * point[0], "scale muR")
             _equal_number(run["muf_gev"], 62.5 * point[1], "scale muF")

@@ -218,6 +218,40 @@ raw EFT cross section and remains mandatory after refinement. The final
 record stores each selected run's effective integration settings and
 input/output hashes, including the selected retry directory.
 
+If ihixs aborts with return code `-6` (`SIGABRT`) and glibc reports
+`corrupted size vs. prev_size`, a written `ihixs.out` does not make that
+attempt complete. Static inspection found two heap overflows in the pinned
+command-line parser: option-name buffers omit the terminating NUL byte,
+and the terminating option entry is written one element beyond its array.
+These are a possible cause of the delayed abort; the diagnosis and repair
+need confirmation from your execution.
+
+The opt-in `--repair-parser` option recovers an existing calculation and
+requires its original completed build manifest. It applies only those two
+bounds fixes in separate source copies; the pinned submodule and default
+build stay unchanged. Run `build`, then `benchmark`, then `calculate`
+with that option and the original settings, work directory and runtime
+options. Keep `--resume` on all three stages and `--refine-failed` on
+`calculate`. The repair creates `WORK_DIR/parser-repair/`, containing
+`source-upstream`, `source-lhapdf`, `build-upstream`, `build-lhapdf`,
+`build-manifest.json`, `benchmark.json` and `runs/benchmark/`. It preserves
+the original builds, benchmark and verified completed production points.
+`--resume` archives the failed attempt before rerunning it; unfinished and
+new points use the repaired production binary with the same physics cards,
+PDFs and hard coupling. The final record includes the original and repair
+benchmarks and the hashes for both builds and each selected attempt.
+During `calculate`, the repaired binary also reruns the 40 TeV central
+point in `parser-repair/runs/central_check/`, or a separate
+`central_check__precision_N/` directory if refinement is needed. Its
+numerical error and its relative difference from the cached central result
+must each pass the 0.05% requirement; both results are recorded. All 109
+production points and their numerical-error checks remain required.
+
+The exact commands for the existing `ihixs-ssc40-refined01` calculation
+are in [the Timur parser recovery instructions](TIMUR.md#recover-ihixs-after-a-parser-heap-abort).
+The repair has not been built, benchmarked or used for a calculation while
+preparing these changes; run those stages yourself before using the rate.
+
 The benchmark reproduces the unmodified ihixs example's raw
 `eftn3lo = 45.1816 pb` at 13 TeV, within 0.5%; this is **not** the 40 TeV
 rate. Production uses `sqrt(s) = 40000 GeV`, `mH = 125 GeV`, an on-shell
@@ -448,7 +482,7 @@ HO-only normalization, migration, signed weights, BR handling and yields.
 They need no ihixs build, generators or ROOT:
 
 ```bash
-python3 -m unittest discover -s tests -p 'test_ihixs_normalization.py' -v
+python3 -m unittest discover -s tests -p 'test_ihixs*.py' -v
 python3 -m unittest discover -s tests -p 'test_ho_normalization_*.py' -v
 python3 -m unittest discover -s tests -p 'test_ho_shower_completion.py' -v
 ```

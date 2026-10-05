@@ -61,6 +61,17 @@ ADAPTER_REPLACEMENTS = {
 ADAPTER_COUNTS = {"src/core/input_parameters.cpp": 1, "src/tools/luminosity.h": 1,
                   "src/tools/vegas_adaptor.cpp": 2}
 
+# Keep this separate from the physics adapter: existing integrations retain
+# their original executable, while parser-repaired builds have their own hash.
+PARSER_REPAIRS = {
+    "src/tools/user_interface.cpp": (
+        ("new char[strlen(options[i].name.c_str())]",
+         "new char[strlen(options[i].name.c_str()) + 1]"),
+        ("long_options[N+1].", "long_options[N]."),
+    ),
+}
+PARSER_REPAIR_COUNTS = {"src/tools/user_interface.cpp": (1, 4)}
+
 # Probe the linked C++ library, avoiding a second Python LHAPDF installation.
 PDF_PROBE = r'''#include "LHAPDF/LHAPDF.h"
 #include <iostream>
@@ -147,12 +158,16 @@ def parse_args(argv=None):
     parser.add_argument("--resume", action="store_true", help="reuse verified results and archive interrupted run directories")
     parser.add_argument("--refine-failed", action="store_true",
                         help="with calculate --resume, retry inaccurate points at tighter epsrel in separate directories")
+    parser.add_argument("--repair-parser", action="store_true",
+                        help="with --resume, build/use a separate getopt bounds repair and preserve completed runs")
     parser.add_argument("--dry-run", action="store_true", help="print the plan without running or writing anything")
     args = parser.parse_args(argv)
     if args.jobs < 1:
         parser.error("--jobs must be positive")
     if args.refine_failed and (args.stage != "calculate" or not args.resume):
         parser.error("--refine-failed requires --stage calculate --resume")
+    if args.repair_parser and (args.stage == "prepare" or not args.resume):
+        parser.error("--repair-parser requires --resume and --stage build, benchmark or calculate")
     for key in ("settings", "ihixs_source", "work_dir", "record", "powheg_input",
                 "lhapdf_dir", "cuba_dir", "boost_dir", "pdf_data_dir", "herwig_env"):
         value = getattr(args, key)
@@ -355,7 +370,32 @@ def validate_cuba_prefix(prefix):
                          "Install Cuba 4.2 and use its real prefix; see HOAnalysis/README.md.")
 
 
-def build(args, settings):
+def parser_repair_sha256():
+    return norm.canonical_sha256({"replacements": PARSER_REPAIRS, "counts": PARSER_REPAIR_COUNTS})
+
+
+def patched_source(name, original, variant, parser_repair=False):
+    if variant == "lhapdf" and name in ADAPTER_REPLACEMENTS:
+        before, after = ADAPTER_REPLACEMENTS[name]
+        if original.count(before) != ADAPTER_COUNTS[name]:
+            raise ValueError(f"adapter anchor changed in {name}")
+        original = original.replace(before, after)
+    if parser_repair and name in PARSER_REPAIRS:
+        for (before, after), count in zip(PARSER_REPAIRS[name], PARSER_REPAIR_COUNTS[name]):
+            if original.count(before) != count:
+                raise ValueError(f"parser repair anchor changed in {name}")
+            original = original.replace(before, after)
+    return original
+
+
+def parser_repair_args(args):
+    result = copy.copy(args)
+    result.work_dir = args.work_dir / "parser-repair"
+    result.repair_parser = False
+    return result
+
+
+def build(args, settings, *, parser_repair=False):
     paths, hashes = source_inventory(args)
     source_hash = norm.canonical_sha256(hashes)
     adapter_hash = norm.canonical_sha256({"replacements": ADAPTER_REPLACEMENTS, "counts": ADAPTER_COUNTS})
@@ -363,6 +403,8 @@ def build(args, settings):
                 "adapter_sha256": adapter_hash, "cc": args.cc, "cxx": args.cxx,
                 "lhapdf_dir": str(args.lhapdf_dir), "cuba_dir": str(args.cuba_dir),
                 "boost_dir": str(args.boost_dir), "probe_source_sha256": hashlib.sha256(PDF_PROBE.encode()).hexdigest()}
+    if parser_repair:
+        identity["parser_patch_sha256"] = parser_repair_sha256()
     manifest_path = args.work_dir / "build-manifest.json"
     if manifest_path.exists():
         prior = load_build(args)
@@ -375,12 +417,10 @@ def build(args, settings):
         for name in paths:
             target = source / name
             target.parent.mkdir(parents=True, exist_ok=True)
-            if variant == "lhapdf" and name in ADAPTER_REPLACEMENTS:
-                before, after = ADAPTER_REPLACEMENTS[name]
+            if (variant == "lhapdf" and name in ADAPTER_REPLACEMENTS
+                    or parser_repair and name in PARSER_REPAIRS):
                 original = (args.ihixs_source / name).read_text()
-                if original.count(before) != ADAPTER_COUNTS[name]:
-                    raise ValueError(f"adapter anchor changed in {name}")
-                write_same_or_new(target, original.replace(before, after))
+                write_same_or_new(target, patched_source(name, original, variant, parser_repair))
             elif target.exists():
                 if file_sha256(target) != hashes[name]:
                     raise ValueError(f"build source changed: {target}; use a new --work-dir")
@@ -436,6 +476,18 @@ def load_build(args):
     if file_sha256(data["lhapdf_library_path"]) != data["lhapdf_library_sha256"]:
         raise ValueError("linked LHAPDF library changed since the recorded build")
     return data
+
+
+def load_parser_repair(args, base_build):
+    repaired_args = parser_repair_args(args)
+    data = load_build(repaired_args)
+    expected = {**base_build["identity"], "parser_patch_sha256": parser_repair_sha256()}
+    if data["identity"] != expected or data["source_files"] != base_build["source_files"]:
+        raise ValueError("parser repair must use the original source, physics adapter and build settings")
+    for key in ("lhapdf_library_path", "lhapdf_library_sha256"):
+        if data[key] != base_build[key]:
+            raise ValueError("parser repair must link the original LHAPDF library")
+    return repaired_args, data
 
 
 def pdf_probe(args, point, expected_order=None):
@@ -506,13 +558,53 @@ def benchmark(args, settings):
                "production_executable_sha256": build_data["executable_sha256"]["lhapdf"],
                "input_sha256": run["identity"]["input_sha256"], "output_sha256": run["output_sha256"],
                "pdf": pdf, "variant": "unmodified upstream; original internal alpha_s evolution"}
+    if "parser_patch_sha256" in build_data["identity"]:
+        payload["parser_patch_sha256"] = build_data["identity"]["parser_patch_sha256"]
+        payload["variant"] = "upstream physics with getopt bounds repaired; original internal alpha_s evolution"
     write_json(args.work_dir / "benchmark.json", payload)
     if not passed:
         raise ValueError("published ihixs benchmark failed; inspect benchmark.json and raw output")
     print("Published raw-EFT benchmark passed. Production rates are not yet calculated.")
 
 
-def run_precision_checked(args, settings, point, executable, identity, pdf):
+def load_benchmark(args, build_data):
+    path = args.work_dir / "benchmark.json"
+    if not path.is_file():
+        raise ValueError(f"benchmark is missing in {args.work_dir}; run --stage benchmark first")
+    data = json.loads(path.read_text())
+    if data.get("passed") is not True or data["ihixs_commit"] != norm.IHIXS_COMMIT:
+        raise ValueError("published benchmark must pass before calculating the production rate")
+    for key, artifact in (("input_sha256", args.work_dir / "runs/benchmark/input.card"),
+                          ("output_sha256", args.work_dir / "runs/benchmark/ihixs.out")):
+        if file_sha256(artifact) != data[key]:
+            raise ValueError("benchmark artifact changed")
+    if (data["executable_sha256"] != build_data["executable_sha256"]["upstream"]
+            or data["production_executable_sha256"] != build_data["executable_sha256"]["lhapdf"]):
+        raise ValueError("build changed since benchmark validation")
+    if data.get("parser_patch_sha256") != build_data["identity"].get("parser_patch_sha256"):
+        raise ValueError("benchmark parser repair differs from its build")
+    return data
+
+
+def select_production_execution(args, label, executable, identity, repair_context):
+    """Reuse a completed attempt only with its original, verified executable."""
+    if repair_context is None:
+        return executable, identity
+    repaired_args, _ = repair_context
+    complete = args.work_dir / "runs" / label / "complete.json"
+    if complete.is_file():
+        cached = json.loads(complete.read_text())["identity"]
+        variant = cached["variant"]
+        if variant == "lhapdf":
+            return executable, identity
+        if variant != "lhapdf-parser-repair":
+            raise ValueError(f"completed {label} has an unrecognized build variant")
+    # No completion marker means the process did not finish successfully.
+    # run_card will archive a partial directory before using the repaired build.
+    return repaired_args.work_dir / "build-lhapdf/ihixs", {**identity, "variant": "lhapdf-parser-repair"}
+
+
+def run_precision_checked(args, settings, point, executable, identity, pdf, *, repair_context=None):
     """Preserve every attempt and tighten only points failing the total-rate gate."""
     multiplier = prefactor_multiplier(settings)
     enabled = getattr(args, "refine_failed", False)
@@ -529,8 +621,10 @@ def run_precision_checked(args, settings, point, executable, identity, pdf):
             effective["integration"]["epsabs"] *= epsrel / base_epsrel
             run_label += f"__precision_{attempt}"
         run_identity = {**identity, "settings_sha256": norm.canonical_sha256(effective)}
+        selected_executable, run_identity = select_production_execution(
+            args, run_label, executable, run_identity, repair_context)
         directory, completed = run_card(
-            args, run_label, production_card(effective, point), executable, run_identity)
+            args, run_label, production_card(effective, point), selected_executable, run_identity)
         result = parse_output((directory / "ihixs.out").read_text(), point["qcd_order"])
         if not math.isclose(result["alpha_s_mur"], pdf["alpha_s_mur"], rel_tol=1e-7, abs_tol=1e-10):
             raise ValueError(f"{point['label']}: hard alpha_s does not match LHAPDF alphasQ(muR)")
@@ -556,20 +650,58 @@ def run_precision_checked(args, settings, point, executable, identity, pdf):
                      f"{100. * settings['numerical_relative_tolerance']:g}%; {hint}")
 
 
+def check_repaired_central(args, settings, original, repair_context):
+    """Require unchanged central physics before accepting mixed-build results."""
+    if original["build_variant"] != "lhapdf":
+        raise ValueError("parser repair requires a retained central result from the original build")
+    repaired_args, repaired_build = repair_context
+    effective = copy.deepcopy(settings)
+    effective["integration"] = copy.deepcopy(original["integration"])
+    point = {**calculation_points(settings)[0], "label": "central_check"}
+    pdf = pdf_probe(repaired_args, point, 3)
+    if (pdf["info_sha256"] != original["pdf_info_sha256"]
+            or pdf["member_sha256"] != original["pdf_member_sha256"]):
+        raise ValueError("repaired central check must use the original central PDF grids")
+    identity = {"settings_sha256": norm.canonical_sha256(effective),
+                "pdf_info_sha256": pdf["info_sha256"], "pdf_member_sha256": pdf["member_sha256"],
+                "probe_sha256": repaired_build["probe_sha256"], "variant": "lhapdf-parser-repair"}
+    directory, completed, result = run_precision_checked(
+        repaired_args, effective, point, repaired_args.work_dir / "build-lhapdf/ihixs", identity, pdf)
+    delta = abs(result["cross_section_pb"] / original["cross_section_pb"] - 1.)
+    tolerance = settings["numerical_relative_tolerance"]
+    if delta > tolerance:
+        raise ValueError("parser-repaired central cross section differs from the saved central result "
+                         f"by {100. * delta:.6g}% (required <= {100. * tolerance:g}%); "
+                         "preserve both outputs and investigate before using the normalization")
+    print(f"Parser-repaired 40 TeV central check passed (difference {100. * delta:.6g}%).", flush=True)
+    return {**point, **result, "passed": True, "relative_difference": delta, "relative_tolerance": tolerance,
+            "original_cross_section_pb": original["cross_section_pb"],
+            "original_cross_section_error_pb": original["cross_section_error_pb"],
+            "pdf_alpha_s_mur": pdf["alpha_s_mur"],
+            "input_sha256": completed["identity"]["input_sha256"],
+            "output_sha256": completed["output_sha256"],
+            "pdf_info_sha256": pdf["info_sha256"], "pdf_member_sha256": pdf["member_sha256"],
+            "executable_sha256": completed["identity"]["executable_sha256"],
+            "build_variant": completed["identity"]["variant"],
+            "run_directory": str(directory.relative_to(args.work_dir))}
+
+
 def calculate(args, settings):
     build_data = load_build(args)
     benchmark_path = args.work_dir / "benchmark.json"
-    if not benchmark_path.is_file():
-        raise ValueError("benchmark is missing; run --stage benchmark first")
-    benchmark_data = json.loads(benchmark_path.read_text())
-    if benchmark_data.get("passed") is not True:
-        raise ValueError("published benchmark must pass before calculating the production rate")
-    for key, path in (("input_sha256", args.work_dir / "runs/benchmark/input.card"),
-                      ("output_sha256", args.work_dir / "runs/benchmark/ihixs.out")):
-        if file_sha256(path) != benchmark_data[key]:
-            raise ValueError("benchmark artifact changed")
-    if benchmark_data["production_executable_sha256"] != build_data["executable_sha256"]["lhapdf"]:
-        raise ValueError("production build changed since benchmark validation")
+    benchmark_data = load_benchmark(args, build_data)
+    repair_context = None
+    if getattr(args, "repair_parser", False):
+        repair_context = load_parser_repair(args, build_data)
+        repaired_args, repaired_build = repair_context
+        repaired_benchmark = load_benchmark(repaired_args, repaired_build)
+        central_complete = args.work_dir / "runs/central/complete.json"
+        if not central_complete.is_file():
+            raise ValueError("parser repair requires a verified original central completion for comparison")
+        central_identity = json.loads(central_complete.read_text())["identity"]
+        if (central_identity["variant"] != "lhapdf"
+                or central_identity["executable_sha256"] != build_data["executable_sha256"]["lhapdf"]):
+            raise ValueError("parser repair central baseline must come from the original production build")
     result_runs = []
     pdfs = {}
     multiplier = prefactor_multiplier(settings)
@@ -585,12 +717,17 @@ def calculate(args, settings):
                     "pdf_info_sha256": pdf["info_sha256"], "pdf_member_sha256": pdf["member_sha256"],
                     "probe_sha256": build_data["probe_sha256"], "variant": "lhapdf"}
         directory, completed, result = run_precision_checked(
-            args, settings, point, args.work_dir / "build-lhapdf/ihixs", identity, pdf)
+            args, settings, point, args.work_dir / "build-lhapdf/ihixs", identity, pdf,
+            repair_context=repair_context)
         result_runs.append({**point, **result,
                             "pdf_alpha_s_mur": pdf["alpha_s_mur"],
                             "input_sha256": completed["identity"]["input_sha256"],
                             "output_sha256": completed["output_sha256"],
+                            "executable_sha256": completed["identity"]["executable_sha256"],
+                            "build_variant": completed["identity"]["variant"],
                             "pdf_info_sha256": pdf["info_sha256"], "pdf_member_sha256": pdf["member_sha256"]})
+        if point["label"] == "central" and repair_context is not None:
+            repaired_central = check_repaired_central(args, settings, result_runs[0], repair_context)
     central = result_runs[0]
     scale_rates = [run["cross_section_pb"] for run in result_runs[:7]]
     replicas = [run["cross_section_pb"] for run in result_runs if run["label"].startswith("replica_")]
@@ -600,6 +737,12 @@ def calculate(args, settings):
                       args.work_dir / "runs/benchmark/ihixs.log"]
     for run in result_runs:
         artifact_paths.extend(args.work_dir / run["run_directory"] / name
+                              for name in ("input.card", "ihixs.out", "ihixs.log", "complete.json"))
+    if repair_context is not None:
+        artifact_paths.extend(repaired_args.work_dir / name for name in
+                              ("build-manifest.json", "benchmark.json", "runs/benchmark/input.card",
+                               "runs/benchmark/ihixs.out", "runs/benchmark/ihixs.log", "runs/benchmark/complete.json"))
+        artifact_paths.extend(args.work_dir / repaired_central["run_directory"] / name
                               for name in ("input.card", "ihixs.out", "ihixs.log", "complete.json"))
     payload = {"schema_version": 1, "profile": norm.PROFILE, "normalization_kind": "ihixs_n3lo",
                "process": "ggF", "created_utc": datetime.now(timezone.utc).isoformat(),
@@ -632,6 +775,18 @@ def calculate(args, settings):
                     "artifacts": [{"path": str(path.relative_to(args.work_dir)), "sha256": file_sha256(path)}
                                   for path in artifact_paths],
                     "adapter": ADAPTER_REPLACEMENTS, "settings": settings}}
+    if repair_context is not None:
+        payload["validations"]["parser_repair_benchmark"] = repaired_benchmark
+        payload["validations"]["parser_repair_central"] = repaired_central
+        payload["provenance"]["parser_repair"] = {
+            "ihixs_commit": norm.IHIXS_COMMIT,
+            "source_sha256": repaired_build["identity"]["source_sha256"],
+            "adapter_sha256": repaired_build["identity"]["adapter_sha256"],
+            "parser_patch_sha256": repaired_build["identity"]["parser_patch_sha256"],
+            "executable_sha256": repaired_build["executable_sha256"]["lhapdf"],
+            "build_manifest_sha256": file_sha256(repaired_args.work_dir / "build-manifest.json"),
+            "patches": PARSER_REPAIRS,
+        }
     payload = norm.seal_record(payload)
     norm.validate_record(payload)
     if args.record.exists():
@@ -660,9 +815,24 @@ def main(argv=None):
             raise ValueError("another ihixs normalization command is using this work directory") from exc
         prepare(args, settings)
         if args.stage == "build":
-            build(args, settings)
+            if args.repair_parser:
+                base_build = load_build(args)
+                for key in ("cc", "cxx", "lhapdf_dir", "cuba_dir", "boost_dir"):
+                    value = getattr(args, key)
+                    if (str(value) if isinstance(value, Path) or value is None else value) != base_build["identity"][key]:
+                        raise ValueError(f"parser repair {key} must match the original build")
+                repaired_args = parser_repair_args(args)
+                repaired_args.work_dir.mkdir(parents=True, exist_ok=True)
+                build(repaired_args, settings, parser_repair=True)
+                load_parser_repair(args, base_build)
+            else:
+                build(args, settings)
         elif args.stage == "benchmark":
-            benchmark(args, settings)
+            if args.repair_parser:
+                repaired_args, _ = load_parser_repair(args, load_build(args))
+                benchmark(repaired_args, settings)
+            else:
+                benchmark(args, settings)
         elif args.stage == "calculate":
             calculate(args, settings)
     return 0
