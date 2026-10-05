@@ -2,41 +2,50 @@
 
 What if? Higgs Boson production at the SuperConducting SuperCollider.
 
-This repository contains the course/project files, with the paper tracked in
-`paper/` as a Git submodule.
+This repository contains the course/project files, with ihixs tracked in
+`external/ihixs/` and the paper in `paper/` as pinned Git submodules.
 
 ## Start Here: Clone The Repository
 
-If you are a student, this is the starting point. Clone the repository with
-submodules included:
+Students can clone the public repository over HTTPS and initialize ihixs:
 
 ```bash
-git clone --recurse-submodules git@github.com:apapaefs/HiggsSSC.git
+git clone https://github.com/apapaefs/HiggsSSC.git
 cd HiggsSSC
+git submodule update --init external/ihixs
 ```
 
-The `--recurse-submodules` part is important because the paper lives in a
-separate repository inside `paper/`.
+The [student ihixs guide](hgammagamma/HOAnalysis/IHIXS_STUDENT_GUIDE.md)
+gives the complete Timur setup, dependency installation, calculation commands
+and checks for the HO Higgs normalization. Run the wrapper from `HiggsSSC`;
+you do not need a second ihixs repository or access to the paper.
 
-If you already cloned the repository without that option, run this from inside
-`HiggsSSC`:
+If you already have a checkout, update the source from inside `HiggsSSC`:
 
 ```bash
-git submodule update --init --recursive
+git pull --ff-only origin main
+git submodule sync -- external/ihixs
+git submodule update --init external/ihixs
 ```
 
 Students should not run `git submodule add`. The repository setup has already
 been done once by the instructor/maintainer. For students, the job is only to
 clone the existing repository, update it when needed, and work with the files.
 
+The paper lives in a separate repository and requires its own access. If you
+are working on it, initialize it with `git submodule update --init paper`
+after configuring your GitHub SSH access; see the paper workflow below.
+
 ## Layout
 
 ```text
 HiggsSSC/
-  hgammagamma/ # h -> gamma gamma campaign and LO analysis outputs
+  hgammagamma/ # h -> gamma gamma LO and HO campaigns and analysis
+    HOAnalysis/IHIXS_STUDENT_GUIDE.md # inclusive N3LO ggF setup and commands
     SSC_DETECTOR_RESPONSE.md # GEM response implementation and operating reference
   hfourlepton/ # h -> ZZ* -> 4l LO campaign, unified response analysis, and reports
   analyze_lo_varfiles.py # repo-root cut/XGBoost analysis CLI for _var.root files
+  external/ihixs/ # pinned inclusive Higgs cross-section source
   paper/   # paper submodule -> HiggsAtSSC
 ```
 

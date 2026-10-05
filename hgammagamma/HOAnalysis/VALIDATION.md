@@ -1,8 +1,19 @@
 # Local validation, 17 September 2026
 
-These results predate the ihixs N3LO normalization integration. The new
-workflow and tests have not been run; follow [`README.md`](README.md) to
-calculate the required normalization record before an HO signal analysis.
+The local results below are historical checks from September 17, before
+the ihixs N3LO normalization integration. On October 5, the user completed
+the refined Timur ihixs calculation: all 109 production points, both
+benchmarks, PDF/coupling checks and the repaired central comparison passed.
+The installed pure-HEFT 40 TeV N3LO ggF rate is
+`226.82244161097535 +/- 0.06711554812896317 pb`, with numerical error
+quoted separately from scale and PDF uncertainties. The instructor's
+`ho_100k_02` generation and showers also completed; analysis and report
+remain to run. See [`TIMUR.md`](TIMUR.md#completed-ihixs-run-and-current-campaign).
+
+The fresh student default-build workflow and new ihixs regression tests
+have not been executed while preparing these changes. Follow the
+[student guide](IHIXS_STUDENT_GUIDE.md) for your own installation, build,
+published benchmark, 109-point calculation and tests.
 
 The setup was checked with MadGraph5_aMC@NLO 3.5.15, Herwig 7.3.0,
 ThePEG 2.3.0, LHAPDF 6.5.6, ROOT 6.40.02 and the installed HwSim plugin.
@@ -40,8 +51,10 @@ Completed checks:
 
 These are software and interface checks, not a validation of production
 statistics, matching/isolation dependence, or detector-model systematics.
-The photon-background process exports have not yet undergone NLO integration
-or showering. Full scale/PDF ensembles are not propagated into HwSim outputs.
+At the time of these local checks, the photon-background process exports
+had not undergone NLO integration or showering. The later Timur production
+campaign completed those stages. Full scale/PDF ensembles are not propagated
+into HwSim outputs.
 
 ThePEG emits its generic `IDWTUP = -4` reader warning for both LHE files.
 The `VarNegWeight` mode retains the event weights, as checked event by event

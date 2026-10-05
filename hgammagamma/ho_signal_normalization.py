@@ -81,6 +81,28 @@ def _validate_benchmark(benchmark, production_executable, name="benchmark"):
         raise ValueError(f"published ihixs {name} tolerance failed")
 
 
+def _validate_primary_parser_patch(provenance, benchmark):
+    """Bind fresh-build parser repairs to their descriptor and benchmark."""
+    if "parser_patch_sha256" not in provenance:
+        if "parser_patches" in provenance or "parser_patch_sha256" in benchmark:
+            raise ValueError("primary parser patch lacks its build provenance")
+        return False
+    digest = provenance["parser_patch_sha256"]
+    _hash(digest, "primary parser_patch_sha256")
+    patches = provenance["parser_patches"]
+    if (not isinstance(patches, dict) or set(patches) != {"replacements", "counts"}
+            or any(not isinstance(patches[key], dict) or not patches[key]
+                   for key in ("replacements", "counts"))):
+        raise ValueError("primary parser patch descriptor is incomplete")
+    if canonical_sha256(patches) != digest:
+        raise ValueError("primary parser patch hash differs from its descriptor")
+    benchmark_patch = benchmark["parser_patch_sha256"]
+    _hash(benchmark_patch, "benchmark parser_patch_sha256")
+    if benchmark_patch != digest:
+        raise ValueError("benchmark used a different primary parser patch")
+    return True
+
+
 def _validate_parser_repair_central(check, record, central, repair):
     """Check the repaired binary against the preserved original central rate."""
     if central["build_variant"] != "lhapdf":
@@ -191,6 +213,7 @@ def validate_record(record):
         if validations["benchmark"]["passed"] is not True or validations["alpha_s"]["passed"] is not True:
             raise ValueError("ihixs benchmark and PDF alpha_s validation must pass")
         _validate_benchmark(validations["benchmark"], provenance["executable_sha256"])
+        has_primary_parser_patch = _validate_primary_parser_patch(provenance, validations["benchmark"])
         executables = {"lhapdf": provenance["executable_sha256"]}
         has_parser_repair = "parser_repair" in provenance
         if has_parser_repair:
@@ -226,9 +249,10 @@ def validate_record(record):
             if label not in by_label:
                 raise ValueError(f"ihixs record is missing {label}")
         for run in runs:
-            # Historical records omit both fields. Mixed-build records must
-            # identify every run, including those retained from the base build.
-            if has_parser_repair or "executable_sha256" in run or "build_variant" in run:
+            # Historical records omit both fields. Fresh parser-fixed and
+            # mixed-build records bind every run to its declared executable.
+            if (has_primary_parser_patch or has_parser_repair
+                    or "executable_sha256" in run or "build_variant" in run):
                 _hash(run["executable_sha256"], "run executable hash")
                 variant = run["build_variant"]
                 if not isinstance(variant, str) or variant not in executables:

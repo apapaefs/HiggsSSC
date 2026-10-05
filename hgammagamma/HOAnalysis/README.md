@@ -28,8 +28,13 @@ The HO diphoton signal now requires an inclusive N3LO QCD normalization from
 `external/ihixs` submodule. The event shapes remain HJMiNNLO NNLO+PS. This
 normalization applies only to `signal_gg_h_aa` in an HO campaign; backgrounds,
 LO analyses and the four-lepton analysis retain their existing rates.
-The new ihixs workflow and regression tests have not yet been run. Earlier
-validation results in `VALIDATION.md` and `TIMUR.md` predate this change.
+The instructor's October 5, 2026 refined Timur run completed all 109
+production points, both benchmarks, coupling checks and the repaired central
+comparison, installing `226.82244161097535 +/- 0.06711554812896317 pb`.
+That error is numerical; scale and PDF uncertainties are stored separately.
+Fresh student builds and regression tests remain for students to run.
+Start with the [student ihixs guide](IHIXS_STUDENT_GUIDE.md), which uses
+your own account and the public GitHub checkout.
 
 ## Processes And Conventions
 
@@ -86,6 +91,9 @@ Run the commands below yourself from the repository root, before an HO
 signal `analyze` or `all` stage. No numerical cross section is supplied as
 a placeholder. The analysis refuses to substitute the native LHE rate
 when the required ihixs record is absent or incompatible.
+For a fresh student checkout, the [step-by-step guide](IHIXS_STUDENT_GUIDE.md)
+contains the complete setup and commands. Existing validated records and
+their raw calculation directories should be preserved.
 
 Initialize the pinned source:
 
@@ -101,6 +109,12 @@ directory containing the `boost/` headers. Cuba was not found in the
 inspected Timur Herwig prefix, so provide your own installation. The
 wrapper makes separate upstream and production source/build copies;
 the pinned submodule is kept unchanged.
+Fresh builds apply the two option-parser bounds fixes automatically to both
+copies. The upstream copy retains the published benchmark's physics, while
+the production copy also receives the LHAPDF hard-coupling adapter and strict
+Cuba failure checks. The historical settings note about an "unmodified"
+benchmark source refers to its physics conventions; the parser bounds fixes
+also apply to new benchmark builds.
 
 On Timur, install [Cuba 4.2.2](https://feynarts.de/cuba/) in your own
 prefix before building ihixs. Run this in a separate shell, or return to
@@ -137,13 +151,14 @@ On Timur, activate the runtime and install the additional PDF sets:
 ```bash
 source /etc/profile.d/modules.sh
 module load herwig/stable
-cd /home/apapaefs/Projects/HiggsSSC
-mkdir -p hgammagamma/HOAnalysis/inputs/lhapdf
-export LHAPDF_DATA_PATH="$PWD/hgammagamma/HOAnalysis/inputs/lhapdf:/home/shared/Herwig/share/LHAPDF"
-lhapdf update
-lhapdf install NNPDF40_an3lo_as_01180_qed_mhou
-lhapdf install NNPDF40_nnlo_as_01180_qed
-lhapdf install PDF4LHC15_nnlo_100
+cd "$HOME/Projects/HiggsSSC"
+PDF_INSTALL_DIR="$PWD/hgammagamma/HOAnalysis/inputs/lhapdf"
+mkdir -p "$PDF_INSTALL_DIR"
+export LHAPDF_DATA_PATH="$PDF_INSTALL_DIR:/home/shared/Herwig/share/LHAPDF"
+lhapdf --listdir "$PDF_INSTALL_DIR" --pdfdir "$PDF_INSTALL_DIR" update
+lhapdf --listdir "$PDF_INSTALL_DIR" --pdfdir "$PDF_INSTALL_DIR" install NNPDF40_an3lo_as_01180_qed_mhou
+lhapdf --listdir "$PDF_INSTALL_DIR" --pdfdir "$PDF_INSTALL_DIR" install NNPDF40_nnlo_as_01180_qed
+lhapdf --listdir "$PDF_INSTALL_DIR" --pdfdir "$PDF_INSTALL_DIR" install PDF4LHC15_nnlo_100
 ```
 
 The first set is the approximate N3LO QCD, NLO QED, five-flavour NNPDF4.0
@@ -165,6 +180,9 @@ do not change the inclusive-rate profile.
 ```bash
 CUBA_PREFIX="$HOME/.local/cuba-4.2.2-gcc11"
 IHIXS_OPTIONS=(
+  --settings hgammagamma/HOAnalysis/ihixs-ssc40.json
+  --work-dir hgammagamma/HOAnalysis/normalization/ihixs-student01
+  --record hgammagamma/HOAnalysis/normalization/ggf-ssc40-n3lo.json
   --herwig-module herwig/stable
   --lhapdf-dir /home/shared/Herwig
   --cuba-dir "$CUBA_PREFIX"
@@ -175,13 +193,19 @@ IHIXS_OPTIONS=(
 # Optional: inspect the 109-point plan without running or writing anything.
 python3 hgammagamma/run_ihixs_normalization.py --dry-run "${IHIXS_OPTIONS[@]}"
 
-python3 hgammagamma/run_ihixs_normalization.py --stage build "${IHIXS_OPTIONS[@]}"
-python3 hgammagamma/run_ihixs_normalization.py --stage benchmark "${IHIXS_OPTIONS[@]}"
-python3 hgammagamma/run_ihixs_normalization.py --stage calculate "${IHIXS_OPTIONS[@]}"
+for ihixs_stage in build benchmark calculate; do
+  IHIXS_STAGE_OPTIONS=()
+  if [ "$ihixs_stage" = calculate ]; then
+    IHIXS_STAGE_OPTIONS=(--refine-failed)
+  fi
+  python3 hgammagamma/run_ihixs_normalization.py \
+    --stage "$ihixs_stage" "${IHIXS_OPTIONS[@]}" \
+    --resume "${IHIXS_STAGE_OPTIONS[@]}" || break
+done
 ```
 
 If configuration reports `Cuba not found`, inspect
-`HOAnalysis/normalization/ihixs-ssc40/build-upstream/configure.log` and
+`HOAnalysis/normalization/ihixs-student01/build-upstream/configure.log` and
 check that `--cuba-dir` points to the installed prefix above. A literal
 `/path/to/your/cuba-prefix` is a placeholder and will not work. After
 installing Cuba, repeat `--stage build` in the same work directory;
@@ -223,13 +247,15 @@ If ihixs aborts with return code `-6` (`SIGABRT`) and glibc reports
 attempt complete. Static inspection found two heap overflows in the pinned
 command-line parser: option-name buffers omit the terminating NUL byte,
 and the terminating option entry is written one element beyond its array.
-These are a possible cause of the delayed abort; the diagnosis and repair
-need confirmation from your execution.
+These were a possible cause of the delayed abort in the legacy Timur build.
+The user subsequently completed the repaired calculation and its central
+comparison. New builds include both fixes automatically.
 
-The opt-in `--repair-parser` option recovers an existing calculation and
+The opt-in `--repair-parser` option recovers a legacy calculation and
 requires its original completed build manifest. It applies only those two
-bounds fixes in separate source copies; the pinned submodule and default
-build stay unchanged. Run `build`, then `benchmark`, then `calculate`
+bounds fixes in separate source copies; the pinned submodule stays
+unchanged. Use it only for workspaces whose original builds predate the
+automatic fixes. Run `build`, then `benchmark`, then `calculate`
 with that option and the original settings, work directory and runtime
 options. Keep `--resume` on all three stages and `--refine-failed` on
 `calculate`. The repair creates `WORK_DIR/parser-repair/`, containing
@@ -247,12 +273,13 @@ numerical error and its relative difference from the cached central result
 must each pass the 0.05% requirement; both results are recorded. All 109
 production points and their numerical-error checks remain required.
 
-The exact commands for the existing `ihixs-ssc40-refined01` calculation
+The recovery commands used for the completed `ihixs-ssc40-refined01` calculation
 are in [the Timur parser recovery instructions](TIMUR.md#recover-ihixs-after-a-parser-heap-abort).
-The repair has not been built, benchmarked or used for a calculation while
-preparing these changes; run those stages yourself before using the rate.
+Preserve that completed workspace and its record. The student default-build
+workflow and regression tests have not been executed while preparing these
+changes; run the documented stages yourself for a new calculation.
 
-The benchmark reproduces the unmodified ihixs example's raw
+The benchmark reproduces the published ihixs example's raw
 `eftn3lo = 45.1816 pb` at 13 TeV, within 0.5%; this is **not** the 40 TeV
 rate. Production uses `sqrt(s) = 40000 GeV`, `mH = 125 GeV`, an on-shell
 top mass of 173.2 GeV, the native POWHEG Fermi constant and unit conversion,
@@ -283,7 +310,8 @@ hgammagamma/HOAnalysis/normalization/ggf-ssc40-n3lo.json
 ```
 
 Builds, inputs, logs, raw results and intermediate manifests are preserved
-under `HOAnalysis/normalization/ihixs-ssc40/`. Add `--resume` to repeat a
+under the selected work directory (here
+`HOAnalysis/normalization/ihixs-student01/`). Add `--resume` to repeat a
 benchmark or calculation after interruption; verified completed points
 are reused and interrupted directories are archived. Changed physics,
 PDF files or base integration settings require a fresh `--work-dir` and

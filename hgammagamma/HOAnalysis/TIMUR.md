@@ -3,6 +3,9 @@
 Use `/home/apapaefs/Projects/HiggsSSC` for the LO and HO analyses,
 ihixs calculations, inputs and reports. All commands below run from
 this repository root.
+Students should use their own checkout and account, following
+[`IHIXS_STUDENT_GUIDE.md`](IHIXS_STUDENT_GUIDE.md). The `/home/apapaefs`
+paths and completed campaign below describe the instructor's checkout.
 
 The canonical layout is:
 
@@ -12,7 +15,7 @@ The canonical layout is:
 | MG5 3.5.15 runtime | `MG5_aMC_v3_5_15/` |
 | Signal LHE | `hgammagamma/HOAnalysis/inputs/powheg-hjminnlo-merged.lhe` |
 | Local generation PDFs | `hgammagamma/HOAnalysis/inputs/lhapdf/` |
-| ihixs builds and integrations | `hgammagamma/HOAnalysis/normalization/ihixs-ssc40/` |
+| Completed refined ihixs builds and integrations | `hgammagamma/HOAnalysis/normalization/ihixs-ssc40-refined01/` |
 | Validated N3LO rate | `hgammagamma/HOAnalysis/normalization/ggf-ssc40-n3lo.json` |
 | New production campaign | `hgammagamma/HOAnalysis/runs/ho_100k_02/` |
 | Production report | `hgammagamma/HOAnalysis/plots/ho_100k_02/` |
@@ -46,15 +49,43 @@ Earlier checks used Python 3.9.25, GCC 11.5, Herwig 7.3.0, ThePEG 2.3.0,
 LHAPDF 6.5.3, ROOT 6.40.04 and the installed HwSim plugin. The old
 30-event pilot preserved three negative-weight events and response-weight
 closure to `8.2e-20`; the signal LHE passed the 100,000-event validation.
-Those checks predate ihixs normalization and consolidation. The new
-workflow, generator copy and regression tests are left for you to run.
+Those pilot checks predate ihixs normalization and consolidation. The later
+production generation, showers and ihixs calculation have completed as
+described below. Regression tests remain for you to run.
+
+## Completed ihixs Run And Current Campaign
+
+On October 5, 2026, the user completed `ihixs-ssc40-refined01` and installed
+the validated record at `normalization/ggf-ssc40-n3lo.json`. Its inclusive
+pure-HEFT N3LO ggF rate at 40 TeV is
+`226.82244161097535 +/- 0.06711554812896317 pb`, before any branching
+fraction or detector selection. The quoted uncertainty is numerical; the
+record stores separate scale and PDF uncertainties. All 109 production
+points, the original and repaired 13 TeV benchmarks, coupling checks and
+the repaired central comparison passed. The repaired central rate matched
+the original saved central value exactly.
+
+Preserve the record together with `ihixs-ssc40-refined01/`, including its
+`parser-repair/` tree. Do not rebuild those completed binaries or repeat
+the legacy recovery instructions for that successful calculation. Fresh
+builds now apply the parser bounds fixes automatically; the student guide
+uses a separate new work directory.
+
+The instructor's `ho_100k_02` campaign has completed generation and showers
+for all four samples. Analysis and the report remain to run with the new
+normalization and existing events. Keep the original `HO_OPTIONS` and
+`--nevents 100000` request; saved event counts are handled by the audited
+completion metadata. The signal shower's momentum-consistency warnings
+remain a separate physics-validation issue, as described in the recovery
+section below.
 
 ## After ihixs Finishes
 
-First complete the build, benchmark and all 109 integrations described in
-[`README.md`](README.md#calculate-the-ho-signal-normalization). The
-validated N3LO record above is mandatory for HO signal analysis. The
-existing NNLO signal input and NLO backgrounds retain their generation PDFs.
+The validated N3LO record above is mandatory for HO signal analysis and is
+already installed for the instructor's completed calculation. For a new
+calculation, use the [student guide](IHIXS_STUDENT_GUIDE.md) to build,
+benchmark and complete all 109 points. The existing NNLO signal input and
+NLO backgrounds retain their generation PDFs.
 
 Log in to Timur, preferably inside `screen` or `tmux`, and set up:
 
@@ -102,12 +133,14 @@ python3 hgammagamma/make_gammagamma_report.py \
   --no-density --normalization event_xsec --luminosity-fb "$LUMINOSITY_FB"
 ```
 
-This includes the first integration/shower validation for the backgrounds.
+For a new campaign this checks background integration and showering.
 NLO integration still takes time when requesting only 30 events. Check
 the event counts, signed-weight diagnostics, branching-ratio normalization
 and report before launching production.
 
-Run 100,000 events per sample with the same options:
+For a fresh production campaign, run the stages below in order with the
+same options and a new run tag. For the already generated and showered
+`ho_100k_02`, start at `--stage analyze` and then make the report.
 
 ```bash
 python3 hgammagamma/run_gammagamma_ho_campaign.py \
@@ -257,58 +290,49 @@ No showers, analysis, builds or tests were run while preparing this repair.
 
 ## Resume ihixs After A Production Precision Failure
 
-The `ihixs-ssc40-refined01` build and benchmark passed, but `scale_2`
-returned raw `eftn3lo = 226.524792 +/- 0.121277162 pb`: a 0.053538%
+This is the historical recovery used by the completed refined run. Its
+record is now installed; no precision restart is needed for that run.
+The old precision-only commands were superseded by the parser recovery
+below. The current wrapper refuses an unpatched legacy primary build
+without `--repair-parser`; new students should use the student guide's
+automatic fixed build and precision options.
+
+The `ihixs-ssc40-refined01` build and benchmark passed, but its original
+`scale_2` returned raw `eftn3lo = 226.524792 +/- 0.121277162 pb`: a 0.053538%
 numerical error, above the required 0.05%. About 97% of its numerical
 variance came from the `q1q2` contribution. The pinned ihixs source
 relaxes that N3LO term's relative target by a factor of 10,000. Its
 Cuhre integrator also uses a fixed minimum of 1,000 evaluations, so the
 increased Vegas statistics did not force more evaluations of that term.
 
-Use the same refined settings, workspace and installed builds. The new
+The recovery kept the same refined settings and workspace. The
 `--refine-failed` option reuses passing points and retries only inaccurate
 ones with tighter relative targets in separate directories. For this
 profile, the first retry uses `epsrel = 1e-6`; at most two further retries
 use `1e-7` and `1e-8`. The 0.05% final-error requirement remains in force.
 The settings file, plan, original results and ROOT event samples are kept.
 
-In the shell where `IHIXS_REFINED` is defined, run:
-
-```bash
-cd /home/apapaefs/Projects/HiggsSSC
-git pull --ff-only origin main
-python3 hgammagamma/run_ihixs_normalization.py \
-  --stage calculate "${IHIXS_REFINED[@]}" --resume --refine-failed
-```
-
-If using a fresh shell, reconstruct the options explicitly:
-
-```bash
-source /etc/profile.d/modules.sh
-module load herwig/stable
-export LHAPDF_DATA_PATH="$PWD/hgammagamma/HOAnalysis/inputs/lhapdf:/home/shared/Herwig/share/LHAPDF"
-python3 hgammagamma/run_ihixs_normalization.py \
-  --stage calculate --resume --refine-failed \
-  --settings hgammagamma/HOAnalysis/normalization/ihixs-ssc40-refined01-settings.json \
-  --work-dir hgammagamma/HOAnalysis/normalization/ihixs-ssc40-refined01 \
-  --herwig-module herwig/stable --lhapdf-dir /home/shared/Herwig \
-  --cuba-dir "$HOME/.local/cuba-4.2.2-gcc11" --cc cc --cxx c++ --jobs 8
-```
-
-There is no need to repeat `build` or `benchmark`. A successful calculation
-must still finish all 109 points before creating `ggf-ssc40-n3lo.json`.
-Then use the analysis and report commands above. The mocked regression
-tests are in `tests/test_ihixs_normalization.py` for you to run; no
-calculations, builds or tests were run while preparing this update.
+For an incomplete legacy workspace, use the full parser-recovery loop
+below rather than restarting the old executable. It retains
+`--refine-failed` for the calculation stage. A successful calculation must
+still finish all 109 points before creating `ggf-ssc40-n3lo.json`.
+For the completed run, use the analysis and report commands above. The
+mocked regression suites use `tests/test_ihixs*.py` for you to run;
+no calculations, builds or tests were run while preparing this update.
 
 ## Recover ihixs After A Parser Heap Abort
 
-The resumed `ihixs-ssc40-refined01` calculation completed all seven scale
-points and 100 PDF replicas, including two precision refinements. Its
-`nnlo_native` attempt printed the NNLO result and wrote `ihixs.out`, then
+This is the historical recovery used for the completed October 5 run.
+Fresh student builds apply these parser fixes automatically and do not
+need `--repair-parser`.
+
+Before recovery, the resumed `ihixs-ssc40-refined01` calculation completed
+all seven scale points and 100 PDF replicas, including two precision
+refinements. Its `nnlo_native` attempt printed the NNLO result and wrote `ihixs.out`, then
 aborted with return code `-6` (`SIGABRT`) and
-`corrupted size vs. prev_size`. The two native-PDF comparison points are
-still needed. The aborted output cannot be adopted as a completed run.
+`corrupted size vs. prev_size`. The two native-PDF comparison points were
+still needed at that time. The aborted output could not be adopted as a
+completed run.
 
 Static inspection found two bounds errors in the pinned option parser:
 its option-name allocation omits space for the terminating NUL byte, and
@@ -316,8 +340,9 @@ its terminating option entry is written past the allocated array. These
 are a possible cause of the heap abort. `--repair-parser` applies only
 those two corrections in separate source copies. The physics cards,
 PDFs, hard alpha_s and integration settings stay the same. This option
-recovers an existing work directory with an original completed build
-manifest; the default build and pinned submodule remain unchanged.
+recovers a legacy work directory with an original completed build
+manifest. New default builds include the same bounds fixes; the pinned
+submodule remains unchanged.
 
 Keep the original refined settings and work directory. The repair adds
 `parser-repair/` inside that directory, with separate `source-upstream`,
@@ -336,7 +361,8 @@ mismatch stops publication. Thus this recovery reuses the 107 completed
 points and runs one central verification, the two unfinished comparisons
 and a fresh 13 TeV benchmark.
 
-Run the following yourself on Timur. The loop stops at the first failure
+For a legacy incomplete workspace with this error, run the following
+yourself on Timur. The loop stops at the first failure
 without closing your shell. It builds and benchmarks the separate repair
 before resuming the outstanding calculations:
 
@@ -365,9 +391,11 @@ The final `ggf-ssc40-n3lo.json` is written only after all 109 points,
 both benchmarks, the central comparison and the unchanged 0.05% error
 requirement pass. Preserve the original work directory and its
 `parser-repair/` tree with that record.
-This repair remains unverified until you run the build, benchmark and
-calculation. No builds, tests, integrations or analyses were run while
-preparing it.
+The user subsequently ran this build, benchmark and calculation to
+completion on Timur, including both native-PDF comparisons and the central
+agreement check. No builds, tests, integrations or analyses were run by the
+assistant while preparing the repair. Regression tests and the new student
+default-build workflow remain for users to execute.
 
 The ihixs regression pattern includes the original normalization tests and
 the new parser-repair and record-provenance tests. Run it yourself:

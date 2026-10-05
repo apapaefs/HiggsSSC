@@ -3,8 +3,9 @@
 
 The default stage writes a calculation plan/cards only. No rate is installed
 until all calculations, numerical checks and provenance checks succeed.
-The pinned external/ihixs checkout is never modified: the PDF alpha_s adapter
-is applied in a separate build-source copy, alongside an upstream benchmark.
+The pinned external/ihixs checkout is never modified. New source copies apply
+the getopt bounds fixes automatically; the production copy also uses the PDF
+alpha_s adapter, alongside a benchmark with upstream physics.
 """
 
 from __future__ import annotations
@@ -395,7 +396,7 @@ def parser_repair_args(args):
     return result
 
 
-def build(args, settings, *, parser_repair=False):
+def build(args, settings, *, parser_repair=True):
     paths, hashes = source_inventory(args)
     source_hash = norm.canonical_sha256(hashes)
     adapter_hash = norm.canonical_sha256({"replacements": ADAPTER_REPLACEMENTS, "counts": ADAPTER_COUNTS})
@@ -409,6 +410,10 @@ def build(args, settings, *, parser_repair=False):
     if manifest_path.exists():
         prior = load_build(args)
         if prior["identity"] != identity:
+            legacy_identity = {key: value for key, value in identity.items() if key != "parser_patch_sha256"}
+            if parser_repair and prior["identity"] == legacy_identity:
+                print("Retaining verified legacy builds; use --repair-parser --resume for unfinished calculations.")
+                return
             raise ValueError("build inputs changed; use a new --work-dir")
         print("Reusing verified upstream/production builds.")
         return
@@ -541,6 +546,9 @@ def run_card(args, label, card_text, executable, identity):
 
 def benchmark(args, settings):
     build_data = load_build(args)
+    if "parser_patch_sha256" not in build_data["identity"]:
+        raise ValueError("legacy ihixs benchmark build has no parser bounds fix; use --repair-parser --resume "
+                         "after building the repair, or use a new --work-dir")
     card = (args.work_dir / "source-upstream/runcard/default.card").read_text()
     # Use the paper's unmodified default physics and explicitly pin saved output.
     card = re.sub(r"(?m)^output_filename\s*=.*$", "output_filename = ihixs.out", card)
@@ -688,6 +696,9 @@ def check_repaired_central(args, settings, original, repair_context):
 
 def calculate(args, settings):
     build_data = load_build(args)
+    if "parser_patch_sha256" not in build_data["identity"] and not getattr(args, "repair_parser", False):
+        raise ValueError("legacy ihixs build has no parser bounds fix; use --repair-parser --resume "
+                         "after building and benchmarking the repair, or use a new --work-dir")
     benchmark_path = args.work_dir / "benchmark.json"
     benchmark_data = load_benchmark(args, build_data)
     repair_context = None
@@ -775,6 +786,11 @@ def calculate(args, settings):
                     "artifacts": [{"path": str(path.relative_to(args.work_dir)), "sha256": file_sha256(path)}
                                   for path in artifact_paths],
                     "adapter": ADAPTER_REPLACEMENTS, "settings": settings}}
+    if "parser_patch_sha256" in build_data["identity"]:
+        payload["provenance"]["parser_patch_sha256"] = build_data["identity"]["parser_patch_sha256"]
+        payload["provenance"]["parser_patches"] = {
+            "replacements": PARSER_REPAIRS, "counts": PARSER_REPAIR_COUNTS,
+        }
     if repair_context is not None:
         payload["validations"]["parser_repair_benchmark"] = repaired_benchmark
         payload["validations"]["parser_repair_central"] = repaired_central
