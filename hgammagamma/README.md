@@ -847,10 +847,16 @@ python3 hgammagamma/make_gammagamma_report.py \
 
 ### Running Cut And XGBoost Analyses
 
-The repo-root analysis CLI reads the `_var.root` files written by the LO
-campaign and produces a small analysis report above the campaign outputs.  It
-uses the same MG5 cross sections as the plot report, with rate factors supplied
-by the YAML card or, if omitted, by the campaign `.dat` weight scales.
+The repo-root analysis CLI reads the `_var.root` files and produces a small
+analysis report above the campaign outputs. For LO campaigns it uses the same
+MG5 cross sections as the plot report, with rate factors supplied by the YAML
+card or, if omitted, by the campaign `.dat` weight scales. For HO rectangular
+cuts, use [the HO instructions](HOAnalysis/README.md#normalized-distributions-and-additional-cuts)
+and [the HO cut card](analysis_cards/ho_baseline_cuts.yaml): the signal uses
+validated ihixs normalization and the saved physical BR, while backgrounds
+retain their signed NLO rates. The cut denominator includes discarded shower
+attempts. The LO cut card below contains an LO signal K-factor and must not be
+used for HO samples. XGBoost remains available for LO campaigns.
 
 Install the Python analysis dependencies in the environment where PyROOT is
 available:

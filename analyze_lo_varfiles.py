@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Analyze gamma-gamma LO campaign ``_var.root`` files.
+"""Analyze gamma-gamma LO or HO campaign ``_var.root`` files.
 
 Examples
 --------
@@ -27,6 +27,9 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from read_root_varfiles import FEATURE_NAMES, read_named_ROOT_varfile
+from hgammagamma import ho_shower_completion as ho_shower
+from hgammagamma import ho_signal_normalization as ho_normalization
+from hgammagamma import make_gammagamma_report as campaign_report
 
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -87,6 +90,14 @@ class SampleInfo:
     analysis_name: str = "legacy_direct_photons"
     detector_response: str = "none"
     response_mode: str = "genuine"
+    normalization_sum_weight: float | None = None
+    normalization_kind: str = "generator"
+    ihixs_record_sha256: str = ""
+    shower_quality: dict[str, Any] | None = None
+    requires_full_sample: bool = False
+    tree_entries: int | None = None
+    sum_tree_weight: float | None = None
+    sum_abs_weight: float | None = None
 
 
 @dataclass
@@ -151,6 +162,10 @@ SUMMARY_FIELDS = [
     "selected_cross_section_pb",
     "expected_events",
     "mc_events_after_analysis",
+    "normalization_kind",
+    "normalization_sum_weight",
+    "ihixs_record_sha256",
+    "shower_quality",
 ]
 
 
@@ -375,6 +390,16 @@ def resolve_weight_scale(
 
 
 def parse_cross_section(sample_dir: Path, run_tag: str) -> tuple[float, float | None]:
+    # HO rates live in validated sidecars, including the ihixs signal rate.
+    # Retain historical LO banner parsing for campaigns without these files.
+    if (sample_dir / f"normalization-{run_tag}.json").is_file() or (
+            sample_dir / "campaign.json").is_file():
+        campaign = sample_dir / "campaign.json"
+        manifest = json.loads(campaign.read_text()) if campaign.is_file() else {}
+        if (ho_normalization.is_ho_signal(manifest)
+                or manifest.get("hard_accuracy") == "NLO QCD + PS"
+                or (sample_dir / f"normalization-{run_tag}.json").is_file()):
+            return campaign_report.parse_cross_section(sample_dir, run_tag)
     banner = sample_dir / "mg5_process" / "Events" / run_tag / f"{run_tag}_tag_1_banner.txt"
     if banner.exists():
         text = banner.read_text(errors="ignore")
@@ -400,6 +425,73 @@ def parse_cross_section(sample_dir: Path, run_tag: str) -> tuple[float, float | 
     raise FileNotFoundError(f"could not find MG5 cross section for {sample_dir}")
 
 
+def ho_sample_metadata(sample_dir: Path, run_tag: str, dat_file: Path,
+                       dat: dict[str, float | str], rate_factors: dict[str, float] | None,
+                       category: str) -> dict[str, Any]:
+    """Bind HO cut yields to the same validated rate and shower population as plots."""
+    campaign = sample_dir / "campaign.json"
+    if not campaign.is_file():
+        return {}
+    manifest = json.loads(campaign.read_text())
+    is_signal = ho_normalization.is_ho_signal(manifest)
+    if not is_signal and manifest.get("hard_accuracy") != "NLO QCD + PS":
+        return {}
+    if (manifest.get("run_tag") != run_tag or manifest.get("sample") != sample_dir.name
+            or "analyze" not in manifest.get("completed", [])):
+        raise ValueError(f"HO cuts require the matching completed analysis: {campaign}")
+    campaign_report.validate_ho_analysis_summary(sample_dir, dat_file)
+    saved_scale = float(dat.get("weight_scale", 1.0))
+    if (not math.isfinite(saved_scale) or saved_scale <= 0
+            or not math.isclose(saved_scale, float(manifest["weight_scale"]), rel_tol=1e-12)):
+        raise ValueError(f"HO weight scale differs from its completed campaign: {dat_file}")
+    for key in (sample_dir.name, category):
+        if key in (rate_factors or {}) and not math.isclose(
+                float(rate_factors[key]), saved_scale, rel_tol=1e-12, abs_tol=0.0):
+            raise ValueError(f"HO rate_factors cannot replace the saved physical scale for {sample_dir.name}")
+    sidecar_path = sample_dir / f"normalization-{run_tag}.json"
+    if not sidecar_path.is_file():
+        raise ValueError(f"HO cuts require a normalization sidecar: {sidecar_path}")
+    sidecar = json.loads(sidecar_path.read_text())
+    if is_signal:
+        sidecar = campaign_report.load_ho_signal_sidecar(sample_dir, run_tag, weight_scale=saved_scale)
+    elif (sidecar.get("run_tag") != run_tag or sidecar.get("sample") != sample_dir.name
+          or float(sidecar.get("weight_scale", -1)) != saved_scale
+          or sidecar.get("cross_section_pb") != manifest.get("lhe", {}).get("cross_section_pb")):
+        raise ValueError(f"HO background rate differs from its completed campaign: {sidecar_path}")
+    completion = manifest.get("shower_completion")
+    if completion is None and "shower_completion_sha256" in sidecar:
+        raise ValueError(f"HO rate sidecar lacks its shower completion record: {sample_dir}")
+    quality = None
+    if completion is not None:
+        ho_shower.validate_completion(completion, manifest, directory=sample_dir)
+        if sidecar.get("shower_completion_sha256") != completion["fingerprint"]:
+            raise ValueError(f"HO rate differs from the saved shower population: {sample_dir}")
+        quality = {key: completion.get(key) for key in (
+            "termination", "attempted_events", "saved_events", "discarded_events",
+            "exception_counts", "max_momentum_violation_mev")}
+    if float(dat.get("events_read", 0)) != ho_shower.expected_analysis_events(manifest):
+        raise ValueError(f"HO analysis event count differs from the saved shower: {dat_file}")
+    denominator = ho_shower.normalization_denominator(manifest, float(dat["sum_weight"]), saved_scale)
+    entries = float(dat["tree_entries"])
+    if not math.isfinite(entries) or entries <= 0 or not entries.is_integer():
+        raise ValueError(f"invalid HO response tree count: {dat_file}")
+    tree_weight = float(dat["sum_tree_weight"])
+    absolute_weight = float(dat["sum_abs_weight"])
+    if (not math.isfinite(tree_weight) or not math.isfinite(absolute_weight)
+            or absolute_weight < abs(float(dat["sum_weight"])) * (1.0 - 1e-8)):
+        raise ValueError(f"invalid HO signed-weight summary: {dat_file}")
+    return {
+        "normalization_sum_weight": denominator,
+        "normalization_kind": "ihixs_n3lo" if is_signal else "generator",
+        "ihixs_record_sha256": sidecar.get("ihixs_record_sha256", ""),
+        "shower_quality": quality,
+        "requires_full_sample": True,
+        "tree_entries": int(entries),
+        "sum_tree_weight": tree_weight,
+        "sum_abs_weight": absolute_weight,
+    }
+
+
 def discover_samples(
     analysis_root: Path,
     run_tag: str,
@@ -423,6 +515,7 @@ def discover_samples(
                 raise FileNotFoundError(f"missing .dat summary for {var_file}")
             dat = parse_key_value_dat(dat_file)
             analysis_name, detector_response, response_mode = response_provenance(dat)
+            ho_metadata = ho_sample_metadata(sample_dir, run_tag, dat_file, dat, rate_factors, category)
             cross_section_pb, cross_section_error_pb = parse_cross_section(sample_dir, run_tag)
             dat_weight_scale = float(dat.get("weight_scale", 1.0))
             samples.append(
@@ -434,14 +527,20 @@ def discover_samples(
                     dat_file=dat_file,
                     cross_section_pb=cross_section_pb,
                     cross_section_error_pb=cross_section_error_pb,
-                    weight_scale=resolve_weight_scale(sample_dir.name, category, dat_weight_scale, rate_factors),
+                    weight_scale=dat_weight_scale if ho_metadata else resolve_weight_scale(
+                        sample_dir.name, category, dat_weight_scale, rate_factors),
                     events_read=float(dat.get("events_read", 0.0)),
                     sum_weight=float(dat.get("sum_weight", 0.0)),
                     analysis_name=analysis_name,
                     detector_response=detector_response,
                     response_mode=response_mode,
+                    **ho_metadata,
                 )
             )
+    if requested is not None:
+        missing = requested - {sample.name for sample in samples}
+        if missing:
+            raise FileNotFoundError("missing requested analyzed samples: " + ", ".join(sorted(missing)))
     return samples
 
 
@@ -450,12 +549,28 @@ def apply_cuts(rows: Sequence[dict[str, float]], cuts: Sequence[Cut]) -> list[bo
 
 
 def summarize_sample(sample: SampleInfo, cuts: Sequence[Cut], luminosity_fb: float, max_events: int | None = None) -> dict[str, Any]:
-    rows, weights = read_named_ROOT_varfile(sample.var_file, max_events=max_events)
+    if sample.requires_full_sample and max_events is not None:
+        raise ValueError("HO cut yields require the full sample; remove analysis.max_events")
+    if sample.requires_full_sample:
+        rows, weights = read_named_ROOT_varfile(sample.var_file, max_events=None, strict=True)
+    else:
+        rows, weights = read_named_ROOT_varfile(sample.var_file, max_events=max_events)
     decisions = apply_cuts(rows, cuts)
-    sum_weight = float(sum(weights))
-    sum_selected_weight = float(sum(weight for weight, selected in zip(weights, decisions) if selected))
+    sum_weight = math.fsum(weights)
+    sum_selected_weight = math.fsum(weight for weight, selected in zip(weights, decisions) if selected)
+    if sample.requires_full_sample:
+        if len(rows) != sample.tree_entries or len(weights) != len(rows):
+            raise ValueError(f"HO response tree count differs from its analysis summary: {sample.var_file}")
+        tolerance = 1e-8 * max(math.fsum(abs(weight) for weight in weights), abs(sample.sum_weight), 1e-300)
+        if (sample.sum_tree_weight is None or not math.isfinite(sum_weight)
+                or not math.isclose(sum_weight, sample.sum_tree_weight, rel_tol=0.0, abs_tol=tolerance)
+                or not math.isclose(sum_weight, sample.sum_weight, rel_tol=0.0, abs_tol=tolerance)):
+            raise ValueError(f"HO response tree weights differ from its analysis summary: {sample.var_file}")
     selected_entries = int(sum(1 for selected in decisions if selected))
-    efficiency = sum_selected_weight / sum_weight if sum_weight > 0.0 else 0.0
+    denominator = sample.normalization_sum_weight if sample.normalization_sum_weight is not None else sum_weight
+    if sample.requires_full_sample and (not math.isfinite(denominator) or denominator <= 0):
+        raise ValueError("HO cut normalization requires a positive signed source denominator")
+    efficiency = sum_selected_weight / denominator if denominator > 0.0 else 0.0
     cross_section_pb = sample.cross_section_pb * sample.weight_scale
     selected_cross_section_pb = cross_section_pb * efficiency
     return {
@@ -476,6 +591,10 @@ def summarize_sample(sample: SampleInfo, cuts: Sequence[Cut], luminosity_fb: flo
         "selected_cross_section_pb": selected_cross_section_pb,
         "expected_events": selected_cross_section_pb * luminosity_fb * 1000.0,
         "mc_events_after_analysis": selected_entries,
+        "normalization_kind": sample.normalization_kind,
+        "normalization_sum_weight": denominator,
+        "ihixs_record_sha256": sample.ihixs_record_sha256,
+        "shower_quality": sample.shower_quality,
     }
 
 
@@ -694,6 +813,8 @@ def run_cuts(config_path: Path, run_tag_override: str | None = None, progress_en
     analysis, _, name, run_tag, luminosity_fb, samples, output_dir = load_analysis_inputs(config_path, run_tag_override)
     cuts = [Cut.from_mapping(item) for item in analysis.get("cuts", [])]
     max_events = analysis.get("max_events")
+    if max_events is not None and any(sample.requires_full_sample for sample in samples):
+        raise ValueError("HO cut yields require the full sample; remove analysis.max_events")
     rows: list[dict[str, Any]] = []
     progress = ProgressBar(len(samples), "Analyzing samples", enabled=progress_enabled)
     try:
@@ -721,6 +842,10 @@ def run_cuts(config_path: Path, run_tag_override: str | None = None, progress_en
 
 def run_xgboost(config_path: Path, run_tag_override: str | None = None, progress_enabled: bool = True) -> AnalysisRunResult:
     analysis, _, name, run_tag, luminosity_fb, samples, output_dir = load_analysis_inputs(config_path, run_tag_override)
+    # The legacy classifier's training/validation treatment was built for LO
+    # weights. HO support in this CLI currently covers rectangular cuts only.
+    if any(sample.requires_full_sample for sample in samples):
+        raise ValueError("HO campaigns currently support the cuts subcommand; HO XGBoost requires a signed-weight validation")
     signal_samples = [sample for sample in samples if sample.category == "Signal"]
     background_samples = [sample for sample in samples if sample.category != "Signal"]
     if not signal_samples or not background_samples:

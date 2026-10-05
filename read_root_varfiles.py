@@ -1,4 +1,4 @@
-"""Read gamma-gamma variable ROOT files produced by the LO analysis."""
+"""Read gamma-gamma variable ROOT files produced by the shared LO/HO analysis."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def _finite(values: Iterable[float]) -> bool:
     return all(math.isfinite(value) for value in values)
 
 
-def _open_tree(filename: str | Path):
+def _open_tree(filename: str | Path, strict: bool = False):
     path = Path(filename)
     if not path.exists():
         raise FileNotFoundError(f"ROOT variable file does not exist: {path}")
@@ -49,17 +49,29 @@ def _open_tree(filename: str | Path):
     root_file = ROOT.TFile.Open(str(path))
     if not root_file or root_file.IsZombie():
         raise OSError(f"Failed to open ROOT variable file: {path}")
+    if strict and root_file.TestBit(ROOT.TFile.kRecovered):
+        root_file.Close()
+        raise OSError(f"Recovered ROOT variable file is not accepted for HO yields: {path}")
 
     tree = root_file.Get(TREE_NAME)
     if not tree:
         root_file.Close()
         raise KeyError(f"{path} does not contain a {TREE_NAME} tree")
+    if strict and not tree.InheritsFrom("TTree"):
+        root_file.Close()
+        raise TypeError(f"{path}: {TREE_NAME} is not a TTree")
     if not tree.GetBranch("variables"):
         root_file.Close()
         raise KeyError(f"{path}: {TREE_NAME} tree does not contain a variables branch")
     if not tree.GetBranch("eventweight"):
         root_file.Close()
         raise KeyError(f"{path}: {TREE_NAME} tree does not contain an eventweight branch")
+    if strict:
+        for name, length in (("variables", VARIABLE_COUNT), ("eventweight", 1)):
+            leaf = tree.GetLeaf(name)
+            if not leaf or leaf.GetLeafCount() or int(leaf.GetLenStatic()) != length:
+                root_file.Close()
+                raise ValueError(f"{path}: invalid {name} branch length for HO yields")
     return path, root_file, tree
 
 
@@ -70,13 +82,15 @@ def read_ROOT_varfile(
     max_events=None,
     include_weight_feature=False,
     selected_only=False,
+    strict=False,
 ):
     """Return feature rows, labels, and weighted event weights from a gamma-gamma tree."""
 
     if max_events is not None and int(max_events) <= 0:
         raise ValueError("max_events must be positive")
 
-    _, root_file, tree = _open_tree(filename)
+    before = Path(filename).stat() if strict else None
+    path, root_file, tree = _open_tree(filename, strict=strict)
     try:
         n_entries = int(tree.GetEntries())
         if max_events is not None and not selected_only:
@@ -87,10 +101,18 @@ def read_ROOT_varfile(
         weights = []
 
         for entry in range(n_entries):
-            tree.GetEntry(entry)
+            entry_bytes = tree.GetEntry(entry)
+            if strict and entry_bytes <= 0:
+                raise OSError(f"Unreadable HO response tree entry {entry}: {path}")
+            if strict:
+                for name in ("variables", "eventweight"):
+                    if tree.GetBranch(name).GetEntry(entry) <= 0:
+                        raise OSError(f"Unreadable HO {name} branch entry {entry}: {path}")
             values = [float(tree.variables[index]) for index in range(VARIABLE_COUNT)]
             weight = _as_scalar(tree.eventweight)
             if not math.isfinite(weight) or not _finite(values):
+                if strict:
+                    raise ValueError(f"Non-finite HO response tree entry {entry}: {path}")
                 continue
             if selected_only and values[9] < 2.0:
                 continue
@@ -101,15 +123,20 @@ def read_ROOT_varfile(
             if selected_only and max_events is not None and len(features) >= int(max_events):
                 break
 
+        if strict:
+            after = path.stat()
+            if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+                raise OSError(f"ROOT variable file changed during inspection: {path}")
         return features, labels, weights
     finally:
         root_file.Close()
 
 
-def read_named_ROOT_varfile(filename, max_events=None):
+def read_named_ROOT_varfile(filename, max_events=None, strict=False):
     """Return named gamma-gamma rows and event weights from a ROOT variable file."""
 
-    features, _, weights = read_ROOT_varfile(filename, sample_id=0, xsec=1.0, max_events=max_events)
+    features, _, weights = read_ROOT_varfile(filename, sample_id=0, xsec=1.0,
+                                          max_events=max_events, strict=strict)
     rows = [dict(zip(FEATURE_NAMES, row)) for row in features]
     return rows, weights
 

@@ -503,6 +503,71 @@ necessary before interpreting efficiencies or distributions. Existing LO
 analysis cards with K-factors, or classifiers requiring positive training
 weights, should not be reused blindly for these samples.
 
+### Normalized Distributions And Additional Cuts
+
+For the existing `ho_100k_02` campaign, first complete `--stage analyze`
+with its original campaign options and the validated ihixs record. The
+following commands then read the saved outputs; they do not regenerate or
+reshower events. Run them from the canonical Timur repository root with
+`herwig/stable` loaded so that PyROOT is available.
+
+To compare unit-area distributions, write a separate shape report:
+
+```bash
+python3 hgammagamma/make_gammagamma_report.py \
+  --analysis-root hgammagamma/HOAnalysis/runs/ho_100k_02 \
+  --run-tag ho_100k_02 \
+  --samples signal_gg_h_aa,bkg_prompt_aa,bkg_gamma_j,bkg_dy_ee \
+  --output-dir hgammagamma/HOAnalysis/plots/ho_100k_02_shapes \
+  --normalization unit_area --luminosity-fb 100
+```
+
+Leaving out `--no-density` overlays normalized densities for each sample.
+The physical yields in the report tables still use the validated ihixs
+signal rate and the generated NLO background rates. Check that the command
+reports `Loaded 4 samples`. These distributions use the existing detector
+selection and are plotted before the additional mass-window cuts below.
+
+Apply the HO cut card to the saved `_var.root` files:
+
+```bash
+python3 analyze_lo_varfiles.py cuts \
+  --config hgammagamma/analysis_cards/ho_baseline_cuts.yaml \
+  --run-tag ho_100k_02
+```
+
+The card selects at least two reconstructed photons and
+`120 <= m_gg <= 130 GeV`, with inclusive boundaries and logical AND. It
+requires all four samples, the SSC detector response, and the full saved
+tree population. It uses a luminosity of `100 fb^-1`; edit
+`analysis.luminosity_fb` in the card to choose another luminosity, and edit
+`analysis.cuts` to choose another selection. Do not add the LO signal
+`rate_factors` or use `max_events` for these HO yields.
+
+The cut analysis verifies the completed campaign, analysis summaries,
+normalization sidecars and signed tree-weight closure. Its signal
+production cross section is the validated ihixs N3LO value. The physical
+diphoton BR is included once, and the denominator retains all attempted
+source events, including discarded shower attempts. Backgrounds retain
+their generated NLO normalization and saved response weights.
+Selected tree entries count detector-response hypotheses; they need not
+equal the number of unique source events. Expected yields use signed
+weights rather than those entry counts.
+
+The cut report is written to
+`hgammagamma/HOAnalysis/analyses/ho_100k_02/baseline_cuts/`:
+
+- `index.html` gives the selected rates and expected yields;
+- `summary.csv` and `summary.json` provide the numerical results and provenance.
+
+This command creates a cut summary, without post-cut distribution plots.
+The separate shape report remains at
+`hgammagamma/HOAnalysis/plots/ho_100k_02_shapes/index.html`. Recorded shower
+quality warnings remain relevant to both reports; rate normalization does
+not resolve them. These commands and the HO cut regression tests have not
+been run while preparing this update; run them yourself after completing
+the campaign's analysis stage.
+
 ## Tests To Run Yourself
 
 The new Python tests exercise raw-EFT parsing, completeness/provenance,
@@ -513,6 +578,8 @@ They need no ihixs build, generators or ROOT:
 python3 -m unittest discover -s tests -p 'test_ihixs*.py' -v
 python3 -m unittest discover -s tests -p 'test_ho_normalization_*.py' -v
 python3 -m unittest discover -s tests -p 'test_ho_shower_completion.py' -v
+python3 -m unittest discover -s tests -p 'test_ho_cut_normalization.py' -v
+python3 -m unittest discover -s tests -p 'test_ho_varfile_integrity.py' -v
 ```
 
 Then run the existing gamma-gamma and HO regression suites with the
