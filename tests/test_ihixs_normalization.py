@@ -2,12 +2,14 @@
 
 import contextlib
 import copy
+import hashlib
 import io
 import json
 import math
 from pathlib import Path
 import statistics
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -269,6 +271,228 @@ class IhixsWrapperTests(unittest.TestCase):
                 path.write_text(json.dumps({**settings, key: value}))
                 with self.assertRaises(ValueError):
                     wrapper.load_settings(path)
+
+
+class PrecisionRefinementTests(unittest.TestCase):
+    """Mock integrations: refinement changes numerical inputs, never physics."""
+
+    def fixture(self, tmp, *, refine_failed=False):
+        work = Path(tmp) / "work"
+        args = SimpleNamespace(work_dir=work, resume=True, refine_failed=refine_failed)
+        settings = json.loads(wrapper.DEFAULT_SETTINGS.read_text())
+        settings["integration"].update(epsrel=5e-5, epsabs=.025,
+                                       mineval=200000, maxeval=200000000,
+                                       nstart=40000, nincrease=4000)
+        point = {"label": "scale_2", "mur_gev": 31.25, "muf_gev": 62.5,
+                 "pdf_member": 0, "pdf_set": norm.PDF_SET, "qcd_order": "N3LO"}
+        identity = {"settings_sha256": norm.canonical_sha256(settings), "pdf_info_sha256": "b" * 64,
+                    "pdf_member_sha256": "c" * 64, "probe_sha256": "d" * 64,
+                    "variant": "lhapdf"}
+        pdf = {"alpha_s_mur": .125, "alpha_s_91_1876": .118}
+        executable = work / "build-lhapdf/ihixs"
+        return args, settings, point, executable, identity, pdf
+
+    @staticmethod
+    def result(error=.01, **updates):
+        return {"result_key": "eftn3lo", "raw_cross_section_pb": 100.,
+                "raw_cross_section_error_pb": error, "alpha_s_mur": .125,
+                "alpha_s_at_91_1876": .118, **updates}
+
+    def fake_runs(self):
+        """A run_card boundary double retaining prior inputs/output verbatim."""
+        calls = []
+        created = []
+
+        def run(args, label, card, executable, identity):
+            calls.append((label, card, executable, copy.deepcopy(identity)))
+            directory = args.work_dir / "runs" / label
+            completed = {"identity": {**identity,
+                         "input_sha256": hashlib.sha256(card.encode()).hexdigest()},
+                         "output_sha256": hashlib.sha256(label.encode()).hexdigest()}
+            if directory.exists():
+                self.assertEqual((directory / "input.card").read_text(), card)
+                self.assertEqual(json.loads((directory / "complete.json").read_text()), completed)
+            else:
+                directory.mkdir(parents=True)
+                (directory / "input.card").write_text(card)
+                (directory / "ihixs.out").write_text("synthetic output: " + label)
+                (directory / "complete.json").write_text(json.dumps(completed))
+                created.append(label)
+            return directory, completed
+
+        return run, calls, created
+
+    @staticmethod
+    def card_options(card):
+        return dict(line.split(" = ", 1) for line in card.splitlines()
+                    if " = " in line and not line.lstrip().startswith("#"))
+
+    def test_valid_base_point_needs_no_flag_or_refinement(self):
+        with TemporaryDirectory() as tmp:
+            args, settings, point, executable, identity, pdf = self.fixture(tmp)
+            # Older callers without the new optional attribute retain strict behavior.
+            del args.refine_failed
+            run, calls, created = self.fake_runs()
+            with mock.patch.object(wrapper, "run_card", side_effect=run), \
+                    mock.patch.object(wrapper, "parse_output", return_value=self.result()) as parsed:
+                directory, completed, result = wrapper.run_precision_checked(
+                    args, settings, point, executable, identity, pdf)
+            self.assertEqual(directory, args.work_dir / "runs/scale_2")
+            self.assertEqual(created, ["scale_2"])
+            self.assertEqual(calls[0][1], wrapper.production_card(settings, point))
+            self.assertEqual(calls[0][3], identity)
+            self.assertEqual(result["precision_refinements"], 0)
+            self.assertEqual(result["run_directory"], "runs/scale_2")
+            multiplier = wrapper.prefactor_multiplier(settings)
+            self.assertAlmostEqual(result["cross_section_pb"], 100. * multiplier)
+            self.assertAlmostEqual(result["cross_section_error_pb"], .01 * multiplier)
+            self.assertEqual(completed["identity"]["settings_sha256"], identity["settings_sha256"])
+            parsed.assert_called_once_with("synthetic output: scale_2", "N3LO")
+
+    def test_precision_failure_without_flag_stops_after_base(self):
+        with TemporaryDirectory() as tmp:
+            args, settings, point, executable, identity, pdf = self.fixture(tmp)
+            run, calls, created = self.fake_runs()
+            with mock.patch.object(wrapper, "run_card", side_effect=run), \
+                    mock.patch.object(wrapper, "parse_output", return_value=self.result(.1)):
+                with self.assertRaisesRegex(ValueError, "numerical uncertainty"):
+                    wrapper.run_precision_checked(args, settings, point, executable, identity, pdf)
+            self.assertEqual([call[0] for call in calls], ["scale_2"])
+            self.assertEqual(created, ["scale_2"])
+
+    def test_only_failed_point_is_refined_and_all_original_artifacts_survive(self):
+        with TemporaryDirectory() as tmp:
+            args, settings, point, executable, identity, pdf = self.fixture(tmp, refine_failed=True)
+            original_settings = copy.deepcopy(settings)
+            central = {**point, "label": "central", "mur_gev": 62.5}
+            run, calls, created = self.fake_runs()
+            with mock.patch.object(wrapper, "run_card", side_effect=run), \
+                    mock.patch.object(wrapper, "parse_output", side_effect=[
+                        self.result(), self.result(.1), self.result(.01)]):
+                central_dir, _, central_result = wrapper.run_precision_checked(
+                    args, settings, central, executable, identity, pdf)
+                central_contents = {p.name: p.read_bytes() for p in central_dir.iterdir()}
+                directory, _, result = wrapper.run_precision_checked(
+                    args, settings, point, executable, identity, pdf)
+            self.assertEqual(created, ["central", "scale_2", "scale_2__precision_1"])
+            self.assertEqual([call[0] for call in calls], created)
+            self.assertEqual(central_result["precision_refinements"], 0)
+            self.assertEqual(directory, args.work_dir / "runs/scale_2__precision_1")
+            self.assertEqual(result["precision_refinements"], 1)
+            self.assertEqual(result["run_directory"], "runs/scale_2__precision_1")
+            self.assertEqual({p.name: p.read_bytes() for p in central_dir.iterdir()}, central_contents)
+            self.assertEqual((args.work_dir / "runs/scale_2/input.card").read_text(),
+                             wrapper.production_card(original_settings, point))
+            self.assertEqual((args.work_dir / "runs/scale_2/ihixs.out").read_text(),
+                             "synthetic output: scale_2")
+            self.assertEqual(settings, original_settings)
+            base_options = self.card_options(calls[1][1])
+            retry_options = self.card_options(calls[2][1])
+            for key in base_options:
+                if key not in ("epsrel", "epsabs"):
+                    self.assertEqual(retry_options[key], base_options[key], key)
+            self.assertAlmostEqual(float(retry_options["epsrel"]), 1e-6)
+            self.assertAlmostEqual(float(retry_options["epsabs"]), .0005)
+            self.assertEqual(result["integration"]["epsrel"], 1e-6)
+            self.assertAlmostEqual(result["integration"]["epsabs"], .0005)
+            self.assertEqual(calls[2][2], executable)
+            expected_settings = copy.deepcopy(original_settings)
+            expected_settings["integration"]["epsrel"] = 1e-6
+            expected_settings["integration"]["epsabs"] *= 1e-6 / original_settings["integration"]["epsrel"]
+            self.assertEqual(calls[2][3], {**identity,
+                             "settings_sha256": norm.canonical_sha256(expected_settings)})
+
+    def test_verified_refinement_is_revisited_via_same_run_card_identity(self):
+        with TemporaryDirectory() as tmp:
+            args, settings, point, executable, identity, pdf = self.fixture(tmp, refine_failed=True)
+            run, calls, created = self.fake_runs()
+            outputs = [self.result(.1), self.result(.01)] * 2
+            with mock.patch.object(wrapper, "run_card", side_effect=run), \
+                    mock.patch.object(wrapper, "parse_output", side_effect=outputs):
+                first = wrapper.run_precision_checked(args, settings, point, executable, identity, pdf)
+                saved = {str(p.relative_to(args.work_dir)): p.read_bytes()
+                         for p in (args.work_dir / "runs").rglob("*") if p.is_file()}
+                second = wrapper.run_precision_checked(args, settings, point, executable, identity, pdf)
+            self.assertEqual(first, second)
+            self.assertEqual(created, ["scale_2", "scale_2__precision_1"])
+            self.assertEqual([call[0] for call in calls], created * 2)
+            self.assertEqual(calls[:2], calls[2:])
+            self.assertEqual({str(p.relative_to(args.work_dir)): p.read_bytes()
+                              for p in (args.work_dir / "runs").rglob("*") if p.is_file()}, saved)
+
+    def test_three_refinements_are_tenfold_tighter_and_exhaustion_fails_closed(self):
+        with TemporaryDirectory() as tmp:
+            args, settings, point, executable, identity, pdf = self.fixture(tmp, refine_failed=True)
+            run, calls, created = self.fake_runs()
+            with mock.patch.object(wrapper, "run_card", side_effect=run), \
+                    mock.patch.object(wrapper, "parse_output", return_value=self.result(.1)):
+                with self.assertRaisesRegex(ValueError, "numerical uncertainty"):
+                    wrapper.run_precision_checked(args, settings, point, executable, identity, pdf)
+            labels = ["scale_2"] + [f"scale_2__precision_{index}" for index in range(1, 4)]
+            self.assertEqual(created, labels)
+            self.assertEqual([call[0] for call in calls], labels)
+            for index, call in enumerate(calls[1:]):
+                options = self.card_options(call[1])
+                self.assertAlmostEqual(float(options["epsrel"]), 1e-6 / (10 ** index), places=12)
+                self.assertAlmostEqual(float(options["epsabs"]), .0005 / (10 ** index), places=12)
+
+    def test_already_tight_base_gets_tighter_and_second_success_is_selected(self):
+        with TemporaryDirectory() as tmp:
+            args, settings, point, executable, identity, pdf = self.fixture(tmp, refine_failed=True)
+            settings["integration"]["epsrel"] = 5e-7
+            identity["settings_sha256"] = norm.canonical_sha256(settings)
+            run, calls, created = self.fake_runs()
+            with mock.patch.object(wrapper, "run_card", side_effect=run), \
+                    mock.patch.object(wrapper, "parse_output", side_effect=[
+                        self.result(.1), self.result(.08), self.result(.01)]):
+                directory, _, result = wrapper.run_precision_checked(
+                    args, settings, point, executable, identity, pdf)
+            self.assertEqual(created, ["scale_2", "scale_2__precision_1", "scale_2__precision_2"])
+            self.assertEqual(directory, args.work_dir / "runs/scale_2__precision_2")
+            self.assertEqual(result["run_directory"], "runs/scale_2__precision_2")
+            self.assertEqual(result["precision_refinements"], 2)
+            self.assertAlmostEqual(float(self.card_options(calls[1][1])["epsrel"]), 5e-8, places=14)
+            self.assertAlmostEqual(result["integration"]["epsrel"], 5e-9, places=14)
+            self.assertAlmostEqual(result["integration"]["epsabs"], .00025)
+
+    def test_alpha_s_mismatch_is_never_retried_even_with_large_integration_error(self):
+        for wrong in ({"alpha_s_mur": .126}, {"alpha_s_at_91_1876": .119}):
+            with self.subTest(wrong=wrong), TemporaryDirectory() as tmp:
+                args, settings, point, executable, identity, pdf = self.fixture(tmp, refine_failed=True)
+                run, calls, _ = self.fake_runs()
+                with mock.patch.object(wrapper, "run_card", side_effect=run), \
+                        mock.patch.object(wrapper, "parse_output", return_value=self.result(.1, **wrong)):
+                    with self.assertRaisesRegex(ValueError, "alpha_s"):
+                        wrapper.run_precision_checked(args, settings, point, executable, identity, pdf)
+                self.assertEqual([call[0] for call in calls], ["scale_2"])
+
+    def test_execution_and_parser_errors_are_not_precision_refinements(self):
+        for error, target in ((RuntimeError("synthetic process failure"), "run_card"),
+                              (ValueError("ambiguous raw EFT output"), "parse_output")):
+            with self.subTest(target=target), TemporaryDirectory() as tmp:
+                args, settings, point, executable, identity, pdf = self.fixture(tmp, refine_failed=True)
+                run, calls, _ = self.fake_runs()
+                with mock.patch.object(wrapper, "run_card", side_effect=run) as runner, \
+                        mock.patch.object(wrapper, "parse_output", return_value=self.result()) as parsed:
+                    (runner if target == "run_card" else parsed).side_effect = error
+                    with self.assertRaisesRegex(type(error), str(error)):
+                        wrapper.run_precision_checked(args, settings, point, executable, identity, pdf)
+                self.assertEqual(runner.call_count, 1)
+                if target == "parse_output":
+                    self.assertEqual([call[0] for call in calls], ["scale_2"])
+
+    def test_refinement_flag_requires_calculate_and_resume(self):
+        self.assertFalse(wrapper.parse_args(["--stage", "calculate", "--resume"]).refine_failed)
+        args = wrapper.parse_args(["--stage", "calculate", "--resume", "--refine-failed"])
+        self.assertTrue(args.refine_failed)
+        for argv in (["--stage", "calculate", "--refine-failed"],
+                     ["--refine-failed", "--resume"],
+                     ["--stage", "build", "--resume", "--refine-failed"],
+                     ["--stage", "benchmark", "--resume", "--refine-failed"]):
+            with self.subTest(argv=argv), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as raised:
+                    wrapper.parse_args(argv)
+                self.assertEqual(raised.exception.code, 2)
 
 
 if __name__ == "__main__":

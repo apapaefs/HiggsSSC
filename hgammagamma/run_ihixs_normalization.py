@@ -10,6 +10,7 @@ is applied in a separate build-source copy, alongside an upstream benchmark.
 from __future__ import annotations
 
 import argparse
+import copy
 from datetime import datetime, timezone
 import fcntl
 import hashlib
@@ -37,6 +38,7 @@ REPO_ROOT = SCRIPT_DIR.parent
 DEFAULT_SETTINGS = SCRIPT_DIR / "HOAnalysis/ihixs-ssc40.json"
 DEFAULT_WORK = SCRIPT_DIR / "HOAnalysis/normalization/ihixs-ssc40"
 NUMBER = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eEdD][-+]?\d+)?"
+PRECISION_REFINEMENT_LIMIT = 3
 
 ADAPTER_REPLACEMENTS = {
     "src/core/input_parameters.cpp": (
@@ -143,10 +145,14 @@ def parse_args(argv=None):
     parser.add_argument("--herwig-env", type=Path)
     parser.add_argument("--herwig-module")
     parser.add_argument("--resume", action="store_true", help="reuse verified results and archive interrupted run directories")
+    parser.add_argument("--refine-failed", action="store_true",
+                        help="with calculate --resume, retry inaccurate points at tighter epsrel in separate directories")
     parser.add_argument("--dry-run", action="store_true", help="print the plan without running or writing anything")
     args = parser.parse_args(argv)
     if args.jobs < 1:
         parser.error("--jobs must be positive")
+    if args.refine_failed and (args.stage != "calculate" or not args.resume):
+        parser.error("--refine-failed requires --stage calculate --resume")
     for key in ("settings", "ihixs_source", "work_dir", "record", "powheg_input",
                 "lhapdf_dir", "cuba_dir", "boost_dir", "pdf_data_dir", "herwig_env"):
         value = getattr(args, key)
@@ -506,6 +512,50 @@ def benchmark(args, settings):
     print("Published raw-EFT benchmark passed. Production rates are not yet calculated.")
 
 
+def run_precision_checked(args, settings, point, executable, identity, pdf):
+    """Preserve every attempt and tighten only points failing the total-rate gate."""
+    multiplier = prefactor_multiplier(settings)
+    enabled = getattr(args, "refine_failed", False)
+    refinements = PRECISION_REFINEMENT_LIMIT if enabled else 0
+    base_epsrel = settings["integration"]["epsrel"]
+    for attempt in range(refinements + 1):
+        effective = copy.deepcopy(settings)
+        run_label = point["label"]
+        if attempt:
+            # EFT terms use Cuhre, with per-term accuracy relaxations up to
+            # 10000. Extra Vegas statistics do not tighten these targets.
+            epsrel = min(base_epsrel / 10., 1.e-6) / 10. ** (attempt - 1)
+            effective["integration"]["epsrel"] = epsrel
+            effective["integration"]["epsabs"] *= epsrel / base_epsrel
+            run_label += f"__precision_{attempt}"
+        run_identity = {**identity, "settings_sha256": norm.canonical_sha256(effective)}
+        directory, completed = run_card(
+            args, run_label, production_card(effective, point), executable, run_identity)
+        result = parse_output((directory / "ihixs.out").read_text(), point["qcd_order"])
+        if not math.isclose(result["alpha_s_mur"], pdf["alpha_s_mur"], rel_tol=1e-7, abs_tol=1e-10):
+            raise ValueError(f"{point['label']}: hard alpha_s does not match LHAPDF alphasQ(muR)")
+        if not math.isclose(result["alpha_s_at_91_1876"], pdf["alpha_s_91_1876"], rel_tol=1e-7, abs_tol=1e-10):
+            raise ValueError(f"{point['label']}: input alpha_s(MZ) does not match the selected PDF")
+        sigma = result["raw_cross_section_pb"] * multiplier
+        error = result["raw_cross_section_error_pb"] * multiplier
+        relative_error = error / sigma
+        if relative_error <= settings["numerical_relative_tolerance"]:
+            result.update(cross_section_pb=sigma, cross_section_error_pb=error,
+                          integration=effective["integration"], precision_refinements=attempt,
+                          run_directory=str(directory.relative_to(args.work_dir)))
+            return directory, completed, result
+        print(f"{point['label']}: retained {run_label} with numerical error "
+              f"{100. * relative_error:.6g}% (required <= "
+              f"{100. * settings['numerical_relative_tolerance']:.6g}%)", flush=True)
+        if attempt < refinements:
+            next_epsrel = min(base_epsrel / 10., 1.e-6) / 10. ** attempt
+            print(f"{point['label']}: retrying only this point with epsrel={next_epsrel:g}", flush=True)
+    hint = ("precision refinements exhausted; inspect the saved attempts"
+            if enabled else "use --resume --refine-failed to retry this point with tighter epsrel")
+    raise ValueError(f"{point['label']}: numerical uncertainty exceeds "
+                     f"{100. * settings['numerical_relative_tolerance']:g}%; {hint}")
+
+
 def calculate(args, settings):
     build_data = load_build(args)
     benchmark_path = args.work_dir / "benchmark.json"
@@ -534,18 +584,9 @@ def calculate(args, settings):
         identity = {"settings_sha256": norm.canonical_sha256(settings),
                     "pdf_info_sha256": pdf["info_sha256"], "pdf_member_sha256": pdf["member_sha256"],
                     "probe_sha256": build_data["probe_sha256"], "variant": "lhapdf"}
-        directory, completed = run_card(args, point["label"], production_card(settings, point),
-                                        args.work_dir / "build-lhapdf/ihixs", identity)
-        result = parse_output((directory / "ihixs.out").read_text(), point["qcd_order"])
-        if not math.isclose(result["alpha_s_mur"], pdf["alpha_s_mur"], rel_tol=1e-7, abs_tol=1e-10):
-            raise ValueError(f"{point['label']}: hard alpha_s does not match LHAPDF alphasQ(muR)")
-        if not math.isclose(result["alpha_s_at_91_1876"], pdf["alpha_s_91_1876"], rel_tol=1e-7, abs_tol=1e-10):
-            raise ValueError(f"{point['label']}: input alpha_s(MZ) does not match the selected PDF")
-        sigma = result["raw_cross_section_pb"] * multiplier
-        error = result["raw_cross_section_error_pb"] * multiplier
-        if error / sigma > settings["numerical_relative_tolerance"]:
-            raise ValueError(f"{point['label']}: numerical uncertainty exceeds 0.05%; increase integration points")
-        result_runs.append({**point, **result, "cross_section_pb": sigma, "cross_section_error_pb": error,
+        directory, completed, result = run_precision_checked(
+            args, settings, point, args.work_dir / "build-lhapdf/ihixs", identity, pdf)
+        result_runs.append({**point, **result,
                             "pdf_alpha_s_mur": pdf["alpha_s_mur"],
                             "input_sha256": completed["identity"]["input_sha256"],
                             "output_sha256": completed["output_sha256"],
@@ -558,7 +599,7 @@ def calculate(args, settings):
                       args.work_dir / "runs/benchmark/input.card", args.work_dir / "runs/benchmark/ihixs.out",
                       args.work_dir / "runs/benchmark/ihixs.log"]
     for run in result_runs:
-        artifact_paths.extend(args.work_dir / "runs" / run["label"] / name
+        artifact_paths.extend(args.work_dir / run["run_directory"] / name
                               for name in ("input.card", "ihixs.out", "ihixs.log", "complete.json"))
     payload = {"schema_version": 1, "profile": norm.PROFILE, "normalization_kind": "ihixs_n3lo",
                "process": "ggF", "created_utc": datetime.now(timezone.utc).isoformat(),

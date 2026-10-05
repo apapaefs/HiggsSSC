@@ -254,3 +254,49 @@ python3 -m unittest discover -s tests -p 'test_ho_normalization_*.py' -v
 ```
 
 No showers, analysis, builds or tests were run while preparing this repair.
+
+## Resume ihixs After A Production Precision Failure
+
+The `ihixs-ssc40-refined01` build and benchmark passed, but `scale_2`
+returned raw `eftn3lo = 226.524792 +/- 0.121277162 pb`: a 0.053538%
+numerical error, above the required 0.05%. About 97% of its numerical
+variance came from the `q1q2` contribution. The pinned ihixs source
+relaxes that N3LO term's relative target by a factor of 10,000. Its
+Cuhre integrator also uses a fixed minimum of 1,000 evaluations, so the
+increased Vegas statistics did not force more evaluations of that term.
+
+Use the same refined settings, workspace and installed builds. The new
+`--refine-failed` option reuses passing points and retries only inaccurate
+ones with tighter relative targets in separate directories. For this
+profile, the first retry uses `epsrel = 1e-6`; at most two further retries
+use `1e-7` and `1e-8`. The 0.05% final-error requirement remains in force.
+The settings file, plan, original results and ROOT event samples are kept.
+
+In the shell where `IHIXS_REFINED` is defined, run:
+
+```bash
+cd /home/apapaefs/Projects/HiggsSSC
+git pull --ff-only origin main
+python3 hgammagamma/run_ihixs_normalization.py \
+  --stage calculate "${IHIXS_REFINED[@]}" --resume --refine-failed
+```
+
+If using a fresh shell, reconstruct the options explicitly:
+
+```bash
+source /etc/profile.d/modules.sh
+module load herwig/stable
+export LHAPDF_DATA_PATH="$PWD/hgammagamma/HOAnalysis/inputs/lhapdf:/home/shared/Herwig/share/LHAPDF"
+python3 hgammagamma/run_ihixs_normalization.py \
+  --stage calculate --resume --refine-failed \
+  --settings hgammagamma/HOAnalysis/normalization/ihixs-ssc40-refined01-settings.json \
+  --work-dir hgammagamma/HOAnalysis/normalization/ihixs-ssc40-refined01 \
+  --herwig-module herwig/stable --lhapdf-dir /home/shared/Herwig \
+  --cuba-dir "$HOME/.local/cuba-4.2.2-gcc11" --cc cc --cxx c++ --jobs 8
+```
+
+There is no need to repeat `build` or `benchmark`. A successful calculation
+must still finish all 109 points before creating `ggf-ssc40-n3lo.json`.
+Then use the analysis and report commands above. The mocked regression
+tests are in `tests/test_ihixs_normalization.py` for you to run; no
+calculations, builds or tests were run while preparing this update.

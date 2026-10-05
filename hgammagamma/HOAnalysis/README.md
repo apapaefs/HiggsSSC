@@ -190,6 +190,34 @@ The message `Prepared 109 integrations` means input cards were written,
 not that the integrations ran. LHAPDF's Python `tarfile` extraction
 warnings are separate from the CMake dependency failure.
 
+If a saved production point fails the 0.05% numerical-error check, resume
+with precision refinement enabled:
+
+```bash
+python3 hgammagamma/run_ihixs_normalization.py \
+  --stage calculate "${IHIXS_OPTIONS[@]}" --resume --refine-failed
+```
+
+Keep the original settings and work directory. Passing points and the
+benchmark are reused. Only a point that exceeds the total-rate precision
+limit is retried: its first retry uses `epsrel = min(original/10, 1e-6)`,
+then each further retry tightens it by another factor of ten, with at
+most three retries. `epsabs` is reduced by the same ratio. Each attempt
+has its own `runs/LABEL__precision_N/` directory; the original result and
+all retry outputs are preserved. Changed input, executable, PDF or
+coupling provenance is refused. A Cuba convergence failure stops the
+calculation and leaves its log for inspection.
+
+This targets the actual integration controls in the pinned ihixs source:
+the pure EFT terms use Cuhre, which fixes its minimum evaluations to
+1,000 and does not use the Vegas `nstart`/`nincrease` controls. Its
+per-term relative targets also have relaxation factors, reaching 10,000
+for the N3LO `q1q2` term. Increasing the Vegas statistics alone therefore
+need not improve the final error. The 0.05% check applies to the complete
+raw EFT cross section and remains mandatory after refinement. The final
+record stores each selected run's effective integration settings and
+input/output hashes, including the selected retry directory.
+
 The benchmark reproduces the unmodified ihixs example's raw
 `eftn3lo = 45.1816 pb` at 13 TeV, within 0.5%; this is **not** the 40 TeV
 rate. Production uses `sqrt(s) = 40000 GeV`, `mH = 125 GeV`, an on-shell
@@ -224,8 +252,10 @@ Builds, inputs, logs, raw results and intermediate manifests are preserved
 under `HOAnalysis/normalization/ihixs-ssc40/`. Add `--resume` to repeat a
 benchmark or calculation after interruption; verified completed points
 are reused and interrupted directories are archived. Changed physics,
-PDF files or integration settings require a fresh `--work-dir` and
-`--record` path. Preserve the record and raw calculation directory
+PDF files or base integration settings require a fresh `--work-dir` and
+`--record` path. The opt-in precision retries above preserve the base
+plan and use separate, individually hashed attempt directories.
+Preserve the record and raw calculation directory
 together when transferring them between hosts. The signal sidecar also
 embeds the complete record so reports remain portable.
 
