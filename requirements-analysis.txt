@@ -6,7 +6,7 @@ PyYAML
 numpy
 matplotlib
 
-# Optional, only needed for:
+# Optional, only needed for LO or HO XGBoost analyses:
 #   python3 analyze_lo_varfiles.py xgboost --config <config.yaml>
 xgboost
 scikit-learn

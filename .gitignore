@@ -37,6 +37,7 @@ __pycache__/
 /hgammagamma/HOAnalysis/inputs/
 /hgammagamma/HOAnalysis/runs/
 /hgammagamma/HOAnalysis/plots/
+/hgammagamma/HOAnalysis/analyses/
 /hgammagamma/ho-analysis-build.log
 
 # Generated ihixs builds, scans and normalization records (settings are tracked).

@@ -573,6 +573,22 @@ class CutFlowTests(unittest.TestCase):
 
         self.assertEqual(config["analysis"]["detector_response"], "none")
 
+    def test_fallback_yaml_parser_keeps_nested_model_parameters(self) -> None:
+        from analyze_lo_varfiles import _parse_simple_yaml
+
+        config = _parse_simple_yaml(
+            "analysis:\n"
+            "  xgboost:\n"
+            "    model_params:\n"
+            "      objective: binary:logistic\n"
+            "      max_depth: 4\n"
+            "    seed: 42\n"
+            "  luminosity_fb: 100\n"
+        )["analysis"]
+        self.assertEqual(config["xgboost"], {
+            "model_params": {"objective": "binary:logistic", "max_depth": 4}, "seed": 42})
+        self.assertEqual(config["luminosity_fb"], 100)
+
 
 if __name__ == "__main__":
     unittest.main()

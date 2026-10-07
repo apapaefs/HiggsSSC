@@ -1,0 +1,31 @@
+analysis:
+  name: xgboost_baseline
+  analysis_root: hgammagamma/HOAnalysis/runs/ho_100k_02
+  run_tag: ho_100k_02
+  detector_response: ssc
+  luminosity_fb: 100.0
+  # Require the complete campaign and all four samples before training.
+  samples: signal_gg_h_aa,bkg_prompt_aa,bkg_gamma_j,bkg_dy_ee
+  output_dir: hgammagamma/HOAnalysis/analyses/ho_100k_02/xgboost_baseline
+  # HO normalization comes from validated sidecars; do not add LO rate_factors.
+  # Event caps are rejected, including analysis.max_events and xgboost.max_events.
+  xgboost:
+    # Import only the cut selection, not the baseline card's rates or samples.
+    baseline_cuts_config: hgammagamma/analysis_cards/ho_baseline_cuts.yaml
+    # Source events are grouped within each sample: 60% train, 20% validation,
+    # 20% test. Response hypotheses from one event always share its partition.
+    validation_size: 0.2
+    test_size: 0.2
+    seed: 12345
+    # Fractional background systematic in S / sqrt(B + (systematics * B)^2).
+    systematics: 0.0
+    # Validation B^2 / sum(source-event selected weights^2), using signed B.
+    min_background_effective_count: 25.0
+    model_params:
+      objective: binary:logistic
+      n_estimators: 300
+      max_depth: 3
+      learning_rate: 0.05
+      subsample: 0.9
+      colsample_bytree: 0.9
+      n_jobs: 1

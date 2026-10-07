@@ -142,11 +142,171 @@ class HOCutSummaryTests(unittest.TestCase):
         self.assertAlmostEqual(result["analysis_efficiency"], 1.)
         self.assertAlmostEqual(result["selected_cross_section_pb"], 200. * BR)
 
-    def test_ho_xgboost_is_rejected_before_loading_the_lo_classifier(self):
-        inputs = ({}, Path("campaign"), "classifier", RUN_TAG, 10., [self.sample()], Path("out"))
-        with patch.object(self.subject, "load_analysis_inputs", return_value=inputs):
-            with self.assertRaisesRegex(ValueError, "HO campaigns currently support the cuts"):
-                self.subject.run_xgboost(Path("card.yaml"))
+    def test_ho_xgboost_dispatches_to_the_separate_ho_workflow(self):
+        analysis = {"_resolved_detector_response": "ssc"}
+        samples = [self.sample(), self.sample(signal=False)]
+        inputs = (analysis, Path("campaign"), "classifier", RUN_TAG, 10., samples, Path("out"))
+        result = object()
+        with patch.object(self.subject, "load_analysis_inputs", return_value=inputs) as loader:
+            with patch.object(self.subject, "run_ho_xgboost", return_value=result) as ho_runner:
+                with patch.dict(sys.modules, {"xgboost_root_varfiles_module": None}):
+                    actual = self.subject.run_xgboost(
+                        Path("card.yaml"), run_tag_override="override", progress_enabled=False)
+        self.assertIs(actual, result)
+        loader.assert_called_once_with(Path("card.yaml"), "override")
+        ho_runner.assert_called_once_with(
+            analysis, "classifier", RUN_TAG, 10., samples, Path("out"), progress_enabled=False)
+
+
+class HOXGBoostCLITests(unittest.TestCase):
+    """Exercise HO orchestration with real population checks and a mocked trainer."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.subject = load_cut_subject()
+
+    sample = HOCutSummaryTests.sample
+
+    def samples(self):
+        return [self.sample(tree_entries=4, var_file=Path("signal_var.root")),
+                self.sample(signal=False, tree_entries=4, var_file=Path("background_var.root"))]
+
+    def population(self, sample):
+        selected = dict(zip(FEATURES, [125., 60., -.5, 50., .5, 2.1, 2.9, 25., -.4, 2.]))
+        unselected = dict(zip(FEATURES, [-999.] * 9 + [0.]))
+        rows = [unselected, selected.copy(), selected.copy(), selected.copy()]
+        scale = sample.weight_scale
+        return rows, [3. * scale, 7. * scale, -2. * scale, 8. * scale], [0, 0, 1, 2], [0, 1, 2, 3]
+
+    def modules(self, samples):
+        populations = {sample.var_file: self.population(sample) for sample in samples}
+        reader = ModuleType("read_root_varfiles")
+        reader.read_ho_ROOT_varfile = Mock(side_effect=lambda path: populations[path])
+        trainer = ModuleType("ho_xgboost_analysis")
+        trainer.validate_config = Mock()
+        trainer.run_ho_signal_background_analysis = Mock(return_value={
+            "metadata": {"name": "classifier"}, "summary_rows": [], "assets": [],
+        })
+        return reader, trainer, populations
+
+    def run_workflow(self, analysis=None, samples=None):
+        return self.subject.run_ho_xgboost(
+            {"_resolved_detector_response": "ssc"} if analysis is None else analysis,
+            "classifier", RUN_TAG, 10., self.samples() if samples is None else samples,
+            Path("out"), progress_enabled=False)
+
+    def test_partial_population_caps_are_rejected_before_importing_ml(self):
+        for analysis in ({"max_events": 1}, {"xgboost": {"max_events": 1}}):
+            with self.subTest(analysis=analysis):
+                with patch.object(self.subject, "load_config") as baseline_loader:
+                    with patch.dict(sys.modules, {"ho_xgboost_analysis": None,
+                                                  "read_root_varfiles": None}):
+                        with self.assertRaisesRegex(ValueError, "requires the full sample"):
+                            self.run_workflow(analysis=analysis)
+                    baseline_loader.assert_not_called()
+
+    def test_mixed_ho_and_lo_samples_are_rejected_before_importing_ml(self):
+        samples = self.samples()
+        samples[1].requires_full_sample = False
+        with patch.object(self.subject, "load_config") as baseline_loader:
+            with patch.dict(sys.modules, {"ho_xgboost_analysis": None,
+                                          "read_root_varfiles": None}):
+                with self.assertRaisesRegex(ValueError, "cannot mix HO and legacy LO"):
+                    self.run_workflow(samples=samples)
+            baseline_loader.assert_not_called()
+
+    def test_missing_signal_or_background_is_rejected_before_importing_ml(self):
+        for sample in self.samples():
+            with self.subTest(category=sample.category):
+                with patch.object(self.subject, "load_config") as baseline_loader:
+                    with patch.dict(sys.modules, {"ho_xgboost_analysis": None,
+                                                  "read_root_varfiles": None}):
+                        with self.assertRaisesRegex(ValueError, "requires signal and background"):
+                            self.run_workflow(samples=[sample])
+                    baseline_loader.assert_not_called()
+
+    def test_all_full_populations_are_validated_before_training(self):
+        samples = self.samples()
+        reader, trainer, populations = self.modules(samples)
+        original_validator = self.subject.validate_ho_sample_population
+        validated = []
+
+        def validate(sample, rows, weights):
+            original_validator(sample, rows, weights)
+            validated.append(sample.name)
+
+        def train(loaded, **kwargs):
+            self.assertEqual(validated, [sample.name for sample in samples])
+            self.assertEqual(loaded, [(sample, *populations[sample.var_file]) for sample in samples])
+            self.assertTrue(all(item[1][0]["n_selected_photons"] == 0. for item in loaded))
+            return {"metadata": kwargs["metadata"], "summary_rows": [], "assets": []}
+
+        trainer.run_ho_signal_background_analysis.side_effect = train
+        baseline = {"analysis": {"cuts": [{"variable": "m_gg", "min": 123., "max": 127.}]}}
+        with patch.dict(sys.modules, {"read_root_varfiles": reader, "ho_xgboost_analysis": trainer}):
+            with patch.object(self.subject, "load_config", return_value=baseline):
+                with patch.object(self.subject, "validate_ho_sample_population", side_effect=validate):
+                    result = self.run_workflow(samples=samples)
+        self.assertEqual(reader.read_ho_ROOT_varfile.call_count, len(samples))
+        self.assertEqual(result.index_html, Path("out/index.html"))
+        trainer.run_ho_signal_background_analysis.assert_called_once()
+
+    def test_invalid_later_population_stops_before_training(self):
+        samples = self.samples()
+        for failure in ("count", "signed_sum", "source_count", "absolute_sum", "denominator"):
+            with self.subTest(failure=failure):
+                reader, trainer, populations = self.modules(samples)
+                rows, weights, sources, entries = populations[samples[1].var_file]
+                if failure == "count":
+                    rows.pop()
+                elif failure == "signed_sum":
+                    weights[-1] -= 1.
+                elif failure == "source_count":
+                    sources[-1] = sources[-2]
+                elif failure == "absolute_sum":
+                    weights[0] += 1.
+                    weights[2] -= 1.
+                else:
+                    samples[1].normalization_sum_weight = 0.
+                baseline = {"analysis": {"cuts": [{"variable": "m_gg", "min": 123.}]}}
+                with patch.dict(sys.modules, {"read_root_varfiles": reader,
+                                              "ho_xgboost_analysis": trainer}):
+                    with patch.object(self.subject, "load_config", return_value=baseline):
+                        with self.assertRaises(ValueError):
+                            self.run_workflow(samples=samples)
+                self.assertEqual(reader.read_ho_ROOT_varfile.call_count, 2)
+                trainer.run_ho_signal_background_analysis.assert_not_called()
+
+    def test_baseline_card_contributes_only_its_cuts(self):
+        samples = self.samples()
+        reader, trainer, _ = self.modules(samples)
+        baseline_path = Path("comparison.yaml")
+        analysis = {"name": "actual", "run_tag": RUN_TAG, "luminosity_fb": 10.,
+                    "samples": [sample.name for sample in samples],
+                    "_resolved_detector_response": "ssc",
+                    "xgboost": {"baseline_cuts_config": str(baseline_path), "seed": 42}}
+        baseline = {"analysis": {
+            "name": "other", "run_tag": "other-run", "luminosity_fb": 999.,
+            "analysis_root": "/unused", "output_dir": "/unused", "samples": ["other"],
+            "rate_factors": {"Signal": 200.}, "max_events": 1,
+            "detector_response": "none", "xgboost": {"seed": 0},
+            "cuts": [{"variable": "m_gg", "min": 123., "max": 127.}],
+        }}
+        with patch.dict(sys.modules, {"read_root_varfiles": reader, "ho_xgboost_analysis": trainer}):
+            with patch.object(self.subject, "load_config", return_value=baseline) as loader:
+                with patch.object(self.subject, "discover_samples") as discover:
+                    self.run_workflow(analysis=analysis, samples=samples)
+        loader.assert_called_once_with(baseline_path)
+        discover.assert_not_called()
+        args, kwargs = trainer.run_ho_signal_background_analysis.call_args
+        self.assertEqual([item[0] for item in args[0]], samples)
+        self.assertEqual(kwargs["baseline_cuts"], [self.subject.Cut("m_gg", 123., 127.)])
+        self.assertEqual(kwargs["config"], analysis["xgboost"])
+        self.assertIs(kwargs["metadata"]["resolved_analysis"], analysis)
+        self.assertEqual(kwargs["metadata"]["run_tag"], RUN_TAG)
+        self.assertEqual(kwargs["metadata"]["luminosity_fb"], 10.)
+        self.assertEqual(kwargs["metadata"]["detector_response"], "ssc")
+        self.assertEqual(kwargs["output_dir"], Path("out"))
 
 
 class HOCutDiscoveryTests(unittest.TestCase):

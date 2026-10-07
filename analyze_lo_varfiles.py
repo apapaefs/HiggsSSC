@@ -214,6 +214,7 @@ def _parse_simple_yaml(text: str) -> dict[str, Any]:
     root: dict[str, Any] = {}
     current_section: dict[str, Any] | None = None
     current_nested: dict[str, Any] | None = None
+    current_deeper: dict[str, Any] | None = None
     current_list: list[dict[str, Any]] | None = None
     current_item: dict[str, Any] | None = None
 
@@ -223,6 +224,8 @@ def _parse_simple_yaml(text: str) -> dict[str, Any]:
             continue
         indent = len(line) - len(line.lstrip(" "))
         stripped = line.strip()
+        if indent <= 4:
+            current_deeper = None
 
         if indent == 0:
             key, _, value = stripped.partition(":")
@@ -284,7 +287,15 @@ def _parse_simple_yaml(text: str) -> dict[str, Any]:
             key, _, value = stripped.partition(":")
             if not _:
                 raise ValueError(f"expected nested key/value near: {raw_line}")
-            current_nested[key] = _parse_scalar(value)
+            if indent == 4 and not value.strip():
+                current_deeper = {}
+                current_nested[key] = current_deeper
+            elif indent == 6 and current_deeper is not None:
+                current_deeper[key] = _parse_scalar(value)
+            elif indent == 4:
+                current_nested[key] = _parse_scalar(value)
+            else:
+                raise ValueError(f"unsupported nested YAML; install PyYAML near: {raw_line}")
             continue
 
         raise ValueError(f"unsupported YAML structure near: {raw_line}")
@@ -548,6 +559,21 @@ def apply_cuts(rows: Sequence[dict[str, float]], cuts: Sequence[Cut]) -> list[bo
     return [all(cut.accepts(row) for cut in cuts) for row in rows]
 
 
+def validate_ho_sample_population(sample: SampleInfo, rows, weights) -> None:
+    """Validate the complete saved response population before any selection."""
+    if len(rows) != sample.tree_entries or len(weights) != len(rows):
+        raise ValueError(f"HO response tree count differs from its analysis summary: {sample.var_file}")
+    sum_weight = math.fsum(weights)
+    tolerance = 1e-8 * max(math.fsum(abs(weight) for weight in weights), abs(sample.sum_weight), 1e-300)
+    if (sample.sum_tree_weight is None or not math.isfinite(sum_weight)
+            or not math.isclose(sum_weight, sample.sum_tree_weight, rel_tol=0.0, abs_tol=tolerance)
+            or not math.isclose(sum_weight, sample.sum_weight, rel_tol=0.0, abs_tol=tolerance)):
+        raise ValueError(f"HO response tree weights differ from its analysis summary: {sample.var_file}")
+    denominator = sample.normalization_sum_weight
+    if denominator is None or not math.isfinite(denominator) or denominator <= 0:
+        raise ValueError("HO normalization requires a positive signed source denominator")
+
+
 def summarize_sample(sample: SampleInfo, cuts: Sequence[Cut], luminosity_fb: float, max_events: int | None = None) -> dict[str, Any]:
     if sample.requires_full_sample and max_events is not None:
         raise ValueError("HO cut yields require the full sample; remove analysis.max_events")
@@ -559,13 +585,7 @@ def summarize_sample(sample: SampleInfo, cuts: Sequence[Cut], luminosity_fb: flo
     sum_weight = math.fsum(weights)
     sum_selected_weight = math.fsum(weight for weight, selected in zip(weights, decisions) if selected)
     if sample.requires_full_sample:
-        if len(rows) != sample.tree_entries or len(weights) != len(rows):
-            raise ValueError(f"HO response tree count differs from its analysis summary: {sample.var_file}")
-        tolerance = 1e-8 * max(math.fsum(abs(weight) for weight in weights), abs(sample.sum_weight), 1e-300)
-        if (sample.sum_tree_weight is None or not math.isfinite(sum_weight)
-                or not math.isclose(sum_weight, sample.sum_tree_weight, rel_tol=0.0, abs_tol=tolerance)
-                or not math.isclose(sum_weight, sample.sum_weight, rel_tol=0.0, abs_tol=tolerance)):
-            raise ValueError(f"HO response tree weights differ from its analysis summary: {sample.var_file}")
+        validate_ho_sample_population(sample, rows, weights)
     selected_entries = int(sum(1 for selected in decisions if selected))
     denominator = sample.normalization_sum_weight if sample.normalization_sum_weight is not None else sum_weight
     if sample.requires_full_sample and (not math.isfinite(denominator) or denominator <= 0):
@@ -745,6 +765,27 @@ def build_terminal_summary(
     output_dir: Path,
     assets: Sequence[Path] = (),
 ) -> str:
+    if metadata.get("evaluation_partition") == "test" and "comparison" in metadata:
+        lines = ["", "HO XGBoost independent test comparison",
+                 f"  status: {metadata['status']}",
+                 f"  frozen threshold: {metadata['best_threshold']}"]
+        for selection in ("baseline", "xgboost"):
+            result = metadata["comparison"][selection]
+            if result is None:
+                lines.append(f"  {selection}: unavailable (insufficient validation statistics)")
+                continue
+            totals = result["totals"]
+            value = totals["significance"]
+            significance = f"{value:.6g}" if value is not None else "undefined"
+            lines.append(f"  {selection}: S={totals['signal_expected_events']:.6g} "
+                         f"+/- {totals['signal_mc_error_events']:.6g} MC, "
+                         f"B={totals['background_expected_events']:.6g} "
+                         f"+/- {totals['background_mc_error_events']:.6g} MC, "
+                         f"significance={significance}, supported={totals['statistically_supported']}")
+        lines.extend(f"  {message}" for message in metadata["warnings"])
+        lines.append(f"  report: {Path(output_dir) / 'index.html'}")
+        return "\n".join(lines)
+
     def fmt(value: float) -> str:
         return f"{float(value):.6g}"
 
@@ -842,10 +883,9 @@ def run_cuts(config_path: Path, run_tag_override: str | None = None, progress_en
 
 def run_xgboost(config_path: Path, run_tag_override: str | None = None, progress_enabled: bool = True) -> AnalysisRunResult:
     analysis, _, name, run_tag, luminosity_fb, samples, output_dir = load_analysis_inputs(config_path, run_tag_override)
-    # The legacy classifier's training/validation treatment was built for LO
-    # weights. HO support in this CLI currently covers rectangular cuts only.
     if any(sample.requires_full_sample for sample in samples):
-        raise ValueError("HO campaigns currently support the cuts subcommand; HO XGBoost requires a signed-weight validation")
+        return run_ho_xgboost(analysis, name, run_tag, luminosity_fb, samples, output_dir,
+                              progress_enabled=progress_enabled)
     signal_samples = [sample for sample in samples if sample.category == "Signal"]
     background_samples = [sample for sample in samples if sample.category != "Signal"]
     if not signal_samples or not background_samples:
@@ -919,6 +959,67 @@ def run_xgboost(config_path: Path, run_tag_override: str | None = None, progress
         index = write_outputs(metadata, rows, output_dir, assets)
         progress.update(3, "wrote outputs")
         return AnalysisRunResult(index_html=index, output_dir=output_dir, metadata=metadata, rows=list(rows), assets=assets)
+    finally:
+        progress.finish()
+
+
+def run_ho_xgboost(analysis, name, run_tag, luminosity_fb, samples, output_dir, *, progress_enabled=True):
+    """Keep the validated HO workflow separate from the historical LO classifier."""
+    if not all(sample.requires_full_sample for sample in samples):
+        raise ValueError("HO XGBoost cannot mix HO and legacy LO samples")
+    xgb_cfg = analysis.get("xgboost", {}) or {}
+    if not isinstance(xgb_cfg, dict):
+        raise ValueError("analysis.xgboost must be a mapping")
+    if analysis.get("max_events") is not None or xgb_cfg.get("max_events") is not None:
+        raise ValueError("HO XGBoost requires the full sample; remove max_events at both configuration levels")
+    if analysis.get("cuts"):
+        raise ValueError("HO XGBoost uses two-photon preselection; configure the comparison with xgboost.baseline_cuts_config")
+    if not math.isfinite(luminosity_fb) or luminosity_fb <= 0:
+        raise ValueError("HO XGBoost luminosity_fb must be finite and positive")
+    if not any(sample.category == "Signal" for sample in samples) or not any(
+            sample.category != "Signal" for sample in samples):
+        raise ValueError("HO XGBoost requires signal and background samples")
+    baseline_path = Path(xgb_cfg.get("baseline_cuts_config",
+        REPO_ROOT / "hgammagamma/analysis_cards/ho_baseline_cuts.yaml")).expanduser()
+    baseline_analysis = load_config(baseline_path)["analysis"]
+    if not isinstance(baseline_analysis.get("cuts"), list) or not baseline_analysis["cuts"]:
+        raise ValueError("baseline_cuts_config must contain a nonempty analysis.cuts list")
+    baseline_cuts = [Cut.from_mapping(item) for item in baseline_analysis["cuts"]]
+    from ho_xgboost_analysis import run_ho_signal_background_analysis, validate_config
+    from read_root_varfiles import read_ho_ROOT_varfile
+
+    validate_config(xgb_cfg)
+    progress = ProgressBar(len(samples) + 2, "HO XGBoost analysis", enabled=progress_enabled)
+    try:
+        loaded = []
+        for index, sample in enumerate(samples, start=1):
+            rows, weights, source_events, entries = read_ho_ROOT_varfile(sample.var_file)
+            validate_ho_sample_population(sample, rows, weights)
+            if len(set(source_events)) != sample.events_read:
+                raise ValueError(f"HO source-event count differs from its analysis summary: {sample.var_file}")
+            absolute = math.fsum(abs(weight) for weight in weights)
+            if sample.sum_abs_weight is None or not math.isclose(
+                    absolute, sample.sum_abs_weight, rel_tol=1e-8, abs_tol=1e-300):
+                raise ValueError(f"HO absolute response weights differ from its analysis summary: {sample.var_file}")
+            loaded.append((sample, rows, weights, source_events, entries))
+            progress.update(index, f"validated {sample.name}")
+        metadata = {
+            "name": name, "mode": "xgboost", "run_tag": run_tag,
+            "luminosity_fb": luminosity_fb,
+            "detector_response": analysis["_resolved_detector_response"],
+            "resolved_analysis": analysis,
+            "baseline_cuts_config": str(baseline_path.resolve()),
+            "baseline_cuts": [{"variable": c.variable, "min": c.minimum, "max": c.maximum}
+                              for c in baseline_cuts],
+        }
+        progress.update(len(samples) + 1, "training and validating")
+        result = run_ho_signal_background_analysis(
+            loaded, output_dir=output_dir, metadata=metadata, baseline_cuts=baseline_cuts,
+            config=xgb_cfg)
+        progress.update(len(samples) + 2, "wrote comparison")
+        return AnalysisRunResult(index_html=output_dir / "index.html", output_dir=output_dir,
+                                 metadata=result["metadata"], rows=result["summary_rows"],
+                                 assets=result["assets"])
     finally:
         progress.finish()
 

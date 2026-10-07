@@ -568,6 +568,134 @@ not resolve them. These commands and the HO cut regression tests have not
 been run while preparing this update; run them yourself after completing
 the campaign's analysis stage.
 
+### XGBoost As An Alternative To Cuts
+
+The HO classifier follows the train, evaluate and inspect workflow used in
+[MLforHEP](https://github.com/apapaefs/MLforHEP), with a separate treatment of
+signed higher-order weights. It is an alternative to the additional cuts:
+the existing cut command and its report remain available. Both analyze the
+same 40 TeV SSC diphoton campaign, with HJMiNNLO signal shapes, the validated
+ihixs inclusive signal rate, the three NLO backgrounds and SSC response.
+
+First complete the campaign analysis and normalization described above.
+Use the Python environment containing PyROOT, and install the analysis
+packages if needed:
+
+```bash
+python3 -m pip install -r requirements-analysis.txt
+python3 analyze_lo_varfiles.py xgboost \
+  --config hgammagamma/analysis_cards/ho_xgboost_baseline.yaml
+```
+
+PyROOT comes from the ROOT/Herwig installation. The HO classifier also needs
+XGBoost, scikit-learn, NumPy and Matplotlib; cuts do not require the optional
+machine-learning packages. The legacy LO classifier additionally uses tqdm.
+The card requires all four samples of `ho_100k_02`, SSC response and
+`100 fb^-1`, and writes to
+`hgammagamma/HOAnalysis/analyses/ho_100k_02/xgboost_baseline/`. To analyze
+another campaign, update `analysis_root`, `run_tag` and `output_dir` together.
+The CLI `--run-tag` option overrides the tag, without relocating these
+explicit paths.
+
+The analysis verifies the full saved trees, sidecars, ihixs normalization,
+detector-response provenance and shower completion before selecting rows.
+It requires valid saved `sourceevent` identifiers and rejects `max_events`
+in either the analysis or XGBoost configuration. Do not add LO `rate_factors`.
+Missing or inconsistent inputs stop the analysis rather than producing a
+partial four-sample comparison.
+
+Each sample is split by source event, using seed `12345`: 60% training,
+20% validation and 20% test. All detector-response hypotheses of one source
+event stay in the same partition, including hypotheses that fail the photon
+preselection. Only rows with `n_selected_photons >= 2` enter the classifier.
+Its nine inputs, in order, are:
+
+```text
+m_gg, pt_gamma1, eta_gamma1, pt_gamma2, eta_gamma2,
+deltaR_gg, deltaPhi_gg, pt_gg, y_gg
+```
+
+Photon multiplicity is the preselection, not a classifier input. Event weights,
+sample labels, source identifiers and truth-origin information are excluded.
+The mass input lets the classifier learn a mass selection together with the
+other kinematics. This can sculpt the selected mass spectrum; the reported
+significance is a counting estimate, not a sideband-fit sensitivity.
+
+For each response row, the physical weight in expected events is
+
+```text
+w = 1000 * luminosity_fb * sigma_production_pb * weight_scale
+    * signed_response_weight / normalization_sum_weight
+```
+
+This is the cut analysis convention: the signal branching fraction enters
+once, backgrounds retain their signed response/fake weights, and the full
+source normalization denominator includes discarded shower attempts. The
+training approximation first projects each sample's training weights using
+its actual fraction of source events, then takes absolute values and rescales
+signal and combined background to equal total training weight. These scale
+factors are determined from training events only, preserve the relative
+contributions of the three backgrounds and leave zero weights at zero.
+Absolute weights are not used to
+calculate physical rates or efficiencies.
+
+The default model has 300 trees, depth 3, learning rate 0.05, row and column
+subsampling 0.9, a binary logistic objective and one CPU thread. The card's
+`xgboost.model_params` allows deliberate changes; there is no automatic
+hyperparameter search. `validation_size`, `test_size`, `seed`, `systematics`
+and `min_background_effective_count` are configurable under `xgboost`.
+
+The threshold scan evaluates 501 scores from 0 to 1 on validation data only
+and maximizes `S / sqrt(B + (delta * B)^2)`, where `delta` is the fractional
+background systematic (`systematics: 0.0` by default). A candidate needs
+positive signed `S` and `B` and background effective count at least 25 by
+default. For the latter, selected contributions from each source event are
+combined before squaring: `N_eff = B^2 / sum_event(w_event^2)`. If no threshold
+qualifies, the report records `insufficient_statistics`; it does not select
+an arbitrary fallback or tune on test events.
+
+The chosen model and threshold are frozen for the cut comparison. The
+`xgboost.baseline_cuts_config` setting imports only the `analysis.cuts`
+selection from the HO cut card: by default at least two photons and
+`120 <= m_gg <= 130 GeV`. Its sample list, normalization and luminosity do
+not override the XGBoost run. Both selections are evaluated on identical
+untouched test source events. For each sample, held-out contributions are
+divided by that partition's actual fraction of source events, retaining
+the full normalization denominator; the correction is not a fixed factor
+of five when partition sizes are rounded. Events discarded by the shower
+remain represented by the denominator, without invented response rows.
+
+The comparison gives projected signed yields, efficiencies, approximate
+significance and Monte Carlo errors. Errors combine response hypotheses at
+the source-event level before squaring and are counting approximations
+conditional on the saved normalization. They do not include uncertainty in
+the normalization denominator, inclusive cross section, branching fraction
+or detector model. Signed cancellations can make efficiencies negative or
+greater than one. Sparse or non-positive test yields are flagged without
+retuning. Unweighted and explicitly labeled absolute-weight ROC/AUC curves
+are discrimination diagnostics, not physical signed efficiencies. Better
+validation performance does not guarantee an improvement on the test sample.
+
+The report directory contains:
+
+- `index.html`, `summary.csv` and `summary.json` for the familiar report;
+- `comparison.csv` and `comparison.json` for the test cut/classifier comparison,
+  and `metrics.json` for diagnostics and threshold-selection status;
+- `signal_background_xgboost.json` for the trained model and
+  `model_metadata.json` for feature order, resolved configuration, software
+  versions and normalization provenance;
+- `partitions.csv` for the full response-row partition assignments,
+  `scores.csv` for photon-preselected rows in all three partitions, and
+  `threshold_scan.csv` for validation candidates;
+- ROC, feature-importance, training/test score and diphoton-mass plots before
+  and after selection.
+
+Training scores are exported for diagnostics and never contribute to the
+headline test performance. The saved model supports reproducibility; applying
+it to a later campaign is outside this first workflow. A production comparison
+requires the actual campaign artifacts at their recorded paths. Synthetic
+tests cannot establish sensitivity or simulation quality for `ho_100k_02`.
+
 ## Tests To Run Yourself
 
 The new Python tests exercise raw-EFT parsing, completeness/provenance,
@@ -580,6 +708,15 @@ python3 -m unittest discover -s tests -p 'test_ho_normalization_*.py' -v
 python3 -m unittest discover -s tests -p 'test_ho_shower_completion.py' -v
 python3 -m unittest discover -s tests -p 'test_ho_cut_normalization.py' -v
 python3 -m unittest discover -s tests -p 'test_ho_varfile_integrity.py' -v
+python3 -m unittest discover -s tests -p 'test_ho_ml_reader.py' -v
+python3 -m unittest discover -s tests -p 'test_ho_xgboost_core.py' -v
+```
+
+The model and report integration tests need PyROOT and the optional
+machine-learning packages in the same Python environment:
+
+```bash
+python3 -m unittest discover -s tests -p 'test_ho_xgboost_analysis.py' -v
 ```
 
 Then run the existing gamma-gamma and HO regression suites with the
@@ -592,8 +729,8 @@ python3 -m unittest discover -s tests -p 'test_gammagamma*.py' -v
 Start the new normalization and analysis workflow with a separate small
 signal pilot before the full campaign. The upstream benchmark and all
 109 integrations are required before a production normalization record
-is accepted. No builds, tests, integrations or analyses were run while
-implementing this change.
+is accepted. Run production validation in the target runtime with the actual
+campaign artifacts; synthetic tests do not replace a real-campaign check.
 
 Configuration references are the installed Herwig 7.3 LHE examples and the
 MG5 3.5.15 `Template/NLO/Cards/run_card.dat` and

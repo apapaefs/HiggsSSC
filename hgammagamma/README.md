@@ -856,7 +856,10 @@ and [the HO cut card](analysis_cards/ho_baseline_cuts.yaml): the signal uses
 validated ihixs normalization and the saved physical BR, while backgrounds
 retain their signed NLO rates. The cut denominator includes discarded shower
 attempts. The LO cut card below contains an LO signal K-factor and must not be
-used for HO samples. XGBoost remains available for LO campaigns.
+used for HO samples. The alternative HO classifier has its own
+[XGBoost instructions](HOAnalysis/README.md#xgboost-as-an-alternative-to-cuts)
+and [HO card](analysis_cards/ho_xgboost_baseline.yaml); it compares against
+the cuts on an untouched test partition. The LO workflow below is unchanged.
 
 Install the Python analysis dependencies in the environment where PyROOT is
 available:
@@ -983,8 +986,9 @@ sample-directory names under `rate_factors`:
     bkg_dy_ee: 1.0
 ```
 
-The XGBoost mode uses the same sample discovery and normalization, but trains a
-binary signal-versus-background classifier and chooses a score threshold that
+For LO campaigns, the XGBoost mode uses the same sample discovery and
+normalization, but trains a binary signal-versus-background classifier and
+chooses a score threshold that
 maximizes the expected significance on the test split.  It trains only on the
 `n_selected_photons >= 2` response hypotheses; zero- and one-photon outcomes
 remain in the tree to preserve the input-weight normalization and multiplicity
@@ -1028,6 +1032,24 @@ plus XGBoost outputs such as `metrics.json`, `scores.csv`, `roc.png`,
 `feature_importance.png`, and the trained model JSON.  If `xgboost`,
 `scikit-learn`, or `tqdm` are missing, this subcommand exits with a dependency
 message; the cut analysis does not require those optional packages.
+
+For the HO `ho_100k_02` campaign, run the alternative classifier with:
+
+```bash
+python3 analyze_lo_varfiles.py xgboost \
+  --config hgammagamma/analysis_cards/ho_xgboost_baseline.yaml
+```
+
+The HO workflow checks the complete campaign and signed normalization before
+training, and rejects event caps. It splits by source event into 60% training,
+20% validation and 20% test, includes diphoton mass as an input, and selects
+the score threshold on validation events only. Training uses absolute physical
+weights with equal total signal/background weight; the reported yields and
+significance use signed weights. It compares the classifier and baseline cuts
+on the same test events at `100 fb^-1`, writing a separate report under
+`hgammagamma/HOAnalysis/analyses/ho_100k_02/xgboost_baseline/`. See the
+[HO guide](HOAnalysis/README.md#xgboost-as-an-alternative-to-cuts) for the
+source-event sampling correction, statistical requirements and saved artifacts.
 
 ### Linux Notes
 
