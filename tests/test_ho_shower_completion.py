@@ -109,6 +109,80 @@ class ShowerCompletionTests(unittest.TestCase):
             self.assertAlmostEqual(completion.normalization_denominator(manifest, 1.6 * .00227, .00227),
                                    1.6 * .00227)
 
+    def test_parse_logs_accepts_million_event_scientific_attempt_count(self):
+        # ThePEG switches its floating-point counters to scientific notation
+        # at one million events; reproduce the actual production Total line
+        # without creating a million-event LHE fixture.
+        with TemporaryDirectory() as directory:
+            fixture = self.fixture(directory, weights=(10.,) * 6, saved=4,
+                                   requested=6, termination="source_exhausted")
+            herwig = fixture[0]
+            out = herwig / f"{SAMPLE}.out"
+            out.write_text(out.read_text().replace(
+                "Total: 4 6 0.214(1)e+00",
+                "Total: 999913 1e+06 3.374(2)e+00"))
+            run = herwig / "run.log"
+            run.write_text(run.read_text().replace("basic cuts: 4", "basic cuts: 999913"))
+            log = herwig / f"{SAMPLE}.log"
+            log.write_text(log.read_text().replace("eventerror (2 times)", "eventerror (87 times)"))
+            parsed = completion._parse_logs(herwig, SAMPLE, "source_exhausted")
+            self.assertEqual(parsed["generated_events"], 999913)
+            self.assertEqual(parsed["attempted_events"], 1000000)
+            self.assertEqual(parsed["saved_events"], 999913)
+            self.assertEqual(parsed["exception_counts"]["eventerror"], 87)
+
+    def test_scientific_integer_counts_preserve_completion_and_source_proof(self):
+        for generated, attempted in (("4e+00", "6e+00"), ("4E0", "6.0"),
+                                     ("4.0D+00", "6D0")):
+            with self.subTest(generated=generated, attempted=attempted), TemporaryDirectory() as directory:
+                fixture = self.fixture(directory, weights=(10., 10., -10., 10., 10., 10.), saved=4,
+                                       requested=6, termination="source_exhausted")
+                out = fixture[0] / f"{SAMPLE}.out"
+                out.write_text(out.read_text().replace(
+                    "Total: 4 6 ", f"Total: {generated} {attempted} "))
+                record, manifest = self.build(fixture)
+                self.assertEqual(record["generated_events"], 4)
+                self.assertEqual(record["attempted_events"], 6)
+                self.assertEqual(record["discarded_events"], 2)
+                self.assertEqual(record["source_weights"]["sum_weight"], 4.)
+                self.assertIs(completion.validate_completion(record, manifest, directory), record)
+
+    def test_noninteger_nonfinite_and_invalid_total_counts_are_rejected(self):
+        for count in ("3.5", "3e-1", "nan", "inf", "1e999", "unknown", "-1"):
+            for field in (0, 1):
+                with self.subTest(count=count, field=field), TemporaryDirectory() as directory:
+                    fixture = self.fixture(directory)
+                    values = ["3", "3"]
+                    values[field] = count
+                    out = fixture[0] / f"{SAMPLE}.out"
+                    out.write_text(out.read_text().replace(
+                        "Total: 3 3 ", f"Total: {values[0]} {values[1]} "))
+                    with self.assertRaises(ValueError):
+                        self.build(fixture)
+
+    def test_scientific_counts_must_match_exact_saved_and_source_counts(self):
+        # Rounded counters cannot override exact ROOT/LHE counts, even when
+        # their printed scientific-notation values are valid integers.
+        for generated, attempted in (("3e+00", "6e+00"), ("4e+00", "5e+00")):
+            with self.subTest(generated=generated, attempted=attempted), TemporaryDirectory() as directory:
+                fixture = self.fixture(directory, weights=(10.,) * 6, saved=4,
+                                       requested=6, termination="source_exhausted")
+                out = fixture[0] / f"{SAMPLE}.out"
+                out.write_text(out.read_text().replace(
+                    "Total: 4 6 ", f"Total: {generated} {attempted} "))
+                with self.assertRaises(ValueError):
+                    self.build(fixture)
+
+    def test_repeated_scientific_total_remains_ambiguous(self):
+        with TemporaryDirectory() as directory:
+            fixture = self.fixture(directory)
+            out = fixture[0] / f"{SAMPLE}.out"
+            out.write_text(out.read_text().replace(
+                "Total: 3 3 0.214(1)e+00",
+                "Total: 3e+00 3e+00 0.214(1)e+00\nTotal: 3e+00 3e+00 0.214(1)e+00"))
+            with self.assertRaisesRegex(ValueError, "ambiguous final Les Houches Total"):
+                self.build(fixture)
+
     def test_production_card_distinguishes_cuts_creation_from_two_settings(self):
         with TemporaryDirectory() as directory:
             fixture = self.fixture(directory)

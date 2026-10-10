@@ -288,6 +288,23 @@ python3 -m unittest discover -s tests -p 'test_ho_normalization_*.py' -v
 
 No showers, analysis, builds or tests were run while preparing this repair.
 
+## Recover The Million-Event Statistics Parser Error
+
+Herwig may print large counts in scientific notation. The prompt-diphoton
+shower in `runs/ho_bg_1m_01` printed `Total: 999913 1e+06 ...`: it consumed
+1,000,000 LHE events and saved 999,913, with 87 recorded shower discards.
+Older runner versions rejected `1e+06` with
+`missing or ambiguous final Les Houches Total` after ROOT finalization.
+
+Update the checkout, then repeat the original campaign command with
+identical options and `--resume`. Keep its `--output-dir`, `--run-tag`,
+`--nevents 1000000` and seeds unchanged. The corrected parser accepts
+finite integer counts in scientific notation and retains the exact
+LHE/ROOT/discard-count checks. Resume audits and adopts the completed
+shower before continuing; the generated LHE and ROOT files need no edits
+or regeneration. The discarded signed weights remain in the source
+normalization denominator.
+
 ## Resume ihixs After A Production Precision Failure
 
 This is the historical recovery used by the completed refined run. Its

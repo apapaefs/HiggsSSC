@@ -169,10 +169,14 @@ def _parse_logs(herwig_dir, sample_name, termination):
         raise ValueError("missing or repeated Les Houches statistics")
     section = out.split("Statistics for Les Houches event handler", 1)[1]
     section = section.split("Per Les Houches Reader", 1)[0]
-    totals = re.findall(r"(?m)^Total:\s+(\d+)\s+(\d+)\s+([^\n]+)$", section)
+    totals = re.findall(r"(?m)^Total:\s+(\S+)\s+(\S+)\s+([^\n]+)$", section)
     if len(totals) != 1:
         raise ValueError("missing or ambiguous final Les Houches Total")
-    generated, attempted = (int(totals[0][0]), int(totals[0][1]))
+    # ThePEG switches large counts to scientific notation (e.g. 1e+06).
+    # Still require finite integer counts; completion validation below checks
+    # them against the exact ROOT, LHE and discarded-event populations.
+    generated = _lhe_integer(totals[0][0], "generated event count")
+    attempted = _lhe_integer(totals[0][1], "attempted event count")
     # Herwig writes uncertainties as e.g. 0.214(1)e+00.
     cross_section = re.sub(r"\([^)]*\)", "", totals[0][2].strip()).split()[0]
     _number(cross_section)
