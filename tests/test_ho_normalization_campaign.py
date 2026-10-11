@@ -146,7 +146,12 @@ class HoNormalizationCampaignTests(unittest.TestCase):
                 if changed == "lhe":
                     original_args.signal_lhe.write_text(signal_lhe_text().replace("1 1 10.0", "1 1 11.0"))
                 elif changed == "root":
-                    (directory / "herwig/events/input.root").write_bytes(b"modified HwSim events")
+                    root_file = directory / "herwig/events/input.root"
+                    previous = root_file.stat()
+                    root_file.write_bytes(b"modified HwSim events")
+                    # This fixture tests size/mtime inventory detection. A
+                    # same-size rewrite may occur within one filesystem tick.
+                    os.utime(root_file, ns=(previous.st_atime_ns, previous.st_mtime_ns + 1_000_000_000))
                 else:
                     dat = directory / "signal_gg_h_aa_hwsim_roots-stored_run.dat"
                     before, after = ("weight_scale .003", "weight_scale .006") if changed == "branching" else (
