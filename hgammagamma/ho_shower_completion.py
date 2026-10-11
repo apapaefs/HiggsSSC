@@ -158,6 +158,21 @@ def _exception_summary(text):
     return counts, classes
 
 
+def _exact_statistic_count(text, exact, name):
+    """Check ThePEG's printed count against independently counted events.
+
+    Its floating counters use six significant digits, so e.g. 3999652 is
+    printed as 3.99965e+06. Only that specific scientific-format rounding is
+    allowed; the exact ROOT/footer and exception counts remain authoritative.
+    """
+    _integer(exact, name, minimum=1)
+    printed = _lhe_integer(text, name)
+    scientific = bool(re.fullmatch(r"\d+(?:\.\d*)?[eEdD][+-]?\d+", text))
+    if printed != exact and not (scientific and printed == _number(format(exact, ".6g"))):
+        raise ValueError(f"printed {name} differs from exact shower bookkeeping")
+    return exact
+
+
 def _parse_logs(herwig_dir, sample_name, termination):
     paths = {"run_log": herwig_dir / "run.log", "herwig_out": herwig_dir / f"{sample_name}.out",
              "herwig_log": herwig_dir / f"{sample_name}.log"}
@@ -172,11 +187,6 @@ def _parse_logs(herwig_dir, sample_name, termination):
     totals = re.findall(r"(?m)^Total:\s+(\S+)\s+(\S+)\s+([^\n]+)$", section)
     if len(totals) != 1:
         raise ValueError("missing or ambiguous final Les Houches Total")
-    # ThePEG switches large counts to scientific notation (e.g. 1e+06).
-    # Still require finite integer counts; completion validation below checks
-    # them against the exact ROOT, LHE and discarded-event populations.
-    generated = _lhe_integer(totals[0][0], "generated event count")
-    attempted = _lhe_integer(totals[0][1], "attempted event count")
     # Herwig writes uncertainties as e.g. 0.214(1)e+00.
     cross_section = re.sub(r"\([^)]*\)", "", totals[0][2].strip()).split()[0]
     _number(cross_section)
@@ -190,6 +200,13 @@ def _parse_logs(herwig_dir, sample_name, termination):
     if run.index("A root tree has been written to the file:") > run.index("Number of events that pass basic cuts:"):
         raise ValueError("HwSim footer precedes finalized ROOT output")
     counts, classes = _exception_summary(texts["herwig_log"])
+    # With the audited unfiltered, non-recycling card, each source attempt
+    # either reaches HwSim or raises one eventerror. Do not use rounded log
+    # counters to choose the consumed LHE prefix for signed normalization.
+    saved = int(footer[0])
+    generated = _exact_statistic_count(totals[0][0], saved, "generated event count")
+    attempted = _exact_statistic_count(totals[0][1], saved + counts["eventerror"],
+                                      "attempted event count")
     all_text = "\n".join(texts.values())
     if re.search(r"Reopening LesHouchesReader|Segmentation fault|segmentation fault|"
                  r"core dumped|Traceback \(most recent call last\)|terminate called|"
@@ -212,7 +229,7 @@ def _parse_logs(herwig_dir, sample_name, termination):
     if maximum is not None and maximum < 0:
         raise ValueError("negative maximum momentum violation")
     return {"generated_events": generated, "attempted_events": attempted,
-            "saved_events": int(footer[0]), "exception_counts": counts,
+            "saved_events": saved, "exception_counts": counts,
             "exception_classes": classes, "max_momentum_violation_mev": maximum,
             "root_writers": [str((herwig_dir / path).resolve()) for path in writers],
             "artifacts": artifacts}

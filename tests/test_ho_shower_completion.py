@@ -96,6 +96,78 @@ class ShowerCompletionTests(unittest.TestCase):
         manifest["shower_completion"] = record
         return record, manifest
 
+    def rounded_count_fixture(self, directory):
+        # Synthetic metadata represents a large finalized shower. The small
+        # LHE is deliberately not used as proof for this provisional record.
+        fixture = self.fixture(directory, saved=3999652, requested=4000000,
+                               attempts=4000002, termination="source_exhausted")
+        herwig, _, metadata, manifest, _, _ = fixture
+        for key in completion.MOMENTS:
+            metadata[0][key] = 3999652.
+        manifest["lhe"]["events"] = 4000002
+        out = herwig / f"{SAMPLE}.out"
+        out.write_text(out.read_text().replace(
+            "Total: 3999652 4000002 ", "Total: 3.99965e+06 4e+06 "))
+        run = herwig / "run.log"
+        run.write_text(run.read_text().replace(
+            "Weight of events that pass basic cuts: 1.6",
+            "Weight of events that pass basic cuts: 3.99965e+06"))
+        return fixture
+
+    def test_statistic_count_restores_exact_counts_from_six_digit_rounding(self):
+        cases = (("3999652", 3999652), ("3.999652e+06", 3999652),
+                 ("3.99965e+06", 3999652), ("4e+06", 4000002),
+                 ("3.99965E+06", 3999652), ("4e+00", 4))
+        for printed, exact in cases:
+            with self.subTest(printed=printed, exact=exact):
+                self.assertEqual(completion._exact_statistic_count(printed, exact, "test"), exact)
+
+    def test_statistic_count_rejects_invalid_and_inconsistent_printed_counts(self):
+        cases = (("nan", 3999652), ("inf", 3999652), ("unknown", 3999652),
+                 ("-3999652", 3999652), ("3.9996521e+06", 3999652),
+                 ("3.99966e+06", 3999652), ("3999650", 3999652),
+                 ("4000000.0", 4000002), ("3e+00", 4))
+        for printed, exact in cases:
+            with self.subTest(printed=printed, exact=exact):
+                with self.assertRaises(ValueError):
+                    completion._exact_statistic_count(printed, exact, "test")
+
+    def test_parse_logs_restores_both_rounded_counts_from_exact_accounting(self):
+        with TemporaryDirectory() as directory:
+            fixture = self.rounded_count_fixture(directory)
+            parsed = completion._parse_logs(fixture[0], SAMPLE, "source_exhausted")
+            self.assertEqual(parsed["generated_events"], 3999652)
+            self.assertEqual(parsed["saved_events"], 3999652)
+            self.assertEqual(parsed["attempted_events"], 4000002)
+            self.assertEqual(parsed["exception_counts"]["eventerror"], 350)
+
+    def test_rounded_completion_requires_signed_source_proof_after_exact_closure(self):
+        with TemporaryDirectory() as directory:
+            herwig, _, metadata, manifest, termination, _ = self.rounded_count_fixture(directory)
+            record = completion.build_completion(
+                herwig, SAMPLE, manifest["nevents_requested"], manifest["lhe"]["events"],
+                metadata, termination)
+            self.assertEqual(record["generated_events"], 3999652)
+            self.assertEqual(record["attempted_events"], 4000002)
+            self.assertEqual(record["discarded_events"], 350)
+            self.assertIs(completion.validate_completion(
+                record, manifest, directory, require_source=False), record)
+            with self.assertRaisesRegex(ValueError, "source-weight proof"):
+                completion.validate_completion(record, manifest, directory)
+
+    def test_rounded_counts_cannot_hide_exact_root_or_lhe_population_mismatch(self):
+        for mismatch in ("root_entries", "lhe_events"):
+            with self.subTest(mismatch=mismatch), TemporaryDirectory() as directory:
+                herwig, _, metadata, manifest, termination, _ = self.rounded_count_fixture(directory)
+                if mismatch == "root_entries":
+                    metadata[0]["entries"] -= 1
+                else:
+                    manifest["lhe"]["events"] -= 1
+                with self.assertRaises(ValueError):
+                    completion.build_completion(
+                        herwig, SAMPLE, manifest["nevents_requested"], manifest["lhe"]["events"],
+                        metadata, termination)
+
     def test_normal_completion_is_sealed_and_reuses_saved_count(self):
         with TemporaryDirectory() as directory:
             fixture = self.fixture(directory)

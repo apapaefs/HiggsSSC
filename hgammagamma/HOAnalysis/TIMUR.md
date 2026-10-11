@@ -305,6 +305,14 @@ shower before continuing; the generated LHE and ROOT files need no edits
 or regeneration. The discarded signed weights remain in the source
 normalization denominator.
 
+Above one million events, ThePEG's six-significant-digit statistics can
+also round the counts (for example, `3999652` becomes `3.99965e+06`). The
+runner uses the exact integer HwSim footer and recorded shower discards
+to reconstruct generated and attempted counts, and requires the printed
+totals to agree exactly or in that specific scientific format. ROOT
+entries and consumed LHE events still undergo the full independent
+checks; rounded totals never set the signed source-weight denominator.
+
 ## Resume ihixs After A Production Precision Failure
 
 This is the historical recovery used by the completed refined run. Its
