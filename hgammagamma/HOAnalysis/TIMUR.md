@@ -4,7 +4,8 @@ Use `/home/apapaefs/Projects/HiggsSSC` for the LO and HO analyses,
 ihixs calculations, inputs and reports. All commands below run from
 this repository root.
 Students should use their own checkout and account, following
-[`IHIXS_STUDENT_GUIDE.md`](IHIXS_STUDENT_GUIDE.md). The `/home/apapaefs`
+the [full pipeline guide](PIPELINE_STUDENT_GUIDE.md), or
+[`IHIXS_STUDENT_GUIDE.md`](IHIXS_STUDENT_GUIDE.md) for normalization alone. The `/home/apapaefs`
 paths and completed campaign below describe the instructor's checkout.
 
 The canonical layout is:

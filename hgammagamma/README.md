@@ -14,7 +14,9 @@ provenance, validation, and limitation reference, see
 
 For POWHEG HJMiNNLO + Herwig signal and MadGraph5 MC@NLO + Herwig
 backgrounds using the same response, see the
-[`HOAnalysis` campaign guide](HOAnalysis/README.md). Its runner is
+[full pipeline guide](HOAnalysis/PIPELINE_STUDENT_GUIDE.md) for setup and
+every stage in your own account, or the
+[`HOAnalysis` campaign guide](HOAnalysis/README.md) for individual stages. Its runner is
 `run_gammagamma_ho_campaign.py`; the default stage prepares cards only.
 
 ## Get The Repository
@@ -66,28 +68,37 @@ MadGraph5 run cards and uses `NNPDF40_lo_as_01180` for Herwig. The higher-order
 
 ## Download MadGraph
 
-From the repository root, download MadGraph5_aMC@NLO version `v3.5.15` from
-
-```text
-https://launchpad.net/mg5amcnlo
-```
-
-For example:
+For the HO workflow, the pipeline's `setup` command performs this step.
+For a separate installation, use the pinned upstream `v3.5.15` source
+archive from the repository root:
 
 ```bash
-wget https://launchpad.net/mg5amcnlo/3.0/3.7.x/+download/LTS_MG5aMC_v3.5.15.tgz
+curl -fL https://codeload.github.com/mg5amcnlo/mg5amcnlo/tar.gz/1d7559658bdc2b7eba476d4897aa594994fa82af \
+  -o MG5-v3.5.15.tar.gz
 ```
 
 This downloads the tarball
 
 ```text
-HiggsSSC/LTS_MG5aMC_v3.5.15.tgz
+HiggsSSC/MG5-v3.5.15.tar.gz
 ```
 
 Unpack it with:
 
 ```bash
-tar -xzf LTS_MG5aMC_v3.5.15.tgz
+mkdir -p MG5_aMC_v3_5_15
+tar -xzf MG5-v3.5.15.tar.gz --strip-components=1 -C MG5_aMC_v3_5_15
+```
+
+Apply the repository's release-packaging and Python 3.9 startup fixes (the
+pipeline setup does this automatically for its private installation):
+
+```bash
+python3 - <<'PY'
+from pathlib import Path
+from hgammagamma.run_gammagamma_ho_pipeline import prepare_mg5_archive
+prepare_mg5_archive(Path('MG5_aMC_v3_5_15'))
+PY
 ```
 
 You should now have:

@@ -15,10 +15,21 @@ cd HiggsSSC
 git submodule update --init external/ihixs
 ```
 
-The [student ihixs guide](hgammagamma/HOAnalysis/IHIXS_STUDENT_GUIDE.md)
-gives the complete Timur setup, dependency installation, calculation commands
-and checks for the HO Higgs normalization. Run the wrapper from `HiggsSSC`;
-you do not need a second ihixs repository or access to the paper.
+The [full HO diphoton pipeline guide](hgammagamma/HOAnalysis/PIPELINE_STUDENT_GUIDE.md)
+covers setup in your own Timur account, POWHEG installation and signal
+generation, ihixs normalization, MG5 backgrounds, showers, analysis and the
+report. Start from the repository root:
+
+```bash
+python3 hgammagamma/run_gammagamma_ho_pipeline.py setup --jobs 4
+python3 hgammagamma/run_gammagamma_ho_pipeline.py run --run-tag ho_pilot_01 --nevents 30 --jobs 4
+```
+
+The first pilot includes the full ihixs normalization calculation. No input
+files from the instructor's account are required. The
+[student ihixs guide](hgammagamma/HOAnalysis/IHIXS_STUDENT_GUIDE.md) remains
+available for the normalization calculation alone. You do not need a
+second ihixs repository or access to the paper.
 
 If you already have a checkout, update the source from inside `HiggsSSC`:
 
@@ -41,6 +52,7 @@ after configuring your GitHub SSH access; see the paper workflow below.
 ```text
 HiggsSSC/
   hgammagamma/ # h -> gamma gamma LO and HO campaigns and analysis
+    HOAnalysis/PIPELINE_STUDENT_GUIDE.md # full independent HO setup and run
     HOAnalysis/IHIXS_STUDENT_GUIDE.md # inclusive N3LO ggF setup and commands
     SSC_DETECTOR_RESPONSE.md # GEM response implementation and operating reference
   hfourlepton/ # h -> ZZ* -> 4l LO campaign, unified response analysis, and reports

@@ -1,5 +1,10 @@
 # Student Guide: ihixs In HiggsSSC
 
+For the complete generation-to-report workflow, use the
+[full pipeline guide](PIPELINE_STUDENT_GUIDE.md), which installs Cuba and
+the PDFs and invokes this calculation automatically. This guide covers
+ihixs alone, including use with existing campaigns.
+
 This guide calculates the inclusive **pure-HEFT ggF production cross section
 at 40 TeV, at N3LO in QCD**, for the HO diphoton analysis. The rate excludes
 the Higgs branching fraction, generation cuts and detector response. It
