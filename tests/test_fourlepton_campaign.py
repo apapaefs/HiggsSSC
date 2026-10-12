@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import gzip
 import io
 import json
@@ -16,9 +18,45 @@ from hfourlepton import run_four_lepton_campaign as campaign
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
+def setUpModule() -> None:
+    """Card tests use a small fixture, independent of a user's MG5 install."""
+    global MG5_FIXTURE, MG5_TEMPORARY
+    MG5_TEMPORARY = TemporaryDirectory()
+    MG5_FIXTURE = Path(MG5_TEMPORARY.name)
+    (MG5_FIXTURE / "VERSION").write_text("version = 3.5.15\n")
+    model = MG5_FIXTURE / "models/sm"
+    model.mkdir(parents=True)
+    # Relevant entries from the SM restriction card; MASS 24 is deliberately
+    # absent so the runner must derive the dependent W mass.
+    (model / "restrict_default.dat").write_text("""Block SMINPUTS
+    1 1.325070e+02
+    2 1.166390e-05
+    3 1.180000e-01
+Block MASS
+    5 4.700000e+00
+    6 1.730000e+02
+   15 1.777000e+00
+   23 9.118800e+01
+   25 1.250000e+02
+DECAY 6 1.491500e+00
+DECAY 23 2.441404e+00
+DECAY 24 2.047600e+00
+DECAY 25 6.38233934e-03
+Block YUKAWA
+    5 4.700000e+00
+    6 1.730000e+02
+   15 1.777000e+00
+""")
+
+
+def tearDownModule() -> None:
+    MG5_TEMPORARY.cleanup()
+
+
 def config(*extra: str) -> campaign.Config:
     with patch.dict("os.environ", {}, clear=True):
-        return campaign.parse_config(["--dry-run", "--no-herwig-module", *extra])
+        return campaign.parse_config(["--dry-run", "--no-herwig-module",
+                                      "--mg5-dir", str(MG5_FIXTURE), *extra])
 
 
 def lhe_text(cross_sections: list[float], weights: list[float] | None = None) -> str:
