@@ -16,7 +16,7 @@ confused with outputs of this repository's simplified simulation.
 | Object | Historical acceptance/efficiency | Resolution and fake assumptions |
 | --- | --- | --- |
 | Photons/electrons | EMC `0.1 < \|eta\| < 3`; high-resolution analyses veto `1.01 < \|eta\| < 1.16`; shower ID about 90%, combined geometric/cut efficiency 80–85% | EM sampling 6% barrel, 8–8.5% endcap, constant 0.4%; detailed parameterization uses 8.5%. Position `4.4 mm/sqrt(E)`. |
-| Muons | `0.1 < \|eta\| < 2.5`; 85% geometric × 95% reconstruction | At 500 GeV, momentum resolution 5% at eta=0, 12% at |eta|=2.5. No universal jet-to-muon fake probability was specified. |
+| Muons | `0.1 < \|eta\| < 2.5`; 85% geometric × 95% reconstruction | At 500 GeV, momentum resolution 5% at eta=0, 12% at \|eta\|=2.5. No universal jet-to-muon fake probability was specified. |
 | Jets | HCAL to `\|eta\|=5.5` | Central energy resolution `60%/sqrt(E) + 4%` in quadrature; the heavy-Higgs forward-tag study used `200%/sqrt(E) + 6%`. |
 
 Energies are in GeV. GEM EM noise was parameterized in transverse energy:

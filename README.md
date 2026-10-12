@@ -77,8 +77,8 @@ python3 run_pipeline.py setup --workflow gammagamma-ho
 python3 run_pipeline.py run --workflow gammagamma-ho --run-tag ho_pilot_01
 ```
 
-The first HO run includes the full 109-point normalization calculation even
-for a 30-event pilot. It can take much longer than event showering. See
+The first HO run includes the full 109-point normalization calculation and
+POWHEG integration, even for a 30-event pilot. It can take hours. See
 [HO conventions](hgammagamma/HOAnalysis/README.md) and
 [normalization](hgammagamma/HOAnalysis/IHIXS_STUDENT_GUIDE.md).
 
