@@ -213,6 +213,52 @@ class StudentPipelineTests(unittest.TestCase):
                 cli.run(pipeline)
             self.assertEqual(calls, ["run", "validate"])
 
+    def test_ho_production_saves_per_campaign_artifact_evidence(self):
+        with self.repository() as root:
+            args = self.args(root, "--workflow", "gammagamma-ho", "--nevents", "100")
+            self.artifacts(args)
+            cli.shared.save(cli.state_path(args), {"state": "prepared", "stage": "preflight"})
+            original = cli.physics_artifacts(args)
+            pipeline = SimpleNamespace(args=args, config={}, run=mock.Mock())
+            with contextlib.redirect_stdout(io.StringIO()):
+                cli.run(pipeline)
+            saved = cli.read_state(args)
+            self.assertEqual(saved["state"], "complete")
+            self.assertEqual(saved["analysis_artifacts"], original)
+            self.assertFalse(cli.pilot_path(args).exists())
+            self.assertFalse((args.work_dir / "pilot-complete.json").exists())
+
+    def test_ho_production_evidence_survives_report_failure_and_blocks_changed_outputs(self):
+        for action in ("run", "report", "cuts", "xgboost"):
+            with self.subTest(action=action), self.repository() as root:
+                args = self.args(root, "--workflow", "gammagamma-ho", "--nevents", "100")
+                self.artifacts(args)
+                original = cli.physics_artifacts(args)
+                cli.shared.save(cli.state_path(args), {
+                    "state": "complete", "stage": "complete", "analysis_artifacts": original,
+                })
+                cli.progress(args, state="failed", stage="production-report", error="presentation failed")
+                product = next(cli.locations(args)[0].rglob("*_var.root"))
+                product.write_text("changed nonempty production output")
+                args.action = action
+                pipeline = SimpleNamespace(args=args, config={}, run=mock.Mock(), call=mock.Mock())
+                operation = cli.run if action == "run" else cli.report if action == "report" else cli.downstream_analysis
+                with self.assertRaisesRegex(ValueError, "completed analysis product changed"):
+                    operation(pipeline)
+                pipeline.run.assert_not_called()
+                pipeline.call.assert_not_called()
+                self.assertEqual(cli.read_state(args)["analysis_artifacts"], original)
+
+    def test_saved_campaign_artifact_inventory_cannot_silently_lose_an_output(self):
+        with self.repository() as root:
+            args = self.args(root, "--workflow", "gammagamma-ho", "--nevents", "100")
+            self.artifacts(args)
+            original = cli.physics_artifacts(args)
+            original.pop(next(name for name in original if name.endswith("_var.root")))
+            cli.shared.save(cli.state_path(args), {"state": "failed", "analysis_artifacts": original})
+            with self.assertRaisesRegex(ValueError, "inventory differs"):
+                cli.validate_saved_run_artifacts(args)
+
     def test_lo_report_cuts_and_ml_reject_changed_completed_outputs(self):
         for action in ("report", "cuts", "xgboost"):
             for suffix in (".dat", "_var.root"):

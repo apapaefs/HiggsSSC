@@ -190,6 +190,7 @@ def campaign_command(pipeline, workflow, profile=None):
 def physics_artifacts(args):
     """Check saved analysis provenance without invoking an analyzer or generator.
 
+    Successful student runs retain per-campaign hashes in their saved state.
     Older HO manifests record summary values instead of output hashes. Retain
     that contract, and use existing pilot hashes when they cover this campaign.
     """
@@ -245,6 +246,13 @@ def physics_artifacts(args):
         for folder, summary in ho_summaries:
             validate_ho_analysis_summary(folder, summary)
     current = {str(path.resolve()): shared.digest(path) for path in paths}
+    if state_path(args).is_file():
+        recorded = read_state(args).get("analysis_artifacts")
+        if recorded is not None:
+            if not isinstance(recorded, dict) or {str(Path(name).resolve()) for name in recorded} != set(current):
+                raise ValueError("completed campaign analysis-artifact inventory differs from saved evidence")
+            for name, value in recorded.items():
+                expect_hash(name, value)
     snapshots = [pilot_path(args)]
     if args.workflow == "gammagamma-ho":
         snapshots.append(args.work_dir / "pilot-complete.json")
@@ -326,7 +334,9 @@ def downstream_analysis(pipeline):
 def validate_saved_run_artifacts(args):
     """Validate completed evidence before a resumed run can rewrite reports."""
     saved = read_state(args) if state_path(args).is_file() else None
-    completed = saved is not None and saved.get("state") == "complete"
+    completed = saved is not None and (
+        saved.get("state") == "complete" or saved.get("analysis_artifacts") is not None
+    )
     directory = locations(args)[0].resolve()
     snapshots = [pilot_path(args)]
     if args.workflow == "gammagamma-ho":
@@ -357,7 +367,7 @@ def run(pipeline, *, saved_artifacts_checked=False):
     artifacts = physics_artifacts(args)
     if args.nevents <= 30:
         shared.save(pilot_path(args), {"environment": pipeline.config, "artifacts": artifacts})
-    progress(args, state="complete", stage="complete", error=None)
+    progress(args, state="complete", stage="complete", error=None, analysis_artifacts=artifacts)
     print(f"Pipeline complete: {locations(args)[1] / 'index.html'}")
 
 
