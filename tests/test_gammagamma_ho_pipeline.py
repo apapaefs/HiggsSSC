@@ -459,6 +459,56 @@ class PipelineTests(unittest.TestCase):
             for name in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
                 self.assertEqual(obj.env[name], "1")
 
+    def test_recorded_mg5_ninja_precedes_inherited_same_soname_on_new_invocations(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            args = pipeline.parse_args(["check", "--work-dir", str(root / "work")])
+            config = pipeline.configuration(args)
+            chosen = root / "quad-ninja/lib"
+            chosen.mkdir(parents=True)
+            pipeline.save(args.work_dir / "components.json", {"mg5": {"ninja": str(chosen)}})
+            private_config = args.work_dir / "MG5_aMC_v3_5_15/input/mg5_configuration.txt"
+            private_config.parent.mkdir(parents=True)
+            private_config.write_text("ninja = /unrelated/ordinary-ninja\n")
+            inherited = {"PATH": "/shared/bin", "LD_LIBRARY_PATH": "/shared/lib:" + str(chosen)}
+            with mock.patch.object(pipeline, "activated_environment", side_effect=lambda _: dict(inherited)), \
+                    mock.patch.object(pipeline.Pipeline, "capture", return_value="/shared"), \
+                    mock.patch.object(pipeline.sys, "platform", "linux"):
+                for _ in range(2):
+                    obj = pipeline.Pipeline(args, config)
+                    self.assertEqual(obj.env["LD_LIBRARY_PATH"], str(chosen) + ":/shared/lib")
+                (args.work_dir / "components.json").unlink()
+                private_config.write_text("ninja = " + str(chosen) + "\n")
+                obj = pipeline.Pipeline(args, config)
+                self.assertEqual(obj.env["LD_LIBRARY_PATH"].split(":")[0], str(chosen))
+
+    def test_initial_mg5_setup_activates_and_preserves_its_selected_ninja(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            obj, _ = self.fixture(root)
+            obj.args.workflow = "fourlepton-lo"
+            obj.env = {"LD_LIBRARY_PATH": "/shared/lib"}
+            obj.capture = mock.Mock(return_value="/shared/bin/tool")
+            (obj.mg5 / "bin").mkdir(parents=True)
+            (obj.mg5 / "bin/mg5_aMC").write_text("synthetic entrypoint")
+            (obj.mg5 / "input").mkdir()
+            chosen = obj.prefix / "opt/MG5-selected/HEPTools/ninja/lib"
+            chosen.mkdir(parents=True)
+            (chosen.parent / "include").mkdir()
+            for path in (chosen / "libninja.a", chosen / "libavh_olo.a", chosen.parent / "include/mninja.mod"):
+                path.write_text("synthetic library")
+            with mock.patch.object(pipeline, "prepare_mg5_archive"), \
+                    mock.patch.object(pipeline.sys, "platform", "linux"):
+                obj.setup_mg5()
+                self.assertEqual(obj.env["LD_LIBRARY_PATH"].split(":")[0], str(chosen))
+                self.assertEqual(obj.components()["mg5"]["ninja"], str(chosen))
+                # A new earlier-named installation must not silently replace
+                # the build recorded by the existing private MG5 installation.
+                alternative = obj.prefix / "opt/MG5-a-new/HEPTools/ninja/lib"
+                alternative.mkdir(parents=True)
+                obj.setup_mg5()
+                self.assertEqual(obj.components()["mg5"]["ninja"], str(chosen))
+
     def test_new_pilot_evidence_excludes_report_presentation(self):
         with TemporaryDirectory() as tmp, mock.patch.object(pipeline.norm, "load_record"):
             root = Path(tmp)

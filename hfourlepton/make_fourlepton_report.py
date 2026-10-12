@@ -1812,6 +1812,23 @@ def _manifest_optional_weight_names(sample: ManifestSample) -> list[str]:
             raise ValueError("duplicate populated optional-weight mapping in manifest")
         if sources != sorted(sources):
             raise ValueError("populated optional-weight mapping is not in ThePEG source order")
+        definitions = sample.raw.get("optional_weight_definitions")
+        absent = recorded.get("absent_declared_ids")
+        if (not isinstance(definitions, list)
+                or any(not isinstance(item, Mapping) or not isinstance(item.get("id"), str)
+                       for item in definitions)
+                or not isinstance(absent, list)
+                or any(not isinstance(value, str) for value in absent)):
+            raise ValueError("invalid declared/absent IDs for optional-weight mapping")
+        declared = {item["id"]: item for item in definitions}
+        if (len(declared) != len(definitions) or len(set(absent)) != len(absent)
+                or set(identifiers) & set(absent)
+                or set(identifiers) | set(absent) != set(declared)):
+            raise ValueError("optional-weight mapping does not partition the declared IDs")
+        for item in mapping:
+            definition = declared[item["id"]]
+            if any(item[key] != definition.get(key) for key in ("label", "source_name")):
+                raise ValueError("optional-weight mapping identity differs from declared definitions")
         return names
     definitions = sample.raw.get("optional_weight_definitions")
     if not isinstance(definitions, Sequence) or isinstance(definitions, (str, bytes)):
@@ -1990,6 +2007,12 @@ def analyze_sample(
             "optional_weight_name_syntheses"
         ),
     )
+    if ("optional_weight_mapping" in sample.raw and not expected_optional_weight_names
+            and optional_weights["variation_count"]):
+        optional_weights["errors"].append(
+            "SourceEvents contains variations despite an empty populated optional-weight mapping"
+        )
+        optional_weights["status"] = "inconsistent"
     optional_name_mismatches = optional_float(
         analyzer_diagnostics.get("optional_weight_name_mismatches")
     )

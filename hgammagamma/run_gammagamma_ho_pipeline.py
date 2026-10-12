@@ -216,6 +216,8 @@ class Pipeline:
         self.env.update(CUBACORES=str(args.jobs), CUBAACCEL="0",
                         OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1")
         self.mg5 = self.work / "MG5_aMC_v3_5_15"
+        _known, ninja = self.recorded_ninja()
+        self.activate_ninja_runtime(ninja)
         self.powheg = self.work / "POWHEG-BOX-V2"
         self.cuba = self.work / "cuba"
         self.logs = self.work / "logs"
@@ -309,6 +311,34 @@ class Pipeline:
         components = self.components()
         components[name] = metadata
         save(self.work / "components.json", components)
+
+    def recorded_ninja(self):
+        """Use the installed MG5 selection, without rediscovering another build."""
+        record = self.components().get("mg5", {})
+        if "ninja" in record:
+            return True, Path(record["ninja"]) if record["ninja"] else None
+        cfg = self.mg5 / "input/mg5_configuration.txt"
+        if cfg.is_file():
+            selections = re.findall(r"(?m)^\s*ninja\s*=\s*([^\n#]*)", cfg.read_text())
+            if selections:
+                value = selections[-1].strip()
+                return True, Path(value) if value and value != "None" else None
+        return False, None
+
+    def activate_ninja_runtime(self, directory):
+        if directory is None:
+            return
+        if not directory.is_dir():
+            raise ValueError(f"recorded MG5 Ninja library directory is missing: {directory}")
+        # MG5 links the configured quad-capable Ninja but emits no RUNPATH.
+        # A site's ordinary Ninja can have the same SONAME and omit quad
+        # symbols. Restore the configured library before inherited site paths
+        # on every invocation, including generate_events descendants.
+        keys = ("DYLD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH") if sys.platform == "darwin" else ("LD_LIBRARY_PATH",)
+        for key in keys:
+            entries = [entry for entry in self.env.get(key, "").split(os.pathsep)
+                       if entry and entry != str(directory)]
+            self.env[key] = os.pathsep.join([str(directory), *entries])
 
     def setup_python(self):
         created = not self.python.exists()
@@ -404,12 +434,18 @@ class Pipeline:
             archive = self.download(MG5_URL, "MG5-v3.5.15.tar.gz", MG5_SHA256)
             self.unpack(archive, f"mg5amcnlo-{MG5_COMMIT}", self.mg5)
         prepare_mg5_archive(self.mg5)
-        candidates = ([Path(self.config["ninja_dir"])] if self.config["ninja_dir"] else
-                      sorted(self.prefix.glob("opt/MG5*/HEPTools/ninja/lib")))
+        known, recorded = self.recorded_ninja()
+        if known:
+            candidates = [recorded] if recorded else []
+        elif self.config["ninja_dir"]:
+            candidates = [Path(self.config["ninja_dir"])]
+        else:
+            candidates = sorted(self.prefix.glob("opt/MG5*/HEPTools/ninja/lib"))
         ninja = next((p for p in candidates if (p / "libninja.a").is_file()
                       and (p / "libavh_olo.a").is_file() and (p.parent / "include/mninja.mod").is_file()), None)
-        if self.config["ninja_dir"] and ninja is None:
+        if (self.config["ninja_dir"] or recorded) and ninja is None:
             raise ValueError("--ninja-dir must contain Ninja/OneLOop libraries and ../include/mninja.mod")
+        self.activate_ninja_runtime(ninja)
         # These are this entry point's private MG5 files, never a shared MG5 installation.
         cfg = self.mg5 / "input/mg5_configuration.txt"
         # GitHub source archives omit the user configuration; MG5 supplies
