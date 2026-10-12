@@ -682,6 +682,36 @@ DECAY 25 4.070000000e-03
 
 
 class FourLeptonNormalizationTests(unittest.TestCase):
+    def test_optional_weight_mapping_uses_populated_ids_and_lexical_source_names(self) -> None:
+        definitions = [
+            {"id": "1", "label": "lhe_id=1:scale_up", "description": "scale_up"},
+            {"id": "2", "label": "lhe_id=2:unavailable", "description": "unavailable"},
+            {"id": "3", "label": "lhe_id=3", "description": ""},
+        ]
+        event = '<event>\n1 1 1 1 1 1\n<rwgt><wgt id="1">1.1</wgt><wgt id="3">1</wgt></rwgt>\n</event>\n'
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "weights.lhe"
+            path.write_text(event * 2)
+            result = campaign.lhe_optional_weight_mapping(path, definitions)
+            self.assertEqual([item["id"] for item in result["mapping"]], ["3", "1"])
+            self.assertEqual(result["absent_declared_ids"], ["2"])
+            self.assertEqual(result["validated_events"], 2)
+            for invalid, message in (
+                (event + event.replace('id="3"', 'id="2"'), "IDs change"),
+                (event.replace('id="3"', 'id="999"'), "undeclared or duplicate"),
+                (event.replace('id="3"', 'id="1"'), "undeclared or duplicate"),
+                (event.replace('>1.1<', '>inf<'), "non-finite"),
+                (event.replace('</wgt>', '', 1), "malformed|invalid"),
+            ):
+                with self.subTest(message=message):
+                    path.write_text(invalid)
+                    with self.assertRaisesRegex(ValueError, message):
+                        campaign.lhe_optional_weight_mapping(path, definitions)
+            path.write_text(event)
+            definitions[2]["description"] = "scale_up"
+            with self.assertRaisesRegex(ValueError, "colliding descriptions"):
+                campaign.lhe_optional_weight_mapping(path, definitions)
+
     def test_lhe_optional_weight_definitions_preserve_semantic_order(self) -> None:
         text = """<LesHouchesEvents version="3.0">
 <header>
@@ -706,6 +736,7 @@ class FourLeptonNormalizationTests(unittest.TestCase):
             [definition["id"] for definition in definitions],
             ["1002", "1001"],
         )
+        self.assertEqual(definitions[0]["source_name"], "mur = 2.0   muf = 1.0")
         self.assertEqual(
             [definition["label"] for definition in definitions],
             [
@@ -713,6 +744,31 @@ class FourLeptonNormalizationTests(unittest.TestCase):
                 "lhe_id=1001:mur = 0.5 muf = 1.0",
             ],
         )
+
+    def test_madspin_boundary_preserves_finite_weights_and_records_invalid_source(self) -> None:
+        header = ('<LesHouchesEvents><header><initrwgt><weightgroup>'
+                  '<weight id="1">scale_up</weight><weight id="2">sum pt</weight>'
+                  '</weightgroup></initrwgt></header>\n<init>\n</init>\n')
+        event = '<event>\n1 1 1 1 1 1\n<rwgt><wgt id="1">1.1</wgt><wgt id="2">+inf</wgt></rwgt>\n</event>\n'
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "source.lhe"
+            path.write_text(header + event * 2 + '</LesHouchesEvents>')
+            definitions = campaign.parse_lhe_optional_weight_definitions(path)
+            decayed = {"mapping": [definitions[0]]}
+            diagnostic = campaign.validate_optional_weight_decay_boundary(path, decayed)
+            self.assertEqual(diagnostic["absent_after_decay_ids"], ["2"])
+            self.assertEqual(diagnostic["nonfinite_source_weights"][0]["nonfinite_events"], 2)
+            self.assertEqual(diagnostic["nonfinite_source_weights"][0]["finite_events"], 0)
+            path.write_text(header + event.replace('+inf', '0.8') + '</LesHouchesEvents>')
+            with self.assertRaisesRegex(ValueError, "finite optional weights disappeared"):
+                campaign.validate_optional_weight_decay_boundary(path, decayed)
+            path.write_text(header + event + '</LesHouchesEvents>')
+            changed = {"mapping": [{**definitions[0], "source_name": "wrong"}]}
+            with self.assertRaisesRegex(ValueError, "identity changed"):
+                campaign.validate_optional_weight_decay_boundary(path, changed)
+            changed = {"mapping": [{**definitions[0], "attributes": 'id="1" MUR="2"'}]}
+            with self.assertRaisesRegex(ValueError, "identity changed"):
+                campaign.validate_optional_weight_decay_boundary(path, changed)
 
     def test_stable_higgs_validation_uses_event_records_without_banner_slha(
         self,

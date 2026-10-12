@@ -1808,6 +1808,9 @@ def parse_lhe_optional_weight_definitions(
         description = " ".join(
             re.sub(r"<[^>]+>", " ", weight_match.group(2)).split()
         )
+        # ThePEG stripws trims ends, then LesHouchesFileReader removes LF;
+        # internal spaces remain significant in its description-keyed map.
+        source_name = weight_match.group(2).strip(" \t\r\n").replace("\n", "")
         label = (
             f"lhe_id={weight_id}:{description}"
             if description
@@ -1818,10 +1821,131 @@ def parse_lhe_optional_weight_definitions(
                 "id": weight_id,
                 "label": label,
                 "description": description,
+                "source_name": source_name,
                 "attributes": attributes,
             }
         )
     return definitions
+
+
+def lhe_optional_weight_mapping(
+    path: Path, definitions: list[dict[str, str]], *, allow_nonfinite: bool = False
+) -> dict[str, object]:
+    """Map populated LHE IDs to the description-keyed ThePEG/HwSim map.
+
+    MadSpin can retain declarations for weights absent from every event.
+    Validate event payloads separately; a header alone does not define the
+    optional-weight vector. ThePEG strips surrounding description whitespace
+    and HwSim writes its std::map in lexical description order.
+    """
+    declared = {definition["id"]: definition for definition in definitions}
+    present_ids: set[str] | None = None
+    event_lines: list[str] | None = None
+    events = 0
+    finite_counts: dict[str, int] = defaultdict(int)
+    nonfinite_counts: dict[str, int] = defaultdict(int)
+    with open_maybe_gzip(path) as stream:
+        for line in stream:
+            if re.search(r"<event\b", line):
+                if event_lines is not None:
+                    raise ValueError(f"nested LHE event in {path}")
+                event_lines = []
+            if event_lines is None:
+                continue
+            event_lines.append(line)
+            if "</event>" not in line:
+                continue
+            payload = "".join(event_lines)
+            event_lines = None
+            events += 1
+            if re.search(r"<weights\b", payload):
+                raise ValueError(f"compact LHE optional weights are unsupported in {path}")
+            ids: set[str] = set()
+            for match in re.finditer(
+                r"<wgt\b([^>]*)>(.*?)</wgt>", payload, flags=re.DOTALL
+            ):
+                identifier = re.search(r"\bid\s*=\s*(['\"])(.*?)\1", match.group(1))
+                weight_id = identifier.group(2).strip() if identifier else ""
+                if weight_id not in declared or weight_id in ids:
+                    raise ValueError(
+                        f"undeclared or duplicate optional-weight ID {weight_id!r} "
+                        f"in {path} event {events}"
+                    )
+                try:
+                    value = float(match.group(2).replace("D", "E").replace("d", "e"))
+                except ValueError as error:
+                    raise ValueError(f"invalid optional weight {weight_id} in {path}") from error
+                if math.isfinite(value):
+                    finite_counts[weight_id] += 1
+                else:
+                    nonfinite_counts[weight_id] += 1
+                    if not allow_nonfinite:
+                        raise ValueError(f"non-finite optional weight {weight_id} in {path}")
+                ids.add(weight_id)
+            if len(re.findall(r"<wgt\b", payload)) != len(ids):
+                raise ValueError(f"malformed optional weights in {path} event {events}")
+            if present_ids is None:
+                present_ids = ids
+            elif ids != present_ids:
+                raise ValueError(f"optional-weight IDs change in {path} event {events}")
+    if event_lines is not None or not events:
+        raise ValueError(f"incomplete or missing LHE events in {path}")
+    populated = [definition for definition in definitions if definition["id"] in present_ids]
+    names = [definition.get("source_name", definition["description"]) for definition in populated]
+    if any("\t" in name or "\r" in name for name in names) or any(
+        any(character in definition["label"] for character in "\t\r\n")
+        for definition in populated
+    ):
+        raise ValueError(f"LHE optional-weight descriptions contain unsupported TSV control characters in {path}")
+    if len(names) != len(set(names)):
+        raise ValueError(f"populated LHE optional weights have colliding descriptions in {path}")
+    return {
+        "mapping": sorted(populated, key=lambda definition: definition.get("source_name", definition["description"])),
+        "absent_declared_ids": [definition["id"] for definition in definitions
+                                if definition["id"] not in present_ids],
+        "validated_events": events,
+        "finite_event_counts": dict(finite_counts),
+        "nonfinite_event_counts": dict(nonfinite_counts),
+        "source_order": "ThePEG description-keyed std::map lexical order",
+    }
+
+
+def validate_optional_weight_decay_boundary(
+    source: Path, decayed_mapping: dict[str, object]
+) -> dict[str, object]:
+    """Reject loss of finite variations across MadSpin; retain invalid-source evidence."""
+    source_mapping = lhe_optional_weight_mapping(
+        source, parse_lhe_optional_weight_definitions(source), allow_nonfinite=True
+    )
+    source_weights = {item["id"]: item for item in source_mapping["mapping"]}
+    decayed_weights = {item["id"]: item for item in decayed_mapping["mapping"]}
+    missing = set(source_weights) - set(decayed_weights)
+    finite_missing = sorted(weight_id for weight_id in missing
+                            if source_mapping["finite_event_counts"].get(weight_id, 0))
+    if finite_missing:
+        raise ValueError(f"finite optional weights disappeared during MadSpin: {finite_missing}")
+    def attributes(definition: dict[str, str]) -> dict[str, str]:
+        return {match.group(1): match.group(3) for match in re.finditer(
+            r"([\w:.-]+)\s*=\s*(['\"])(.*?)\2", definition["attributes"]
+        )}
+
+    for weight_id, definition in decayed_weights.items():
+        if (weight_id not in source_weights
+                or definition["source_name"] != source_weights[weight_id]["source_name"]
+                or attributes(definition) != attributes(source_weights[weight_id])):
+            raise ValueError(f"optional-weight identity changed during MadSpin: {weight_id}")
+    return {
+        "stage": "stable-production-before-MadSpin",
+        "nonfinite_source_policy": "record invalid upstream variations; reject loss of any finite source weight",
+        "validated_events": source_mapping["validated_events"],
+        "absent_after_decay_ids": sorted(missing),
+        "nonfinite_source_weights": [
+            {**source_weights[weight_id], "nonfinite_events": count,
+             "finite_events": source_mapping["finite_event_counts"].get(weight_id, 0),
+             "reason": "non-finite numerical value in the saved pre-MadSpin LHE"}
+            for weight_id, count in source_mapping["nonfinite_event_counts"].items()
+        ],
+    }
 
 
 def parse_lhe_weight_metadata(path: Path) -> tuple[int, dict[int, float]]:
@@ -4289,20 +4413,32 @@ def run_sample(
             optional_weight_definitions = (
                 parse_lhe_optional_weight_definitions(analysis_lhe)
             )
+            optional_weight_mapping = lhe_optional_weight_mapping(
+                analysis_lhe, optional_weight_definitions
+            )
+            if sample.is_signal:
+                entry["optional_weight_decay_validation"] = {
+                    **validate_optional_weight_decay_boundary(
+                        stable_or_final_lhe, optional_weight_mapping
+                    ),
+                    "source": card_metadata(stable_or_final_lhe, cfg),
+                }
         except ValueError as error:
             die(str(error))
-        if optional_weight_definitions:
+        if optional_weight_mapping["mapping"]:
             optional_weight_names = (
                 sample_work_dir(sample, cfg)
                 / "lhe_optional_weight_names.txt"
             )
             optional_weight_names.parent.mkdir(parents=True, exist_ok=True)
             optional_weight_names.write_text(
+                "# canonical LHE label\tThePEG/HwSim source name\n" +
                 "".join(
-                    f"{definition['label']}\n"
-                    for definition in optional_weight_definitions
+                    f"{definition['label']}\t{definition['source_name']}\n"
+                    for definition in optional_weight_mapping["mapping"]
                 )
             )
+        entry["optional_weight_mapping"] = optional_weight_mapping
         entry["optional_weight_definitions_status"] = (
             "available" if optional_weight_definitions else "not_present"
         )
