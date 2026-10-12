@@ -3,6 +3,8 @@
 Start with a completed diphoton campaign and inspect its ordinary report.
 The default cards require all four samples and SSC detector-response metadata;
 missing backgrounds must not silently improve a significance estimate.
+Single-photon plots include one-candidate outcomes; use diphoton observables
+such as `m_gg` when comparing with the selected pair rate.
 
 ## Rectangular cuts
 

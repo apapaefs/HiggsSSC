@@ -49,8 +49,9 @@ For a changed shower configuration, use a new tag and retain the old evidence.
 
 ## Existing campaigns
 
-New common runs are isolated by tag. Older direct-runner layouts remain in
-place; use their original entry point and saved settings to resume. Merely
-copying outputs into a new directory does not transfer their provenance.
+New common runs are isolated by tag. Existing HO and four-lepton manifests
+can resume through their original entry points and saved settings. Legacy LO
+outputs without manifests remain readable by reports and analysis; start new
+generation under a new tag. Copying outputs does not transfer provenance.
 Reports and cuts can be directed to existing saved analysis through
 `--analysis-root` and `--output-dir`; see [analysis](ANALYSIS.md).

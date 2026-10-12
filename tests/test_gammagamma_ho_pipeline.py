@@ -284,6 +284,8 @@ class PipelineTests(unittest.TestCase):
             def capture(command):
                 if "-c" in command:
                     compile(command[-1], "dependency-probe", "exec")
+                    if command[-1] == pipeline.NUMPY_TYPING_PROBE:
+                        return json.dumps({"typing_error": None})
                     return json.dumps(versions)
                 return "numpy==1.24.4\n"
             obj.capture = mock.Mock(side_effect=capture)
@@ -309,6 +311,7 @@ class PipelineTests(unittest.TestCase):
             obj.python.write_text("synthetic installed interpreter")
             obj.args.with_ml = True
             obj.record_component("python_core", {"packages": "saved validated core"})
+            obj.ensure_ml_numpy = mock.Mock()
             obj.capture = mock.Mock(return_value=json.dumps({name: "1.0" for name in pipeline.CORE_PACKAGES}))
             def install(label, command):
                 if label == "python-ml":
@@ -319,6 +322,60 @@ class PipelineTests(unittest.TestCase):
                 obj.setup_python()
             self.assertNotIn("python_ml", obj.components())
             self.assertEqual(obj.components()["python_core"], {"packages": "saved validated core"})
+
+    def test_ml_repairs_only_incomplete_inherited_numpy_at_the_same_version(self):
+        with TemporaryDirectory() as tmp:
+            obj, _ = self.fixture(Path(tmp))
+            # The real interpreter is inside the venv; only the test fixture
+            # normally substitutes a short path for external-command mocks.
+            obj.python = obj.work / "venv/bin/python"
+            system = {"version": "1.23.5", "distribution_version": "1.23.5",
+                      "path": "/system/lib/numpy/__init__.py", "typing_error": "No module named numpy._typing"}
+            private = {**system, "path": str(obj.work / "venv/lib/python3.9/site-packages/numpy/__init__.py"),
+                       "typing_error": None}
+            pipeline.save(obj.work / "installed.json", {"legacy": "unchanged"})
+            before = (obj.work / "installed.json").read_bytes()
+            obj.capture = mock.Mock(side_effect=[json.dumps(system), json.dumps(private), "numpy==1.23.5\n"])
+            obj.call = mock.Mock()
+            with contextlib.redirect_stdout(io.StringIO()):
+                obj.ensure_ml_numpy()
+            command = obj.call.call_args_list[0].args[1]
+            self.assertEqual(command, [obj.python, "-m", "pip", "install", "--ignore-installed",
+                                       "--no-deps", "numpy==1.23.5"])
+            self.assertEqual(obj.components()["numpy_private_repair"],
+                             {"version": "1.23.5", "distribution_version": "1.23.5",
+                              "from_path": system["path"], "installed_path": private["path"]})
+            self.assertEqual(obj.components()["python_core"]["numpy"],
+                             {"version": "1.23.5", "path": private["path"]})
+            self.assertEqual((obj.work / "installed.json").read_bytes(), before)
+            obj.capture = mock.Mock(return_value=json.dumps(private))
+            obj.call.reset_mock()
+            obj.ensure_ml_numpy()
+            obj.call.assert_not_called()
+
+    def test_ml_does_not_overwrite_an_incomplete_private_numpy(self):
+        with TemporaryDirectory() as tmp:
+            obj, _ = self.fixture(Path(tmp))
+            obj.capture = mock.Mock(return_value=json.dumps({"version": "1.23.5", "distribution_version": "1.23.5",
+                "path": str(obj.work / "venv/lib/python3.9/site-packages/numpy/__init__.py"),
+                "typing_error": "No module named numpy._typing"}))
+            obj.call = mock.Mock()
+            with self.assertRaisesRegex(ValueError, "preserve this installation"):
+                obj.ensure_ml_numpy()
+            obj.call.assert_not_called()
+
+    def test_ml_repair_rejects_a_changed_numpy_version(self):
+        with TemporaryDirectory() as tmp:
+            obj, _ = self.fixture(Path(tmp))
+            before = {"version": "1.23.5", "distribution_version": "1.23.5", "path": "/system/numpy/__init__.py",
+                      "typing_error": "No module named numpy._typing"}
+            after = {**before, "version": "2.0.0", "distribution_version": "2.0.0", "typing_error": None,
+                     "path": str(obj.work / "venv/lib/numpy/__init__.py")}
+            obj.capture = mock.Mock(side_effect=[json.dumps(before), json.dumps(after)])
+            obj.call = mock.Mock()
+            with contextlib.redirect_stdout(io.StringIO()), self.assertRaisesRegex(ValueError, "did not pass import checks"):
+                obj.ensure_ml_numpy()
+            self.assertNotIn("numpy_private_repair", obj.components())
 
     def test_lo_model_copies_only_tracked_source_and_rejects_changed_installation(self):
         with TemporaryDirectory() as tmp:
@@ -386,6 +443,20 @@ class PipelineTests(unittest.TestCase):
                 obj = pipeline.Pipeline(args, config)
             self.assertEqual(obj.env["PATH"].split(":")[0], str(obj.python.parent))
             self.assertEqual(obj.env["PYTHONNOUSERSITE"], "1")
+
+    def test_requested_workers_bound_cuba_and_nested_numeric_threads(self):
+        with TemporaryDirectory() as tmp:
+            args = pipeline.parse_args(["setup", "--work-dir", str(Path(tmp) / "work"), "--jobs", "3"])
+            config = pipeline.configuration(args)
+            inherited = {"PATH": "/shared/bin", "CUBACORES": "64", "CUBAACCEL": "8",
+                         "OMP_NUM_THREADS": "16", "OPENBLAS_NUM_THREADS": "32", "MKL_NUM_THREADS": "64"}
+            with mock.patch.object(pipeline, "activated_environment", return_value=inherited), \
+                    mock.patch.object(pipeline.Pipeline, "capture", return_value="/shared"):
+                obj = pipeline.Pipeline(args, config)
+            self.assertEqual(obj.env["CUBACORES"], "3")
+            self.assertEqual(obj.env["CUBAACCEL"], "0")
+            for name in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+                self.assertEqual(obj.env[name], "1")
 
     def test_new_pilot_evidence_excludes_report_presentation(self):
         with TemporaryDirectory() as tmp, mock.patch.object(pipeline.norm, "load_record"):

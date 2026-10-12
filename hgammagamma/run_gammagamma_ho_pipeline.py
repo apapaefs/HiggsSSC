@@ -50,6 +50,16 @@ LO_PDF_SETS = ("NNPDF40_lo_as_01180",)
 WORKFLOWS = ("gammagamma-lo", "gammagamma-ho", "fourlepton-lo")
 CORE_PACKAGES = ("numpy", "matplotlib", "PyYAML", "six")
 SAMPLES = ("signal_gg_h_aa", "bkg_prompt_aa", "bkg_gamma_j", "bkg_dy_ee")
+NUMPY_TYPING_PROBE = """
+import importlib, importlib.metadata, json, numpy
+result = {"version": numpy.__version__, "path": numpy.__file__,
+          "distribution_version": importlib.metadata.version("numpy"), "typing_error": None}
+try:
+    importlib.import_module("numpy.typing")
+except ImportError as error:
+    result["typing_error"] = str(error)
+print(json.dumps(result))
+"""
 
 
 def digest(path):
@@ -123,7 +133,8 @@ def parse_args(argv=None):
     p.add_argument("--cxx", default=None, help="setup C++ compiler; default /usr/bin/g++")
     p.add_argument("--fc", default=None, help="setup Fortran compiler; default /usr/bin/gfortran")
     p.add_argument("--ninja-dir", type=Path, help="optional existing Ninja library directory for setup")
-    p.add_argument("--jobs", type=int, default=4)
+    p.add_argument("--jobs", type=int, default=4,
+                   help="generator workers and Cuba integration workers (default: 4)")
     p.add_argument("--run-tag", default="ho_pilot_01")
     p.add_argument("--nevents", type=int, default=30, help="30-event pilot by default; production requires a completed pilot")
     p.add_argument("--luminosity-fb", type=float, default=100.)
@@ -198,6 +209,11 @@ class Pipeline:
         self.python = self.work / "venv/bin/python"
         self.env["PATH"] = str(self.python.parent) + ":" + self.env["PATH"]
         self.env["PYTHONNOUSERSITE"] = "1"
+        # Cuba otherwise forks one worker per host core. Keep its sequential
+        # ihixs points within the requested worker budget, without nested BLAS
+        # or OpenMP teams multiplying the number of active threads.
+        self.env.update(CUBACORES=str(args.jobs), CUBAACCEL="0",
+                        OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1")
         self.mg5 = self.work / "MG5_aMC_v3_5_15"
         self.powheg = self.work / "POWHEG-BOX-V2"
         self.cuba = self.work / "cuba"
@@ -308,6 +324,7 @@ class Pipeline:
         if "python_core" not in components:
             self.record_component("python_core", {"packages": self.capture([self.python, "-m", "pip", "freeze"])})
         if self.with_ml:
+            self.ensure_ml_numpy()
             if created or "python_ml" not in components:
                 # An optional classifier must not change the plotting/analysis
                 # dependencies that produced an already validated pilot.
@@ -321,6 +338,34 @@ class Pipeline:
             self.call("check-python-ml", [self.python, "-c", "import xgboost,sklearn,tqdm"])
             if "python_ml" not in components:
                 self.record_component("python_ml", {"packages": self.capture([self.python, "-m", "pip", "freeze"])})
+
+    def ensure_ml_numpy(self):
+        """Replace an incomplete inherited NumPy with the same private version."""
+        before = json.loads(self.capture([self.python, "-c", NUMPY_TYPING_PROBE]))
+        if not before["typing_error"]:
+            return
+        origin = Path(before["path"]).resolve()
+        private = self.work / "venv"
+        if origin.is_relative_to(private) or before["version"] != before["distribution_version"]:
+            raise ValueError(f"NumPy typing support is incomplete in {origin}: {before['typing_error']}; "
+                             "preserve this installation and use a new --work-dir")
+        version = before["version"]
+        print(f"The inherited NumPy {version} at {origin} lacks typing support required by ML. "
+              "Installing that same version in the private environment.", flush=True)
+        # --ignore-installed leaves the system package untouched; --no-deps
+        # prevents this targeted repair from changing any other core package.
+        self.call("python-private-numpy", [self.python, "-m", "pip", "install", "--ignore-installed",
+                  "--no-deps", f"numpy=={version}"])
+        after = json.loads(self.capture([self.python, "-c", NUMPY_TYPING_PROBE]))
+        if (after["typing_error"] or after["version"] != version
+                or after["distribution_version"] != version
+                or not Path(after["path"]).resolve().is_relative_to(private)):
+            raise ValueError("private same-version NumPy repair did not pass import checks; see python-private-numpy.log")
+        self.call("check-python-private-numpy", [self.python, "-c", "import ROOT,numpy,matplotlib,yaml,six,numpy.typing"])
+        self.record_component("numpy_private_repair", {"version": version, "from_path": str(origin),
+                              "installed_path": after["path"], "distribution_version": after["distribution_version"]})
+        self.record_component("python_core", {"packages": self.capture([self.python, "-m", "pip", "freeze"]),
+                              "numpy": {"version": version, "path": after["path"]}})
 
     def setup_cuba(self):
         if not (self.cuba / "lib/libcuba.a").is_file():
