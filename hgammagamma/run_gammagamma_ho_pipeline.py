@@ -209,6 +209,7 @@ class Pipeline:
         self.python = self.work / "venv/bin/python"
         self.env["PATH"] = str(self.python.parent) + ":" + self.env["PATH"]
         self.env["PYTHONNOUSERSITE"] = "1"
+        self.env["PYTHONUNBUFFERED"] = "1"
         # Cuba otherwise forks one worker per host core. Keep its sequential
         # ihixs points within the requested worker budget, without nested BLAS
         # or OpenMP teams multiplying the number of active threads.

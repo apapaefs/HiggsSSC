@@ -443,6 +443,7 @@ class PipelineTests(unittest.TestCase):
                 obj = pipeline.Pipeline(args, config)
             self.assertEqual(obj.env["PATH"].split(":")[0], str(obj.python.parent))
             self.assertEqual(obj.env["PYTHONNOUSERSITE"], "1")
+            self.assertEqual(obj.env["PYTHONUNBUFFERED"], "1")
 
     def test_requested_workers_bound_cuba_and_nested_numeric_threads(self):
         with TemporaryDirectory() as tmp:

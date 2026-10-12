@@ -25,11 +25,20 @@ borrowed. The shared Herwig/HwSim runtime is used read-only.
 - Baseline cuts at 100 fb⁻¹ used all four samples. No background hypotheses
   passed the mass window, so significance remained undefined; this pilot
   cannot establish background rejection or sensitivity.
+- Fresh ihixs completed all 109 points: central, six scale variations,
+  100 PDF replicas and two native-order comparisons. At 40 TeV pp,
+  `mH=125 GeV`, `muR=muF=62.5 GeV`, pure-HEFT N3LO with
+  `NNPDF40_an3lo_as_01180_qed_mhou`, the rate was
+  `226.82098 +/- 0.07033 pb` (numerical error only). Independent reparsing
+  matched every result and coupling check; all 443 raw artifact hashes matched.
+  Two scale points needed one precision refinement each; initial attempts
+  remain saved. Every final numerical error was below the 0.05% gate.
+  The fresh 13 TeV benchmark returned `45.1815532 +/- 0.0109436459 pb`.
 - 441 local regression tests passed, with seven optional ML tests skipped.
   Documentation links, shell examples and dependency-free CLI help were checked.
 
-Fresh full POWHEG, all 109 ihixs points, the four-sample HO pilot and both
-four-lepton responses remain in progress. Failed development attempts are
+Fresh full POWHEG, the four-sample HO pilot and both four-lepton responses
+remain in progress. Failed development attempts are
 preserved. Older checks below do not certify these unfinished acceptance tests.
 
 ## Independent HO entry point — October 12, 2026
