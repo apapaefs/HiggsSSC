@@ -160,8 +160,9 @@ def parse_args(argv=None):
     parser.add_argument("--analysis-cxx", default="/usr/bin/clang++" if sys.platform == "darwin" else "c++",
                         help="C++ compiler compatible with the installed ROOT")
     parser.add_argument("--herwig", default=os.environ.get("HERWIG", "Herwig"))
-    parser.add_argument("--herwig-max-errors", type=int, default=100,
-                        help="maximum cumulative event errors per Herwig exception class (use 1000 for 5M events)")
+    parser.add_argument("--herwig-max-errors", type=int,
+                        help="override the per-class event-error limit; default: retain an existing sample's limit, "
+                             "or max(100, ceil(nevents/5000)) for a new sample")
     parser.add_argument("--herwig-env", type=Path, default=lo.maybe_path(os.environ.get("HERWIG_ENV")))
     parser.add_argument("--herwig-module", default=os.environ.get("HERWIG_MODULE"))
     parser.add_argument("--no-herwig-module", action="store_true")
@@ -181,11 +182,15 @@ def parse_args(argv=None):
     args = parser.parse_args(cli_arguments)
     if args.restart_failed_shower and (args.stage != "prepare" or not args.resume):
         parser.error("--restart-failed-shower requires --stage prepare --resume")
+    if args.restart_failed_shower and args.herwig_max_errors is None:
+        parser.error("--restart-failed-shower requires an explicit --herwig-max-errors increase")
+    if args.herwig_max_errors is not None and args.herwig_max_errors <= 0:
+        parser.error("herwig-max-errors must be positive")
     args.run_tag_explicit = any(value == "--run-tag" or value.startswith("--run-tag=")
                                 for value in cli_arguments)
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", args.run_tag):
         parser.error("run-tag must contain only letters, digits, underscores and hyphens")
-    for key in ("nevents", "nb_core", "seed_base", "herwig_max_errors", "ebeam", "gen_photon_pt_min", "gen_jet_pt_min",
+    for key in ("nevents", "nb_core", "seed_base", "ebeam", "gen_photon_pt_min", "gen_jet_pt_min",
                 "gen_lepton_pt_min", "gen_eta_max", "gen_mll_min", "isolation_radius",
                 "isolation_epsilon", "isolation_power"):
         if not math.isfinite(getattr(args, key)) or getattr(args, key) <= 0:
@@ -280,6 +285,72 @@ def mg5_cards(args, sample):
     return process, launch
 
 
+def default_herwig_error_budget(nevents):
+    """Allow for cumulative rare event errors without an unlimited budget."""
+    return max(100, (nevents + 4999) // 5000)
+
+
+def stored_herwig_error_budget(manifest):
+    card = manifest.get("configuration", {}).get("herwig_card", "")
+    limits = re.findall(r"(?m)^set EventGenerator:MaxErrors ([0-9]+)$", card)
+    if len(limits) != 1 or int(limits[0]) <= 0:
+        raise ValueError("campaign card must record exactly one positive MaxErrors setting")
+    return int(limits[0])
+
+
+def herwig_error_budget(args, sample):
+    if args.herwig_max_errors is not None:
+        return args.herwig_max_errors
+    manifest_path = sample_dir(args, sample) / "campaign.json"
+    if manifest_path.is_file():
+        # A software update must not silently change an existing campaign's
+        # card or fingerprint. Resolve per sample without changing shared args.
+        return stored_herwig_error_budget(json.loads(manifest_path.read_text()))
+    return default_herwig_error_budget(args.nevents)
+
+
+def validate_error_limit_stop(parsed, manifest):
+    """Require consistent partial counts at the recorded per-class limit."""
+    limit = stored_herwig_error_budget(manifest)
+    counts = parsed["exception_counts"]
+    error_classes = [entry["count"] for entry in parsed["exception_classes"]
+                     if entry["severity"] == "eventerror"]
+    if (any(counts.get(key, 0) for key in ("runerror", "setuperror", "maybeabort", "abortnow", "unknown"))
+            or not error_classes or max(error_classes) != limit
+            or counts["eventerror"] != sum(error_classes)):
+        raise ValueError("failed shower did not stop at its recorded MaxErrors limit")
+    generated, attempted = parsed["generated_events"], parsed["attempted_events"]
+    if (generated != parsed["saved_events"] or generated <= 0
+            or generated >= manifest["nevents_requested"] or attempted >= manifest["lhe"]["events"]
+            or attempted - generated != counts["eventerror"]):
+        raise ValueError("failed shower lacks consistent partial source-event bookkeeping")
+    return limit
+
+
+def error_limit_recovery_hint(args, sample, manifest):
+    """Diagnose a known failure without changing or adopting partial outputs."""
+    herwig_dir = sample_dir(args, sample) / "herwig"
+    try:
+        parsed = shower_completion._parse_logs(herwig_dir, sample.name, "error_limit")
+        limit = validate_error_limit_stop(parsed, manifest)
+    except (OSError, ValueError, KeyError, TypeError, IndexError):
+        return None
+    suggested = max(default_herwig_error_budget(args.nevents), limit * 2)
+    return (
+        f"Herwig stopped {sample.name} at its per-class event-error limit ({limit}): "
+        f"{parsed['saved_events']} saved events from {parsed['attempted_events']} source attempts. "
+        f"See {herwig_dir / 'run.log'}. The generated LHE and partial shower outputs are preserved.\n"
+        "To prepare recovery, repeat the original campaign command, retaining all generation "
+        "settings, paths and seeds, but replace its stage/sample options with "
+        f"--stage prepare --run-samples {sample.name} --resume --restart-failed-shower "
+        f"--herwig-max-errors {suggested}. This validates and archives the failed shower.\n"
+        f"Then repeat it with --stage all --run-samples {sample.name} --resume and "
+        f"--herwig-max-errors {suggested}, without --restart-failed-shower. "
+        "Herwig re-showers the existing LHE from the beginning; completed generation is reused. "
+        "Other samples can resume with their original options and saved budgets."
+    )
+
+
 def herwig_card(args, sample):
     decay = ""
     if sample.signal:
@@ -293,7 +364,7 @@ def herwig_card(args, sample):
         lhe_file=lhe_path(args, sample), pdf_name=sample.pdf_name,
         matching_settings=matching, decay_settings=decay, nevents=args.nevents,
         seed=args.seed_base + SAMPLES.index(sample), sample_name=sample.name,
-        max_errors=args.herwig_max_errors,
+        max_errors=herwig_error_budget(args, sample),
     )
 
 
@@ -391,18 +462,7 @@ def recover_failed_shower(args, sample, old, new_configuration, new_fingerprint)
         raise ValueError("LHE changed since completed generation; refusing shower recovery")
 
     parsed = shower_completion._parse_logs(herwig_dir, sample.name, "error_limit")
-    counts = parsed["exception_counts"]
-    error_classes = [entry["count"] for entry in parsed["exception_classes"]
-                     if entry["severity"] == "eventerror"]
-    if (any(counts.get(key, 0) for key in ("runerror", "setuperror", "maybeabort", "abortnow", "unknown"))
-            or not error_classes or max(error_classes) != old_limit
-            or counts["eventerror"] != sum(error_classes)):
-        raise ValueError("failed shower did not stop at its recorded MaxErrors limit")
-    generated, attempted = parsed["generated_events"], parsed["attempted_events"]
-    if (generated != parsed["saved_events"] or generated <= 0
-            or generated >= old["nevents_requested"] or attempted >= old["lhe"]["events"]
-            or attempted - generated != counts["eventerror"]):
-        raise ValueError("failed shower lacks consistent partial source-event bookkeeping")
+    validate_error_limit_stop(parsed, old)
     inventory = root_inventory(directory)
     root_paths = {str(Path(entry["path"]).resolve()) for entry in inventory}
     if root_paths != set(parsed["root_writers"]) or len(root_paths) != len(inventory):
@@ -426,8 +486,9 @@ def recover_failed_shower(args, sample, old, new_configuration, new_fingerprint)
     updated.setdefault("shower_restarts", []).append({
         "reason": "herwig_error_limit", "archive": str(archive), "prepared_at_utc": stamp,
         "previous_fingerprint": old["fingerprint"], "previous_max_errors": old_limit,
-        "max_errors": new_limit, "generated_events": generated, "attempted_events": attempted,
-        "saved_events": parsed["saved_events"], "exception_counts": copy.deepcopy(counts),
+        "max_errors": new_limit, "generated_events": parsed["generated_events"],
+        "attempted_events": parsed["attempted_events"], "saved_events": parsed["saved_events"],
+        "exception_counts": copy.deepcopy(parsed["exception_counts"]),
         "exception_classes": copy.deepcopy(parsed["exception_classes"]),
         "artifacts": {**copy.deepcopy(parsed["artifacts"]), "roots": root_artifacts,
                       "herwig_card": shower_completion._artifact(card_path),
@@ -772,6 +833,9 @@ def shower(args, sample, manifest):
         # complete finite input. Other partial outputs remain untouched.
         if list((herwig_dir / "events").glob("**/*.root")):
             if args.resume:
+                hint = error_limit_recovery_hint(args, sample, manifest)
+                if hint:
+                    raise ValueError(hint)
                 record_shower_completion(args, sample, manifest, "source_exhausted")
                 print(f"Recovered finalized finite-LHE shower: {sample.name} "
                       f"({manifest['shower_completion']['saved_events']} saved events)")
@@ -783,9 +847,17 @@ def shower(args, sample, manifest):
     command(args, [args.herwig, "read", f"{sample.name}.in"], herwig_dir, "read.log")
     try:
         command(args, [args.herwig, "run", f"{sample.name}.run", f"-N{args.nevents}"], herwig_dir, "run.log")
-    except RuntimeError:
-        if args.dry_run or "More events requested than available in LesHouchesReader" not in (
-                herwig_dir / "run.log").read_text(errors="replace"):
+    except RuntimeError as error:
+        if args.dry_run:
+            raise
+        try:
+            run_log = (herwig_dir / "run.log").read_text(errors="replace")
+        except OSError:
+            run_log = ""
+        if "More events requested than available in LesHouchesReader" not in run_log:
+            hint = error_limit_recovery_hint(args, sample, manifest)
+            if hint:
+                raise RuntimeError(hint) from error
             raise
         record_shower_completion(args, sample, manifest, "source_exhausted")
         print(f"Consumed the complete finite LHE input: {sample.name}; "

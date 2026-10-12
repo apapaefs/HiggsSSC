@@ -400,6 +400,48 @@ after auditing its end-of-file exception, Herwig statistics, source weights
 and ROOT files. Other partial or interrupted outputs remain blocked for
 inspection.
 
+For a new sample, the default Herwig `EventGenerator:MaxErrors` budget is
+`max(100, ceil(nevents / 5000))`: 100 for 100,000 requested events, 200 for
+one million and 1,000 for five million. `--herwig-max-errors` overrides this
+budget. When that option is omitted for an existing campaign, the runner
+retains each sample's recorded limit and configuration fingerprint. Updating
+the software therefore does not change an existing shower's settings.
+
+The budget is cumulative per exception class and severity, not a bound on
+the total number or fraction of discarded events. Raising it does not change
+the decay retry limit or repair an individual failed decay. Discarded signed
+source weights remain in the normalization denominator. The runner reports
+an actionable diagnosis when the recorded logs establish an error-limit
+stop; recovery still requires an explicit request.
+
+To recover an incomplete, unanalyzed shower that reached this limit, reuse
+the original campaign command and its recorded settings:
+
+1. Select only the failed sample with `--run-samples`. Retain its original
+   output directory, run tag, event request, seeds, input paths, generation
+   settings and runtime options.
+2. Replace the stage with `--stage prepare`, include `--resume` and
+   `--restart-failed-shower`, and explicitly supply a larger
+   `--herwig-max-errors` value. The restart flag requires all three options;
+   omitting the error-budget override retains the old limit and is not a
+   recovery request.
+3. Preparation verifies the unchanged LHE and the recorded error-limit
+   termination, and permits only the error-budget increase. It archives the
+   failed `herwig/` directory and original `campaign.json` under the sample's
+   `shower-recovery/` directory, preserving completed MG5 generation and the
+   LHE. It writes the replacement card and manifest without launching a
+   shower.
+4. Repeat that sample's command with `--stage all --resume`, keep the new
+   explicit error budget, and remove `--restart-failed-shower`. Herwig reads
+   the existing LHE from the beginning, then reconstruction and analysis
+   continue. Archived partial ROOT files are excluded from analysis.
+
+This workflow does not use native `Herwig --resume`: it has no usable
+checkpoint that restores both the LHE stream and the HwSim ROOT writer.
+Inspect the recovered campaign's discard counts and source weights before
+interpreting its results. See the
+[Timur five-million-event example](TIMUR.md#recover-a-shower-that-reaches-its-event-error-limit).
+
 Outputs live under `HOAnalysis/runs/RUN_TAG/{Signal,Backgrounds}/events/SAMPLE/`.
 Each sample has its generator cards, logs, `campaign.json`, Herwig ROOT
 files, analysis `.dat`/`.top`/`_var.root` outputs, and

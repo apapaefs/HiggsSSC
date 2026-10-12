@@ -324,23 +324,40 @@ larger shower. It is separate from the 100,000 trials allowed per decay.
 
 Use `--herwig-max-errors 1000` for this campaign. Keep all original
 generation settings, seeds, paths and the five-million-event request.
-The default remains 100 so existing campaign fingerprints remain valid.
-Recovery requires an explicit preparation step with
-`--stage prepare --resume --restart-failed-shower`, restricted to the
-failed sample. It validates the unchanged LHE and the error-limit
-termination, and permits only an increase in the error budget. It archives
-the entire failed `herwig/` directory and original `campaign.json` under
-the sample's `shower-recovery/` directory before writing the new card and
-manifest. Preparation launches no shower or event generation.
+For new samples the default now scales with the event request as
+`max(100, ceil(nevents / 5000))`: 100 at 100,000 events, 200 at one million
+and 1,000 at five million. If `--herwig-max-errors` is omitted when resuming
+an existing campaign, each sample retains its stored limit and fingerprint.
+The failed `ho_bg_5m_01` shower therefore retains 100 until the explicit
+recovery below; updating the checkout alone does not raise its budget.
 
-Then run `--stage all --resume` with the same options, including the new
-error budget. The completed MG5 stage is reused; Herwig showers the
-existing hard events from the beginning and continues to reconstruction
-and analysis. Archived partial ROOT files are excluded from the analysis.
+Modify the original command, preserving every other campaign option:
+
+1. Restrict `--run-samples` to `bkg_prompt_aa`. Use `--stage prepare --resume`,
+   add `--restart-failed-shower`, and explicitly set
+   `--herwig-max-errors 1000`. The restart flag requires the explicit larger
+   budget as well as the preparation stage and resume option.
+2. Preparation validates the unchanged LHE and error-limit termination,
+   permitting only the increase in the error budget. It archives the failed
+   `herwig/` directory and original `campaign.json` under the sample's
+   `shower-recovery/` directory before writing the replacement card and
+   manifest. Completed MG5 generation and the LHE are preserved; preparation
+   launches no shower or generation.
+3. Repeat the same sample's command with `--stage all --resume`, retain
+   `--herwig-max-errors 1000`, and remove `--restart-failed-shower`. The
+   completed MG5 stage is reused. Herwig showers the existing hard events
+   from the beginning, then reconstruction and analysis continue. Archived
+   partial ROOT files are excluded from analysis.
+
+When the saved logs establish this error-limit stop, the runner prints the
+recorded limit and recovery guidance. It does not restart automatically.
 Do not use native `Herwig --resume`: this campaign has no usable checkpoint
 restoring both the LHE stream and HwSim ROOT writer state. The higher
-budget does not fix the individual decay failures; discarded signed
-source weights remain in the normalization denominator and are reported.
+budget does not change the decay retry limit or fix individual decay failures.
+It is not a bound on the total number or fraction of discarded events, since
+the limit applies per exception class and severity. Discarded signed source
+weights remain in the normalization denominator and are reported; inspect
+these losses after the recovered shower completes.
 
 ## Resume ihixs After A Production Precision Failure
 
