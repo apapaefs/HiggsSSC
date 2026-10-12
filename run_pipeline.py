@@ -323,8 +323,27 @@ def downstream_analysis(pipeline):
                   "--analysis-root", directory, "--output-dir", output, "--luminosity-fb", args.luminosity_fb])
 
 
-def run(pipeline):
+def validate_saved_run_artifacts(args):
+    """Validate completed evidence before a resumed run can rewrite reports."""
+    saved = read_state(args) if state_path(args).is_file() else None
+    completed = saved is not None and saved.get("state") == "complete"
+    directory = locations(args)[0].resolve()
+    snapshots = [pilot_path(args)]
+    if args.workflow == "gammagamma-ho":
+        snapshots.append(args.work_dir / "pilot-complete.json")
+    for snapshot in snapshots:
+        if snapshot.is_file():
+            artifacts = json.loads(snapshot.read_text()).get("artifacts", {})
+            if any(Path(name).resolve().is_relative_to(directory) for name in artifacts):
+                completed = True
+    if completed:
+        physics_artifacts(args)
+
+
+def run(pipeline, *, saved_artifacts_checked=False):
     args = pipeline.args
+    if not saved_artifacts_checked:
+        validate_saved_run_artifacts(args)
     if args.workflow == "gammagamma-ho":
         pipeline.run()
     else:
@@ -396,6 +415,7 @@ def main(argv=None):
             if args.nevents > 30:
                 verify_pilot(args, config)
             prepare_run(args, config)
+            validate_saved_run_artifacts(args)
         elif args.action in ("report", "cuts", "xgboost"):
             saved = read_state(args)
             if saved["identity"]["environment"] != config:
@@ -405,7 +425,7 @@ def main(argv=None):
             if args.action in ("setup", "check"):
                 getattr(pipeline, args.action)()
             elif args.action == "run":
-                run(pipeline)
+                run(pipeline, saved_artifacts_checked=True)
             else:
                 previous = read_state(args)
                 if args.action == "report":

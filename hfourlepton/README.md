@@ -79,6 +79,15 @@ with MG5_aMC 3.5.15 using direct SM `1 -> 4` matrix elements at
 `mH=125.09 GeV`; they are stored with their provenance in every manifest and
 can be overridden with `--signal-channel-fractions`.
 
+## Optional-weight provenance
+
+Stable `gg -> H` generation produced nine nonfinite sum-pT scale alternatives
+because the Born Higgs has zero transverse momentum. MadSpin dropped those
+invalid alternatives. The explicit mapping preserves all 136 finite variations
+and records the invalid alternatives with their pre-MadSpin provenance. Losing
+any finite source weight is rejected. This does not validate a complete
+scale-uncertainty ensemble.
+
 ## Reducible backgrounds and decay bias
 
 `--sample-set reducible` selects `Zbb`, `ttZ`, and `ttbar` samples.  The

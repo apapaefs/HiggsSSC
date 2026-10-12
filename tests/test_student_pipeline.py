@@ -165,6 +165,54 @@ class StudentPipelineTests(unittest.TestCase):
                 cli.report(pipeline)
             pipeline.call.assert_not_called()
 
+    def test_complete_run_rejects_changed_outputs_before_constructing_runtime(self):
+        with self.repository() as root, mock.patch.object(cli, "StudentPipeline") as constructor:
+            args = self.args(root)
+            config = cli.shared.configuration(args)
+            cli.shared.save(args.work_dir / "environment.json", config)
+            cli.prepare_run(args, config)
+            self.artifacts(args)
+            cli.progress(args, state="complete", stage="complete")
+            next(cli.locations(args)[0].rglob("*_var.root")).write_text("changed nonempty output")
+            with self.assertRaisesRegex(ValueError, "completed analysis product changed"):
+                cli.main(["run", "--workflow", args.workflow, "--run-tag", args.run_tag,
+                          "--work-dir", str(args.work_dir)])
+            constructor.assert_not_called()
+
+    def test_ho_run_checks_matching_pilot_before_children_even_after_report_failure(self):
+        for legacy in (False, True):
+            with self.subTest(legacy=legacy), self.repository() as root:
+                args = self.args(root, "--workflow", "gammagamma-ho")
+                self.artifacts(args)
+                original = cli.physics_artifacts(args)
+                snapshot = args.work_dir / "pilot-complete.json" if legacy else cli.pilot_path(args)
+                cli.shared.save(snapshot, {"environment": {}, "artifacts": original})
+                cli.shared.save(cli.state_path(args), {"state": "failed", "stage": "pilot-report"})
+                before = snapshot.read_bytes()
+                next(cli.locations(args)[0].rglob("*_var.root")).write_text("changed nonempty output")
+                pipeline = SimpleNamespace(args=args, config={}, run=mock.Mock())
+                with self.assertRaisesRegex(ValueError, "completed analysis product changed"):
+                    cli.run(pipeline)
+                pipeline.run.assert_not_called()
+                self.assertEqual(snapshot.read_bytes(), before)
+
+    def test_partial_run_ignores_other_tags_pilot_and_can_resume(self):
+        with self.repository() as root:
+            args = self.args(root, "--workflow", "gammagamma-ho")
+            cli.shared.save(cli.state_path(args), {"state": "failed", "stage": "pilot-powheg"})
+            unrelated = str(cli.locations(args)[0].parent / "other_tag" / "missing.root")
+            for snapshot in (cli.pilot_path(args), args.work_dir / "pilot-complete.json"):
+                cli.shared.save(snapshot, {"artifacts": {unrelated: "0" * 64}})
+            calls = []
+            pipeline = SimpleNamespace(args=args, config={}, run=lambda: calls.append("run"))
+            def completed_artifacts(_):
+                calls.append("validate")
+                return {}
+            with mock.patch.object(cli, "physics_artifacts", side_effect=completed_artifacts), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                cli.run(pipeline)
+            self.assertEqual(calls, ["run", "validate"])
+
     def test_lo_report_cuts_and_ml_reject_changed_completed_outputs(self):
         for action in ("report", "cuts", "xgboost"):
             for suffix in (".dat", "_var.root"):
