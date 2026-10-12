@@ -188,8 +188,24 @@ def campaign_command(pipeline, workflow, profile=None):
 
 
 def physics_artifacts(args):
+    """Check saved analysis provenance without invoking an analyzer or generator.
+
+    Older HO manifests record summary values instead of output hashes. Retain
+    that contract, and use existing pilot hashes when they cover this campaign.
+    """
     directory, _ = locations(args)
     paths = []
+    expected_hashes = {}
+    ho_summaries = []
+
+    def expect_hash(path, value):
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+            raise ValueError(f"completed analysis lacks a recorded SHA-256: {path}")
+        key = str(Path(path).resolve())
+        if key in expected_hashes and expected_hashes[key] != value:
+            raise ValueError(f"conflicting completed analysis provenance: {path}")
+        expected_hashes[key] = value
+
     if args.workflow == "fourlepton-lo":
         for profile in ("perfect", "ssc"):
             path = directory / f"manifest_{profile}.json"
@@ -199,6 +215,8 @@ def physics_artifacts(args):
             paths.append(path)
             for sample in manifest["samples"]:
                 paths.extend(Path(sample[key]) for key in ("root_file", "analysis_summary"))
+                expect_hash(sample["root_file"], sample.get("output_root_sha256"))
+                expect_hash(sample["analysis_summary"], sample.get("analysis_summary_sha256"))
     else:
         for sample in shared.SAMPLES:
             category = "Signal" if sample.startswith("signal_") else "Backgrounds"
@@ -208,14 +226,39 @@ def physics_artifacts(args):
             if not {"generate", "shower", "analyze"}.issubset(manifest.get("completed", [])):
                 raise ValueError(f"analysis is incomplete for {sample}")
             paths.append(path)
-            paths.extend(folder / f"{sample}_hwsim_roots-{args.run_tag}{suffix}"
-                         for suffix in (".dat", ".top", "_var.root"))
+            outputs = [folder / f"{sample}_hwsim_roots-{args.run_tag}{suffix}"
+                       for suffix in (".dat", ".top", "_var.root")]
+            paths.extend(outputs)
             if args.workflow == "gammagamma-ho":
                 paths.append(folder / f"normalization-{args.run_tag}.json")
+                ho_summaries.append((folder, outputs[0]))
+            else:
+                recorded = {str(Path(entry["path"]).resolve()): entry.get("sha256")
+                            for entry in manifest.get("artifacts", {}).get("analyze", [])}
+                for output in outputs:
+                    expect_hash(output, recorded.get(str(output.resolve())))
     for path in paths:
         if not path.is_file() or not path.stat().st_size:
             raise ValueError(f"missing or empty analysis product: {path}")
-    return {str(path): shared.digest(path) for path in paths}
+    if ho_summaries:
+        from hgammagamma.make_gammagamma_report import validate_ho_analysis_summary
+        for folder, summary in ho_summaries:
+            validate_ho_analysis_summary(folder, summary)
+    current = {str(path.resolve()): shared.digest(path) for path in paths}
+    snapshots = [pilot_path(args)]
+    if args.workflow == "gammagamma-ho":
+        snapshots.append(args.work_dir / "pilot-complete.json")
+    for snapshot in snapshots:
+        if snapshot.is_file():
+            recorded = json.loads(snapshot.read_text()).get("artifacts", {})
+            for name, value in recorded.items():
+                # Reporting a production tag does not depend on another tag's pilot.
+                if str(Path(name).resolve()) in current:
+                    expect_hash(name, value)
+    for name, expected in expected_hashes.items():
+        if current[name] != expected:
+            raise ValueError(f"completed analysis product changed: {name}; preserve it and use a new run tag")
+    return {str(path): current[str(path.resolve())] for path in paths}
 
 
 def pilot_path(args):

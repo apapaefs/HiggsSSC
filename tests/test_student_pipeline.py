@@ -30,9 +30,39 @@ class StudentPipelineTests(unittest.TestCase):
         for sample in cli.shared.SAMPLES:
             category = "Signal" if sample.startswith("signal") else "Backgrounds"
             folder = directory / category / "events" / sample
-            cli.shared.save(folder / "campaign.json", {"sample": sample, "completed": ["generate", "shower", "analyze"]})
+            folder.mkdir(parents=True, exist_ok=True)
+            outputs = []
             for suffix in (".dat", ".top", "_var.root"):
-                (folder / f"{sample}_hwsim_roots-{args.run_tag}{suffix}").write_text("synthetic output")
+                path = folder / f"{sample}_hwsim_roots-{args.run_tag}{suffix}"
+                path.write_text("synthetic output")
+                outputs.append({"path": str(path), "sha256": cli.shared.digest(path)})
+            manifest = {"sample": sample, "completed": ["generate", "shower", "analyze"],
+                        "artifacts": {"analyze": outputs}}
+            if args.workflow == "gammagamma-ho":
+                # Existing HO manifests have .dat values, not LO artifact records.
+                manifest.pop("artifacts")
+                manifest["analysis"] = {"events_read": "30", "sum_weight": "1"}
+                Path(outputs[0]["path"]).write_text("# summary\nevents_read 30\nsum_weight 1\n")
+                (folder / f"normalization-{args.run_tag}.json").write_text("{}")
+            cli.shared.save(folder / "campaign.json", manifest)
+        report.mkdir(parents=True)
+        (report / "index.html").write_text("synthetic report")
+
+    def fourlepton_artifacts(self, args):
+        directory, report = cli.locations(args)
+        for profile in ("perfect", "ssc"):
+            samples = []
+            for index in range(9):
+                folder = directory / "analysis" / profile / str(index)
+                folder.mkdir(parents=True)
+                root = folder / "analysis.root"
+                summary = folder / "analysis.summary.json"
+                root.write_text("synthetic ROOT")
+                summary.write_text("synthetic summary")
+                samples.append({"name": str(index), "status": "complete", "root_file": str(root),
+                                "analysis_summary": str(summary), "output_root_sha256": cli.shared.digest(root),
+                                "analysis_summary_sha256": cli.shared.digest(summary)})
+            cli.shared.save(directory / f"manifest_{profile}.json", {"samples": samples})
         report.mkdir(parents=True)
         (report / "index.html").write_text("synthetic report")
 
@@ -134,6 +164,56 @@ class StudentPipelineTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 cli.report(pipeline)
             pipeline.call.assert_not_called()
+
+    def test_lo_report_cuts_and_ml_reject_changed_completed_outputs(self):
+        for action in ("report", "cuts", "xgboost"):
+            for suffix in (".dat", "_var.root"):
+                with self.subTest(action=action, suffix=suffix), self.repository() as root:
+                    args = self.args(root)
+                    args.action = action
+                    self.artifacts(args)
+                    product = next(cli.locations(args)[0].rglob("*" + suffix))
+                    product.write_text("changed but nonempty")
+                    pipeline = SimpleNamespace(args=args, call=mock.Mock())
+                    with self.assertRaisesRegex(ValueError, "completed analysis product changed"):
+                        (cli.report if action == "report" else cli.downstream_analysis)(pipeline)
+                    pipeline.call.assert_not_called()
+
+    def test_fourlepton_report_checks_saved_root_and_summary_hashes(self):
+        for suffix in (".root", ".summary.json"):
+            with self.subTest(suffix=suffix), self.repository() as root:
+                args = self.args(root, "--workflow", "fourlepton-lo")
+                self.fourlepton_artifacts(args)
+                self.assertEqual(len(cli.physics_artifacts(args)), 38)
+                product = next(cli.locations(args)[0].rglob("*" + suffix))
+                product.write_text("changed but nonempty")
+                pipeline = SimpleNamespace(args=args, call=mock.Mock())
+                with self.assertRaisesRegex(ValueError, "completed analysis product changed"):
+                    cli.report(pipeline)
+                pipeline.call.assert_not_called()
+
+    def test_ho_legacy_summary_contract_and_matching_pilot_snapshot(self):
+        with self.repository() as root:
+            args = self.args(root, "--workflow", "gammagamma-ho")
+            self.artifacts(args)
+            original = cli.physics_artifacts(args)
+            # An unrelated pilot may no longer exist; it must not block this report.
+            cli.shared.save(cli.pilot_path(args), {"artifacts": {str(root / "other_run/missing.root"): "0" * 64}})
+            self.assertEqual(cli.physics_artifacts(args), original)
+            cli.shared.save(args.work_dir / "pilot-complete.json", {"artifacts": original})
+            product = next(cli.locations(args)[0].rglob("*_var.root"))
+            product.write_text("changed but nonempty")
+            with self.assertRaisesRegex(ValueError, "completed analysis product changed"):
+                cli.physics_artifacts(args)
+
+    def test_ho_legacy_changed_summary_is_rejected_without_historical_hashes(self):
+        with self.repository() as root:
+            args = self.args(root, "--workflow", "gammagamma-ho")
+            self.artifacts(args)
+            product = next(cli.locations(args)[0].rglob("*.dat"))
+            product.write_text("events_read 30\nsum_weight 2\n")
+            with self.assertRaisesRegex(ValueError, "HO analysis summary differs"):
+                cli.physics_artifacts(args)
 
     def test_campaign_commands_use_private_python_and_inherited_environment(self):
         with self.repository() as root:

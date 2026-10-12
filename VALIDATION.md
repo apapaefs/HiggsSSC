@@ -7,11 +7,30 @@ input cards and generated products alongside any quoted numerical result.
 
 ## Common workflow audit — October 2026
 
-Fresh validation of the common LO → HO → four-lepton workflow is in progress.
-The acceptance target is a private installation, four LO samples, fresh POWHEG
-and all 109 ihixs points, four HO samples, and nine four-lepton samples with
-both responses. Completion must be established from the saved artifacts;
-older checks below do not certify this new end-to-end route.
+Fresh validation uses an isolated instructor-owned Timur checkout and a new
+private installation; no generated LHE, grids or normalization records were
+borrowed. The shared Herwig/HwSim runtime is used read-only.
+
+- LO setup installed the model source and all 101 LO PDF members. HO setup
+  subsequently added its dependencies to the same installation.
+- The final-source `lo_pilot_02` completed all four samples with 30 LHE,
+  30 HwSim and 30 analyzed source events each. All source weights were positive.
+  Response-row counts were 81 (signal), 40 (prompt diphoton), 38 (gamma+jet)
+  and 63 (Drell–Yan); rows represent weighted detector outcomes, not extra
+  independent events. Tree/summary weight closure was within `1.5e-14`.
+- All 41 manifest artifact hashes/sizes and 16 pilot hashes matched. Repeating
+  the command reused all 12 generation/shower/analysis stages. Report-only
+  regeneration at 200 fb⁻¹ preserved pilot evidence. The report contained
+  12 PNGs, 12 SVGs and 13 CSVs; a representative plot was inspected.
+- Baseline cuts at 100 fb⁻¹ used all four samples. No background hypotheses
+  passed the mass window, so significance remained undefined; this pilot
+  cannot establish background rejection or sensitivity.
+- 441 local regression tests passed, with seven optional ML tests skipped.
+  Documentation links, shell examples and dependency-free CLI help were checked.
+
+Fresh full POWHEG, all 109 ihixs points, the four-sample HO pilot and both
+four-lepton responses remain in progress. Failed development attempts are
+preserved. Older checks below do not certify these unfinished acceptance tests.
 
 ## Independent HO entry point — October 12, 2026
 
