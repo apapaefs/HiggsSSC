@@ -1,5 +1,11 @@
 # Higher-Order Gamma-Gamma Campaign
 
+For a complete run in your own account, start with the
+[full pipeline guide](PIPELINE_STUDENT_GUIDE.md). Its `setup` and `run`
+commands install the additional dependencies and connect POWHEG signal
+generation, ihixs normalization, MG5 backgrounds, Herwig, analysis and the
+report. The instructions below describe the individual campaign stages.
+
 The campaign runner is [`../run_gammagamma_ho_campaign.py`](../run_gammagamma_ho_campaign.py).
 It showers the existing POWHEG HJMiNNLO signal with Herwig, forces
 `H -> gamma gamma`, and generates the three backgrounds used in the LO
@@ -10,8 +16,9 @@ The checked local configuration, test results and remaining validation work
 are recorded in [`VALIDATION.md`](VALIDATION.md).
 The synchronized Timur checkout, input paths, and 100,000-event command
 are documented in [`TIMUR.md`](TIMUR.md).
-On Timur, use `/home/apapaefs/Projects/HiggsSSC` for the LO and HO analyses,
-ihixs, inputs and reports. The HO LHE/PDF inputs are in
+On Timur, use your own `HiggsSSC` checkout for the LO and HO analyses,
+ihixs, inputs and reports. The instructor's paths in `TIMUR.md` document
+that account's existing campaigns. The HO LHE/PDF inputs are in
 `hgammagamma/HOAnalysis/inputs/`, the normalization calculation is in
 `hgammagamma/HOAnalysis/normalization/`, and campaigns and reports are in
 `HOAnalysis/runs/` and `HOAnalysis/plots/`. These generated files and the
