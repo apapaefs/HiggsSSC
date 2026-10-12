@@ -1794,6 +1794,25 @@ def detector_provenance_audit(
 
 
 def _manifest_optional_weight_names(sample: ManifestSample) -> list[str]:
+    if "optional_weight_mapping" in sample.raw:
+        recorded = sample.raw["optional_weight_mapping"]
+        mapping = recorded.get("mapping") if isinstance(recorded, Mapping) else None
+        if not isinstance(mapping, list) or any(
+            not isinstance(item, Mapping)
+            or not isinstance(item.get("id"), str) or not item["id"]
+            or not isinstance(item.get("label"), str) or not item["label"]
+            or not isinstance(item.get("source_name"), str)
+            for item in mapping
+        ):
+            raise ValueError("invalid populated optional-weight mapping in manifest")
+        identifiers = [item["id"] for item in mapping]
+        names = [item["label"] for item in mapping]
+        sources = [item["source_name"] for item in mapping]
+        if any(len(values) != len(set(values)) for values in (identifiers, names, sources)):
+            raise ValueError("duplicate populated optional-weight mapping in manifest")
+        if sources != sorted(sources):
+            raise ValueError("populated optional-weight mapping is not in ThePEG source order")
+        return names
     definitions = sample.raw.get("optional_weight_definitions")
     if not isinstance(definitions, Sequence) or isinstance(definitions, (str, bytes)):
         return []
@@ -1959,7 +1978,11 @@ def analyze_sample(
             "detector response closure failed or is incomplete "
             f"({closure['failed']} failed, {closure['missing']} missing)"
         )
-    expected_optional_weight_names = _manifest_optional_weight_names(sample)
+    try:
+        expected_optional_weight_names = _manifest_optional_weight_names(sample)
+    except ValueError as error:
+        audit.errors.append(str(error))
+        expected_optional_weight_names = []
     optional_weights = optional_weight_audit(
         records.source_events,
         expected_names=expected_optional_weight_names,
