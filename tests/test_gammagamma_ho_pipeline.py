@@ -100,6 +100,49 @@ class PipelineTests(unittest.TestCase):
                 inspect.assert_called_once()
                 weights.assert_called_once_with(lhe.resolve(), 30)
 
+    def test_first_report_failure_retains_analysis_and_legacy_resume(self):
+        with TemporaryDirectory() as tmp, mock.patch.object(pipeline.norm, "load_record"):
+            root = Path(tmp)
+            with self.ho_fixture(root), contextlib.redirect_stdout(io.StringIO()):
+                obj, calls = self.fixture(root)
+                original_call = obj.call
+
+                def fail_report(label, command, **kwargs):
+                    if label.endswith("-report"):
+                        raise RuntimeError("synthetic first report failure")
+                    original_call(label, command, **kwargs)
+
+                obj.call = fail_report
+                with self.assertRaisesRegex(RuntimeError, "first report failure"):
+                    obj.run()
+                directory = pipeline.HO / "runs" / obj.args.run_tag
+                snapshot = pipeline.analysis_snapshot_path(directory)
+                before = snapshot.read_bytes()
+                artifacts = json.loads(before)["artifacts"]
+                self.assertEqual(len(artifacts), 20)
+                self.assertFalse(any(name.endswith("index.html") for name in artifacts))
+                self.assertFalse((obj.work / "pilot-complete.json").exists())
+
+                # The original HO entry point can resume unchanged analysis.
+                obj.call = original_call
+                calls.clear()
+                obj.run()
+                self.assertEqual(snapshot.read_bytes(), before)
+                self.assertFalse(any(label.startswith("ihixs-") for label, _ in calls))
+                report = pipeline.HO / "plots" / obj.args.run_tag / "index.html"
+                report.write_text("new presentation")
+                pipeline.validate_analysis_snapshot(directory)
+                pipeline.verify_pilot(obj.work)
+
+                next(directory.rglob("*_var.root")).write_text("changed analysis")
+                obj.check.reset_mock()
+                calls.clear()
+                with self.assertRaisesRegex(ValueError, "completed analysis product changed"):
+                    obj.run()
+                obj.check.assert_not_called()
+                self.assertEqual(calls, [])
+                self.assertEqual(snapshot.read_bytes(), before)
+
     def test_supplied_missing_lhe_prevents_ihixs_and_dependency_work(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

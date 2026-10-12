@@ -249,6 +249,66 @@ class StudentPipelineTests(unittest.TestCase):
                 pipeline.call.assert_not_called()
                 self.assertEqual(cli.read_state(args)["analysis_artifacts"], original)
 
+    def test_first_ho_report_failure_from_prepared_state_protects_analysis(self):
+        for suffix in (".top", "_var.root"):
+            with self.subTest(suffix=suffix), self.repository() as root:
+                args = self.args(root, "--workflow", "gammagamma-ho", "--nevents", "100")
+                config = cli.shared.configuration(args)
+                ho = root / "hgammagamma/HOAnalysis"
+                ho.mkdir(parents=True)
+                (ho / "powheg-hjminnlo-ssc40-nnpdf40nnloqed.input").write_text("ncall2 50000\ncheck_bad_st2 1\n")
+                pipeline = cli.StudentPipeline.__new__(cli.StudentPipeline)
+                pipeline.args, pipeline.config, pipeline.work = args, config, args.work_dir
+                pipeline.python, pipeline.mg5 = root / "python", root / "mg5"
+                pipeline.prefix, pipeline.boost = root / "runtime", root / "runtime/include"
+                pipeline.cuba, pipeline.powheg, pipeline.logs = root / "cuba", root / "powheg", root / "logs"
+                pipeline.check = mock.Mock()
+
+                def child_call(_pipeline, label, command, **kwargs):
+                    if label == "ihixs-calculate":
+                        cli.shared.save(args.work_dir / "normalization/ggf-ssc40-n3lo.json", {})
+                    elif label.endswith("-powheg"):
+                        directory = cli.locations(args)[0] / "powheg"
+                        directory.mkdir()
+                        (directory / "powheg-hjminnlo-merged.lhe").write_text("synthetic LHE")
+                    elif label.endswith("-campaign"):
+                        self.artifacts(args)
+                        (cli.locations(args)[1] / "index.html").unlink()
+                    elif label.endswith("-report"):
+                        raise RuntimeError("synthetic first report failure")
+
+                with mock.patch.object(cli.shared, "HO", ho), \
+                        mock.patch.object(cli.shared.norm, "load_record"), \
+                        mock.patch.object(cli.shared, "verify_pilot"), \
+                        mock.patch.object(cli.shared.Pipeline, "call", autospec=True, side_effect=child_call), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    cli.prepare_run(args, config)
+                    self.assertEqual(cli.read_state(args)["state"], "prepared")
+                    with self.assertRaisesRegex(RuntimeError, "first report failure"):
+                        cli.run(pipeline)
+
+                saved = cli.read_state(args)
+                self.assertEqual(saved["state"], "failed")
+                self.assertNotIn("analysis_artifacts", saved)
+                directory, report = cli.locations(args)
+                snapshot = cli.shared.analysis_snapshot_path(directory)
+                before = snapshot.read_bytes()
+                self.assertEqual(len(json.loads(before)["artifacts"]), 20)
+                self.assertFalse((report / "index.html").exists())
+                self.assertFalse(cli.pilot_path(args).exists())
+                self.assertFalse((args.work_dir / "pilot-complete.json").exists())
+                next(directory.rglob("*" + suffix)).write_text("changed nonempty analysis")
+                pipeline.call = mock.Mock()
+                pipeline.run = mock.Mock()
+                for action in ("run", "report", "cuts", "xgboost"):
+                    args.action = action
+                    operation = cli.run if action == "run" else cli.report if action == "report" else cli.downstream_analysis
+                    with self.subTest(action=action), self.assertRaisesRegex(ValueError, "completed analysis product changed"):
+                        operation(pipeline)
+                pipeline.run.assert_not_called()
+                pipeline.call.assert_not_called()
+                self.assertEqual(snapshot.read_bytes(), before)
+
     def test_saved_campaign_artifact_inventory_cannot_silently_lose_an_output(self):
         with self.repository() as root:
             args = self.args(root, "--workflow", "gammagamma-ho", "--nevents", "100")

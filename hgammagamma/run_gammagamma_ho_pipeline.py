@@ -618,11 +618,12 @@ class Pipeline:
 
     def run(self):
         self.preflight_inputs()
+        directory = HO / "runs" / self.args.run_tag
+        validate_analysis_snapshot(directory)
         self.check()
         args = self.args
         if args.nevents > 30:
             verify_pilot(self.work)
-        directory = HO / "runs" / args.run_tag
         marker = directory / "pipeline.json"
         if directory.exists() and not marker.exists() and any(directory.iterdir()):
             raise ValueError("this tag belongs to an existing campaign; use its original runner or a new pipeline tag")
@@ -665,6 +666,11 @@ class Pipeline:
                   "--mg5-fortran", self.config["fc"], "--mg5-cxx", self.config["cxx"],
                   "--analysis-cxx", self.config["cxx"], "--no-herwig-module",
                   "--signal-normalization", record, "--signal-lhe", lhe, "--resume"])
+        # A report failure must not discard the evidence for completed physics.
+        # This per-campaign snapshot is separate from pilot acceptance and HTML.
+        analysis = completed_artifacts(directory)
+        validate_analysis_snapshot(directory, analysis)
+        frozen(analysis_snapshot_path(directory), {"schema_version": 1, "artifacts": analysis})
         report = HO / "plots" / args.run_tag
         self.call(args.run_tag + "-report", [self.python, REPO / "hgammagamma/make_gammagamma_report.py",
                   "--analysis-root", directory, "--run-tag", args.run_tag, "--output-dir", report,
@@ -677,8 +683,8 @@ class Pipeline:
         print(f"Pipeline complete: {report / 'index.html'}")
 
 
-def completed_artifacts(directory, report):
-    paths = [report / "index.html"]
+def completed_artifacts(directory, report=None):
+    paths = [report / "index.html"] if report is not None else []
     for sample in SAMPLES:
         category = "Signal" if sample.startswith("signal_") else "Backgrounds"
         folder = directory / category / "events" / sample
@@ -691,7 +697,29 @@ def completed_artifacts(directory, report):
                       folder / f"{sample}_hwsim_roots-{directory.name}.top",
                       folder / f"{sample}_hwsim_roots-{directory.name}_var.root",
                       folder / f"normalization-{directory.name}.json"])
+    for path in paths:
+        if not path.is_file() or not path.stat().st_size:
+            raise ValueError(f"missing or empty completed product: {path}")
     return {str(p): digest(p) for p in paths}
+
+
+def analysis_snapshot_path(directory):
+    return directory / "analysis-artifacts.json"
+
+
+def validate_analysis_snapshot(directory, artifacts=None):
+    """Check HO physics saved before reporting, including interrupted first runs."""
+    path = analysis_snapshot_path(directory)
+    if not path.is_file():
+        return
+    snapshot = json.loads(path.read_text())
+    recorded = snapshot.get("artifacts")
+    current = completed_artifacts(directory) if artifacts is None else artifacts
+    if snapshot.get("schema_version") != 1 or not isinstance(recorded, dict) or set(recorded) != set(current):
+        raise ValueError(f"completed analysis-artifact inventory differs from saved evidence: {path}")
+    for name, expected in recorded.items():
+        if not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{64}", expected) or current[name] != expected:
+            raise ValueError(f"completed analysis product changed: {name}; preserve it and use a new run tag")
 
 
 def verify_pilot(work):

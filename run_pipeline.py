@@ -246,6 +246,8 @@ def physics_artifacts(args):
         for folder, summary in ho_summaries:
             validate_ho_analysis_summary(folder, summary)
     current = {str(path.resolve()): shared.digest(path) for path in paths}
+    if args.workflow == "gammagamma-ho":
+        shared.validate_analysis_snapshot(directory, current)
     if state_path(args).is_file():
         recorded = read_state(args).get("analysis_artifacts")
         if recorded is not None:
@@ -338,6 +340,8 @@ def validate_saved_run_artifacts(args):
         saved.get("state") == "complete" or saved.get("analysis_artifacts") is not None
     )
     directory = locations(args)[0].resolve()
+    if args.workflow == "gammagamma-ho" and shared.analysis_snapshot_path(directory).is_file():
+        completed = True
     snapshots = [pilot_path(args)]
     if args.workflow == "gammagamma-ho":
         snapshots.append(args.work_dir / "pilot-complete.json")
