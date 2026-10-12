@@ -43,7 +43,7 @@ set EventGenerator:EventHandler /Herwig/EventHandlers/LesHouchesHandler
 set EventGenerator:NumberOfEvents $nevents
 set EventGenerator:RandomNumberGenerator:Seed $seed
 set EventGenerator:PrintEvent 0
-set EventGenerator:MaxErrors 100
+set EventGenerator:MaxErrors ${max_errors}
 library HwSim.so
 create Herwig::HwSim /Herwig/Analysis/HwSim
 insert EventGenerator:AnalysisHandlers 0 /Herwig/Analysis/HwSim

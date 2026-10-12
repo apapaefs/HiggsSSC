@@ -220,6 +220,14 @@ def _parse_logs(herwig_dir, sample_name, termination):
         terminal = run.split(EOF_MESSAGE, 1)[1].strip()
         if not re.fullmatch(r"\S+\s+See logfile for details\.", terminal):
             raise ValueError("unexpected diagnostic after terminal Les Houches EOF")
+    elif termination == "error_limit":
+        # Inspection for an explicit archive-and-restart operation only.
+        # build_completion deliberately does not accept this termination.
+        if eof_occurrences or counts["runerror"] or len(caught) != 1:
+            raise ValueError("error-limit recovery requires one terminal caught event error")
+        terminal = run.split(caught[0], 1)[1].strip()
+        if not terminal.endswith("See logfile for details.") or terminal == "See logfile for details.":
+            raise ValueError("missing terminal event-error diagnostic")
     elif eof_occurrences or counts["runerror"] or caught:
         raise ValueError("failed Herwig run cannot be ordinary shower completion")
     violations = re.findall(r"BasicConsistency: maximum 4-momentum violation:\s*(\S+)\s+MeV", run)

@@ -8,6 +8,7 @@ run_powheg_hjminnlo.py; pass its merged output with --signal-lhe.
 from __future__ import annotations
 
 import argparse
+import copy
 import fcntl
 import gzip
 import hashlib
@@ -20,8 +21,10 @@ import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from string import Template
 from types import SimpleNamespace
+from uuid import uuid4
 
 try:
     from . import run_gammagamma_campaign as lo
@@ -157,6 +160,8 @@ def parse_args(argv=None):
     parser.add_argument("--analysis-cxx", default="/usr/bin/clang++" if sys.platform == "darwin" else "c++",
                         help="C++ compiler compatible with the installed ROOT")
     parser.add_argument("--herwig", default=os.environ.get("HERWIG", "Herwig"))
+    parser.add_argument("--herwig-max-errors", type=int, default=100,
+                        help="maximum cumulative event errors per Herwig exception class (use 1000 for 5M events)")
     parser.add_argument("--herwig-env", type=Path, default=lo.maybe_path(os.environ.get("HERWIG_ENV")))
     parser.add_argument("--herwig-module", default=os.environ.get("HERWIG_MODULE"))
     parser.add_argument("--no-herwig-module", action="store_true")
@@ -169,14 +174,18 @@ def parse_args(argv=None):
     parser.add_argument("--isolation-epsilon", type=float, default=1.)
     parser.add_argument("--isolation-power", type=float, default=1.)
     parser.add_argument("--resume", action="store_true", help="reuse completed stages with identical configuration")
+    parser.add_argument("--restart-failed-shower", action="store_true",
+                        help="with --stage prepare --resume, archive an error-limit-stopped shower and raise only its error budget")
     parser.add_argument("--dry-run", action="store_true", help="print cards and commands without writing or running")
     cli_arguments = list(argv) if argv is not None else sys.argv[1:]
     args = parser.parse_args(cli_arguments)
+    if args.restart_failed_shower and (args.stage != "prepare" or not args.resume):
+        parser.error("--restart-failed-shower requires --stage prepare --resume")
     args.run_tag_explicit = any(value == "--run-tag" or value.startswith("--run-tag=")
                                 for value in cli_arguments)
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", args.run_tag):
         parser.error("run-tag must contain only letters, digits, underscores and hyphens")
-    for key in ("nevents", "nb_core", "seed_base", "ebeam", "gen_photon_pt_min", "gen_jet_pt_min",
+    for key in ("nevents", "nb_core", "seed_base", "herwig_max_errors", "ebeam", "gen_photon_pt_min", "gen_jet_pt_min",
                 "gen_lepton_pt_min", "gen_eta_max", "gen_mll_min", "isolation_radius",
                 "isolation_epsilon", "isolation_power"):
         if not math.isfinite(getattr(args, key)) or getattr(args, key) <= 0:
@@ -284,6 +293,7 @@ def herwig_card(args, sample):
         lhe_file=lhe_path(args, sample), pdf_name=sample.pdf_name,
         matching_settings=matching, decay_settings=decay, nevents=args.nevents,
         seed=args.seed_base + SAMPLES.index(sample), sample_name=sample.name,
+        max_errors=args.herwig_max_errors,
     )
 
 
@@ -322,6 +332,138 @@ def command(args, argv, cwd, log_name):
         raise RuntimeError(f"generator/build error (exit status {result.returncode}); see {log}")
 
 
+def recover_failed_shower(args, sample, old, new_configuration, new_fingerprint):
+    """Archive an error-limit abort and prepare a fresh shower of the same LHE.
+
+    This operation never invokes Herwig or MG5. The caller holds the campaign
+    lock; only the per-class Herwig error limit may change between attempts.
+    """
+    def fingerprint(configuration):
+        return hashlib.sha256(json.dumps(configuration, sort_keys=True).encode()).hexdigest()
+
+    previous_configuration = old.get("configuration")
+    if not isinstance(previous_configuration, dict) or old.get("fingerprint") != fingerprint(previous_configuration):
+        raise ValueError("failed-shower recovery requires an intact configuration fingerprint")
+    if new_fingerprint != fingerprint(new_configuration):
+        raise ValueError("invalid replacement configuration fingerprint")
+    if old["fingerprint"] == new_fingerprint and previous_configuration == new_configuration:
+        return old
+    if (not getattr(args, "restart_failed_shower", False) or not args.resume
+            or args.stage != "prepare"):
+        raise ValueError("failed-shower recovery requires --restart-failed-shower --resume --stage prepare")
+
+    directory = sample_dir(args, sample)
+    herwig_dir = directory / "herwig"
+    manifest_path = directory / "campaign.json"
+    if (directory.is_symlink() or herwig_dir.is_symlink() or manifest_path.is_symlink()
+            or not herwig_dir.is_dir()):
+        raise ValueError("failed-shower recovery requires an original local sample directory")
+    if (old.get("sample") != sample.name or old.get("run_tag") != args.run_tag
+            or old.get("ebeam_gev") != args.ebeam or old.get("nevents_requested") != args.nevents
+            or old.get("seed") != args.seed_base + SAMPLES.index(sample)):
+        raise ValueError("failed-shower recovery cannot change the campaign identity")
+    completed = old.get("completed", [])
+    if (not isinstance(completed, list) or "generate" not in completed
+            or any(stage in completed for stage in ("shower", "analyze"))
+            or any(key in old for key in ("shower_completion", "analysis", "rate_normalization", "root_files"))
+            or (directory / f"normalization-{args.run_tag}.json").exists()):
+        raise ValueError("failed-shower recovery requires completed generation and an incomplete, unanalyzed shower")
+    old_card = previous_configuration.get("herwig_card", "")
+    new_card = new_configuration.get("herwig_card", "")
+    limit_pattern = r"(?m)^set EventGenerator:MaxErrors ([0-9]+)$"
+    old_limits, new_limits = re.findall(limit_pattern, old_card), re.findall(limit_pattern, new_card)
+    if len(old_limits) != 1 or len(new_limits) != 1:
+        raise ValueError("failed-shower recovery requires exactly one MaxErrors setting")
+    old_limit, new_limit = int(old_limits[0]), int(new_limits[0])
+    normalized = dict(new_configuration)
+    normalized["herwig_card"] = re.sub(limit_pattern, f"set EventGenerator:MaxErrors {old_limit}", new_card)
+    if old_limit <= 0 or new_limit <= old_limit or normalized != previous_configuration:
+        raise ValueError("failed-shower recovery permits only an increase in MaxErrors")
+    card_path = herwig_dir / f"{sample.name}.in"
+    if not card_path.is_file() or card_path.read_text() != old_card:
+        raise ValueError("persisted Herwig card differs from the failed campaign configuration")
+    original_manifest = manifest_path.read_bytes()
+    if json.loads(original_manifest) != old:
+        raise ValueError("failed campaign manifest changed before recovery")
+    source = lhe_path(args, sample)
+    if (Path(old.get("lhe_file", "")).resolve() != source.resolve()
+            or not old.get("lhe") or inspect_lhe(source, sample, args) != old["lhe"]):
+        raise ValueError("LHE changed since completed generation; refusing shower recovery")
+
+    parsed = shower_completion._parse_logs(herwig_dir, sample.name, "error_limit")
+    counts = parsed["exception_counts"]
+    error_classes = [entry["count"] for entry in parsed["exception_classes"]
+                     if entry["severity"] == "eventerror"]
+    if (any(counts.get(key, 0) for key in ("runerror", "setuperror", "maybeabort", "abortnow", "unknown"))
+            or not error_classes or max(error_classes) != old_limit
+            or counts["eventerror"] != sum(error_classes)):
+        raise ValueError("failed shower did not stop at its recorded MaxErrors limit")
+    generated, attempted = parsed["generated_events"], parsed["attempted_events"]
+    if (generated != parsed["saved_events"] or generated <= 0
+            or generated >= old["nevents_requested"] or attempted >= old["lhe"]["events"]
+            or attempted - generated != counts["eventerror"]):
+        raise ValueError("failed shower lacks consistent partial source-event bookkeeping")
+    inventory = root_inventory(directory)
+    root_paths = {str(Path(entry["path"]).resolve()) for entry in inventory}
+    if root_paths != set(parsed["root_writers"]) or len(root_paths) != len(inventory):
+        raise ValueError("failed shower ROOT inventory differs from finalized writers")
+    root_artifacts = []
+    for entry in inventory:
+        path = Path(entry["path"]).resolve()
+        if not path.is_relative_to(herwig_dir.resolve() / "events"):
+            raise ValueError("failed shower ROOT artifact lies outside its events directory")
+        artifact = shower_completion._artifact(path)
+        if any(artifact[key] != entry[key] for key in ("size", "mtime_ns")):
+            raise ValueError("failed shower ROOT artifact changed during recovery inspection")
+        root_artifacts.append(artifact)
+    if root_inventory(directory) != inventory or manifest_path.read_bytes() != original_manifest:
+        raise ValueError("failed shower changed during recovery inspection")
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    archive = directory / "shower-recovery" / f"{stamp}-{uuid4().hex[:12]}"
+    updated = copy.deepcopy(old)
+    updated.update(configuration=copy.deepcopy(new_configuration), fingerprint=new_fingerprint)
+    updated.setdefault("shower_restarts", []).append({
+        "reason": "herwig_error_limit", "archive": str(archive), "prepared_at_utc": stamp,
+        "previous_fingerprint": old["fingerprint"], "previous_max_errors": old_limit,
+        "max_errors": new_limit, "generated_events": generated, "attempted_events": attempted,
+        "saved_events": parsed["saved_events"], "exception_counts": copy.deepcopy(counts),
+        "exception_classes": copy.deepcopy(parsed["exception_classes"]),
+        "artifacts": {**copy.deepcopy(parsed["artifacts"]), "roots": root_artifacts,
+                      "herwig_card": shower_completion._artifact(card_path),
+                      "campaign_manifest": shower_completion._artifact(manifest_path)},
+    })
+    print(f"+ archive failed shower in {archive}; prepare MaxErrors {old_limit} -> {new_limit}")
+    if args.dry_run:
+        return updated
+
+    archive.mkdir(parents=True, exist_ok=False)
+    moved_herwig = moved_manifest = False
+    try:
+        herwig_dir.rename(archive / "herwig")
+        moved_herwig = True
+        manifest_path.rename(archive / "campaign.json")
+        moved_manifest = True
+        write_text(card_path, new_card, args)
+        write_json(manifest_path, updated, args)
+    except BaseException:
+        # Retain any attempted replacement as evidence, then restore original
+        # paths and bytes. Never delete pre-existing campaign or shower files.
+        if moved_herwig and herwig_dir.exists():
+            herwig_dir.rename(archive / "replacement-herwig")
+        if moved_manifest and manifest_path.exists():
+            manifest_path.rename(archive / "replacement-campaign.json")
+        temporary = manifest_path.with_name(manifest_path.name + ".tmp")
+        if moved_manifest and temporary.exists():
+            temporary.rename(archive / "replacement-campaign.json.tmp")
+        if moved_manifest:
+            (archive / "campaign.json").rename(manifest_path)
+        if moved_herwig:
+            (archive / "herwig").rename(herwig_dir)
+        raise
+    return updated
+
+
 def prepare(args, sample):
     directory = sample_dir(args, sample)
     process, launch = ("", "") if sample.signal else mg5_cards(args, sample)
@@ -351,13 +493,18 @@ def prepare(args, sample):
         manifest.update(hard_model="pure_heft", higgs_mass_gev=125.0)
     if manifest_path.exists():
         old = json.loads(manifest_path.read_text())
+        if args.restart_failed_shower:
+            old = recover_failed_shower(args, sample, old, identity, fingerprint)
         if old["fingerprint"] != fingerprint or old["ebeam_gev"] != args.ebeam:
             raise ValueError(f"configuration changed in {directory}; use a new --run-tag/output-dir")
         manifest = old
+    elif args.restart_failed_shower:
+        raise ValueError("failed-shower recovery requires an existing campaign manifest")
     elif directory.exists() and any(directory.iterdir()):
         raise ValueError(f"unmanaged non-empty sample directory: {directory}")
     persisted_card = directory / "herwig" / f"{sample.name}.in"
-    if any((directory / "herwig/events").glob("**/*.root")) and (
+    if (not (args.dry_run and args.restart_failed_shower)
+            and any((directory / "herwig/events").glob("**/*.root"))) and (
             not persisted_card.is_file() or persisted_card.read_text() != herwig):
         raise ValueError(f"persisted Herwig card differs from existing ROOT products in {directory}; preserve them for inspection")
     if not sample.signal:

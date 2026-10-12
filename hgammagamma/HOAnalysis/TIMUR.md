@@ -313,6 +313,35 @@ totals to agree exactly or in that specific scientific format. ROOT
 entries and consumed LHE events still undergo the full independent
 checks; rounded totals never set the signed source-weight denominator.
 
+## Recover A Shower That Reaches Its Event-Error Limit
+
+The first prompt-diphoton shower in `ho_bg_5m_01` stopped after saving
+1,220,378 events because its `MaxErrors 100` limit was reached. The final
+diagnostic was a failed `D_s0(2590)-` decay; the complete five-million-event
+MG5 LHE was already available. The limit is cumulative per exception
+class and severity, so a budget adequate for 100,000 events can stop a
+larger shower. It is separate from the 100,000 trials allowed per decay.
+
+Use `--herwig-max-errors 1000` for this campaign. Keep all original
+generation settings, seeds, paths and the five-million-event request.
+The default remains 100 so existing campaign fingerprints remain valid.
+Recovery requires an explicit preparation step with
+`--stage prepare --resume --restart-failed-shower`, restricted to the
+failed sample. It validates the unchanged LHE and the error-limit
+termination, and permits only an increase in the error budget. It archives
+the entire failed `herwig/` directory and original `campaign.json` under
+the sample's `shower-recovery/` directory before writing the new card and
+manifest. Preparation launches no shower or event generation.
+
+Then run `--stage all --resume` with the same options, including the new
+error budget. The completed MG5 stage is reused; Herwig showers the
+existing hard events from the beginning and continues to reconstruction
+and analysis. Archived partial ROOT files are excluded from the analysis.
+Do not use native `Herwig --resume`: this campaign has no usable checkpoint
+restoring both the LHE stream and HwSim ROOT writer state. The higher
+budget does not fix the individual decay failures; discarded signed
+source weights remain in the normalization denominator and are reported.
+
 ## Resume ihixs After A Production Precision Failure
 
 This is the historical recovery used by the completed refined run. Its

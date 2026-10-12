@@ -114,6 +114,67 @@ class ShowerCompletionTests(unittest.TestCase):
             "Weight of events that pass basic cuts: 3.99965e+06"))
         return fixture
 
+    def error_limit_fixture(self, directory):
+        fixture = self.fixture(directory, saved=1220378, requested=5000000,
+                               attempts=1220478, termination="source_exhausted")
+        herwig = fixture[0]
+        out = herwig / f"{SAMPLE}.out"
+        out.write_text(out.read_text().replace(
+            "Total: 1220378 1220478 ", "Total: 1.22038e+06 1.22048e+06 "))
+        run = herwig / "run.log"
+        run.write_text(run.read_text().replace(
+            completion.EOF_MESSAGE + " LesHouchesReader",
+            "Too many tries 100000to generate decay of D_s0(2590)-\n"
+            "in HwDecayHandler::performDecay"))
+        log = herwig / f"{SAMPLE}.log"
+        log.write_text(log.read_text().replace(
+            "ThePEG::Exception runerror (1 times)\n", "").replace(
+            "Some detailed diagnostics",
+            "Too many (100) exceptions of this kind has occurred. Execution will be stopped."))
+        return fixture
+
+    def test_error_limit_inspection_recovers_exact_partial_shower_counts(self):
+        with TemporaryDirectory() as directory:
+            fixture = self.error_limit_fixture(directory)
+            parsed = completion._parse_logs(fixture[0], SAMPLE, "error_limit")
+            self.assertEqual(parsed["generated_events"], 1220378)
+            self.assertEqual(parsed["saved_events"], 1220378)
+            self.assertEqual(parsed["attempted_events"], 1220478)
+            self.assertEqual(parsed["exception_counts"]["eventerror"], 100)
+            self.assertEqual(parsed["exception_counts"]["runerror"], 0)
+
+    def test_error_limited_shower_cannot_be_recorded_as_completed(self):
+        with TemporaryDirectory() as directory:
+            herwig, _, metadata, manifest, _, _ = self.error_limit_fixture(directory)
+            for termination in ("requested_events", "source_exhausted", "error_limit"):
+                with self.subTest(termination=termination), self.assertRaises(ValueError):
+                    completion.build_completion(
+                        herwig, SAMPLE, manifest["nevents_requested"], 5000000,
+                        metadata, termination)
+
+    def test_error_limit_inspection_rejects_eof_fatal_and_ambiguous_diagnostics(self):
+        changes = {
+            "eof": ("run.log", "Too many tries 100000", completion.EOF_MESSAGE),
+            "runerror": (f"{SAMPLE}.log", "eventerror (100 times)",
+                         "eventerror (100 times)\nThePEG::Exception runerror (1 times)"),
+            "fatal": (f"{SAMPLE}.log", "eventerror (100 times)",
+                      "eventerror (100 times)\nThePEG::Exception abortnow (1 times)"),
+            "duplicate_caught": ("run.log", "Herwig: ThePEG::Exception caught.",
+                                 "Herwig: ThePEG::Exception caught.\nHerwig: ThePEG::Exception caught."),
+            "missing_caught": ("run.log", "Herwig: ThePEG::Exception caught.\n", ""),
+            "missing_diagnostic": ("run.log", "Too many tries 100000to generate decay of D_s0(2590)-\n"
+                                   "in HwDecayHandler::performDecay\n", ""),
+            "trailing_diagnostic": ("run.log", "See logfile for details.",
+                                    "See logfile for details.\nUnexpected additional error"),
+        }
+        for name, (filename, old, new) in changes.items():
+            with self.subTest(name=name), TemporaryDirectory() as directory:
+                fixture = self.error_limit_fixture(directory)
+                path = fixture[0] / filename
+                path.write_text(path.read_text().replace(old, new))
+                with self.assertRaises(ValueError):
+                    completion._parse_logs(fixture[0], SAMPLE, "error_limit")
+
     def test_statistic_count_restores_exact_counts_from_six_digit_rounding(self):
         cases = (("3999652", 3999652), ("3.999652e+06", 3999652),
                  ("3.99965e+06", 3999652), ("4e+06", 4000002),
@@ -262,7 +323,7 @@ class ShowerCompletionTests(unittest.TestCase):
             card = Template(template.read_text()).substitute(
                 lhe_file=fixture[1].resolve(), pdf_name="NNPDF40_nnlo_as_01180_qed",
                 matching_settings="", decay_settings="", nevents=3, seed=101,
-                sample_name=SAMPLE)
+                sample_name=SAMPLE, max_errors=100)
             (fixture[0] / f"{SAMPLE}.in").write_text(card)
             fixture[3]["configuration"]["herwig_card"] = card
             record, manifest = self.build(fixture)
