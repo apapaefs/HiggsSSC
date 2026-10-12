@@ -1235,5 +1235,54 @@ class FourLeptonManifestAndCliTests(unittest.TestCase):
         self.assertFalse(campaign.build_manifest(cfg, [sample])["detector"]["pileup_noise_enabled"])
 
 
+class PipelineRuntimeTests(unittest.TestCase):
+    def test_incomplete_export_is_preserved_without_force(self):
+        with TemporaryDirectory() as tmp:
+            with patch.object(campaign, "SCRIPT_DIR", Path(tmp)):
+                cfg = config("--run-samples", "bkg_qq_4e")
+                cfg.dry_run = False
+                sample = campaign.SAMPLES_BY_NAME["bkg_qq_4e"]
+                process = campaign.production_dir(sample, cfg) / "mg5_process"
+                process.mkdir(parents=True)
+                evidence = process / "partial.dat"
+                evidence.write_text("preserve")
+                with patch.object(campaign, "production_stage_identity", return_value={}):
+                    with patch.object(campaign, "run_runtime_command", side_effect=AssertionError("exported")):
+                        with self.assertRaisesRegex(SystemExit, "incomplete production export"):
+                            campaign.obtain_mg5_lhe(sample, [sample], cfg)
+                self.assertEqual(evidence.read_text(), "preserve")
+
+    def test_dry_run_is_dependency_free_and_nonmutating(self):
+        import io
+        with TemporaryDirectory() as tmp:
+            with patch.object(campaign, "SCRIPT_DIR", Path(tmp)):
+                with patch.object(campaign.subprocess, "run", side_effect=AssertionError("runtime invoked")):
+                    with patch("sys.stdout", new=io.StringIO()):
+                        result = campaign.main(["--dry-run", "--mg5-dir", "/missing/mg5",
+                                                "--no-herwig-env", "--no-herwig-module"])
+            self.assertEqual(result, 0)
+            self.assertEqual(list(Path(tmp).iterdir()), [])
+
+    def test_explicit_prefix_and_disabled_runtime_autodiscovery(self):
+        with TemporaryDirectory() as tmp:
+            cfg = campaign.parse_config(["--herwig-env", tmp, "--no-herwig-module"])
+            self.assertEqual(cfg.herwig_env, Path(tmp) / "bin/activate")
+            with patch.object(campaign, "guess_default_herwig_env", side_effect=AssertionError("discovered")):
+                with patch.dict("os.environ", {"HERWIG_ENV": tmp}, clear=True):
+                    cfg = campaign.parse_config(["--no-herwig-env", "--no-herwig-module"])
+            self.assertIsNone(cfg.herwig_env)
+            self.assertIsNone(cfg.herwig_module)
+            self.assertIsNone(cfg.collier_library)
+
+    def test_generated_lhe_uses_requested_tag(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for tag in ("pilot", "zzz_other"):
+                path = root / "Events" / tag / "unweighted_events.lhe"
+                path.parent.mkdir(parents=True)
+                path.write_text("events")
+            self.assertEqual(campaign.find_lhe_file(root, "pilot"), root / "Events/pilot/unweighted_events.lhe")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -532,6 +532,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mg5-python", default=clean_optional_text(os.environ.get("MG5_PYTHON")))
     parser.add_argument("--herwig", default=env_text("HERWIG", "Herwig"))
     parser.add_argument("--herwig-env", type=Path, default=maybe_path(os.environ.get("HERWIG_ENV")))
+    parser.add_argument("--no-herwig-env", action="store_true",
+                        help="use the inherited environment without discovering an activation script")
     parser.add_argument("--herwig-module", default=os.environ.get("HERWIG_MODULE"))
     parser.add_argument(
         "--herwig-cxx",
@@ -625,12 +627,15 @@ def parse_config(argv: Sequence[str]) -> Config:
         parser.error("beam energy and luminosity must be positive")
     if args.muon_resolution_scale <= 0:
         parser.error("--muon-resolution-scale must be positive")
-    if re.fullmatch(r"[A-Za-z0-9_.-]+", args.run_tag) is None:
+    if args.run_tag in {".", ".."} or re.fullmatch(r"[A-Za-z0-9_.-]+", args.run_tag) is None:
         parser.error("--run-tag may contain only letters, digits, '.', '_', and '-'")
 
-    explicit_herwig_env = args.herwig_env.expanduser() if args.herwig_env else None
+    explicit_herwig_env = args.herwig_env.expanduser() if args.herwig_env and not args.no_herwig_env else None
     if explicit_herwig_env is not None and explicit_herwig_env.is_dir():
-        explicit_herwig_env = None
+        if any(arg == "--herwig-env" or arg.startswith("--herwig-env=") for arg in argv):
+            explicit_herwig_env /= "bin/activate"
+        else:
+            explicit_herwig_env = None
     herwig_module = clean_optional_text(args.herwig_module)
     if herwig_module is None and explicit_herwig_env is None and not args.no_herwig_module:
         if platform.system() == "Linux":
@@ -640,10 +645,10 @@ def parse_config(argv: Sequence[str]) -> Config:
     if args.no_herwig_module:
         herwig_module = None
     herwig_env = None if herwig_module else explicit_herwig_env
-    if herwig_env is None and herwig_module is None:
+    if herwig_env is None and herwig_module is None and not args.no_herwig_env:
         herwig_env = guess_default_herwig_env()
 
-    collier = args.collier_library or guess_collier_library(herwig_env)
+    collier = args.collier_library or (None if args.no_herwig_env else guess_collier_library(herwig_env))
     fraction_cli_override = any(
         argument == "--signal-channel-fractions"
         or argument.startswith("--signal-channel-fractions=")
@@ -1189,6 +1194,8 @@ def group_event_count(
 
 
 def require_inputs(cfg: Config, samples: Sequence[SampleSpec]) -> None:
+    if cfg.dry_run:
+        return
     if not cfg.template_in.exists():
         die(f"missing Herwig template: {cfg.template_in}")
     needs_mg5 = cfg.source_backend == "mg5" or any(sample.is_signal for sample in samples)
@@ -1615,8 +1622,9 @@ def generation_environment(runtime_dir: Path | None) -> dict[str, str] | None:
     return env
 
 
-def find_lhe_file(process_dir: Path) -> Path:
-    candidates = sorted((process_dir / "Events").glob("*/unweighted_events.lhe*"))
+def find_lhe_file(process_dir: Path, run_tag: str | None = None) -> Path:
+    pattern = f"{run_tag}/unweighted_events.lhe*" if run_tag else "*/unweighted_events.lhe*"
+    candidates = sorted((process_dir / "Events").glob(pattern))
     if not candidates:
         die(f"could not locate MG5 LHE output below {process_dir / 'Events'}")
     undecayed = [path for path in candidates if "decayed" not in str(path)]
@@ -2981,6 +2989,9 @@ def campaign_tracked_inputs(cfg: Config) -> dict[str, dict[str, object]]:
 
 
 def campaign_software_versions(cfg: Config) -> dict[str, str | None]:
+    if cfg.dry_run:
+        return {"python": platform.python_version(), "mg5": mg5_version(cfg.mg5_dir),
+                "herwig": None, "root": None}
     return {
         "python": platform.python_version(),
         "mg5": mg5_version(cfg.mg5_dir),
@@ -3364,7 +3375,7 @@ def obtain_mg5_lhe(
     )
     if not cfg.dry_run and not cfg.force and process_dir.exists():
         try:
-            existing_lhe = find_lhe_file(process_dir)
+            existing_lhe = find_lhe_file(process_dir, cfg.run_tag)
         except SystemExit:
             existing_lhe = None
         if existing_lhe is not None:
@@ -3375,6 +3386,10 @@ def obtain_mg5_lhe(
                 f"{sample.production_group_id} do not match the current "
                 "process/card/software provenance; rerun with --force"
             )
+        die(
+            f"incomplete production export at {process_dir}; preserve it and "
+            "use a new --run-tag (or explicitly --force to replace it)"
+        )
 
     card_dir = group_dir / "cards"
     card = card_dir / "process_card.dat"
@@ -3410,7 +3425,7 @@ def obtain_mg5_lhe(
     run_generate_events(process_dir, runtime_dir, cfg)
     if cfg.dry_run:
         return process_dir / "Events" / cfg.run_tag / "unweighted_events.lhe.gz"
-    generated_lhe = find_lhe_file(process_dir)
+    generated_lhe = find_lhe_file(process_dir, cfg.run_tag)
     write_artifact_stage_marker(marker, identity, generated_lhe)
     return generated_lhe
 

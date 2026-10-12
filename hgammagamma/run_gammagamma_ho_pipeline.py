@@ -20,15 +20,18 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+from types import SimpleNamespace
 
 try:
     from . import run_gammagamma_campaign as runtime
     from . import run_powheg_hjminnlo as powheg
     from . import ho_signal_normalization as norm
+    from . import run_gammagamma_ho_campaign as ho_campaign
 except ImportError:
     import run_gammagamma_campaign as runtime
     import run_powheg_hjminnlo as powheg
     import ho_signal_normalization as norm
+    import run_gammagamma_ho_campaign as ho_campaign
 
 REPO = Path(__file__).resolve().parent.parent
 HO = REPO / "hgammagamma/HOAnalysis"
@@ -43,6 +46,9 @@ CUBA_SHA256 = "8d9f532fd2b9561da2272c156ef7be5f3960953e4519c638759f1b52fe03ed52"
 PDF_SOURCE = "https://lhapdfsets.web.cern.ch/current/"
 PDF_SETS = ("NNPDF40_nlo_as_01180_qed", "NNPDF40_nnlo_as_01180_qed",
             "NNPDF40_an3lo_as_01180_qed_mhou", "PDF4LHC15_nnlo_100")
+LO_PDF_SETS = ("NNPDF40_lo_as_01180",)
+WORKFLOWS = ("gammagamma-lo", "gammagamma-ho", "fourlepton-lo")
+CORE_PACKAGES = ("numpy", "matplotlib", "PyYAML", "six")
 SAMPLES = ("signal_gg_h_aa", "bkg_prompt_aa", "bkg_gamma_j", "bkg_dy_ee")
 
 
@@ -190,6 +196,8 @@ class Pipeline:
         self.pdf_dir = self.work / "pdfs"
         self.env["LHAPDF_DATA_PATH"] = str(self.pdf_dir) + ":" + self.capture(["lhapdf-config", "--datadir"])
         self.python = self.work / "venv/bin/python"
+        self.env["PATH"] = str(self.python.parent) + ":" + self.env["PATH"]
+        self.env["PYTHONNOUSERSITE"] = "1"
         self.mg5 = self.work / "MG5_aMC_v3_5_15"
         self.powheg = self.work / "POWHEG-BOX-V2"
         self.cuba = self.work / "cuba"
@@ -261,17 +269,60 @@ class Pipeline:
         card.write_text("library HwSim.so\ncreate Herwig::HwSim /Herwig/Analysis/HiggsSSCPipelineProbe\n")
         self.call("check-hwsim", ["Herwig", "read", card], cwd=probe)
 
-    def setup(self):
-        self.runtime_check()
-        if not self.python.exists():
-            self.call("python-venv", ["python3", "-m", "venv", "--system-site-packages", self.work / "venv"])
-        requirements = REPO / "hgammagamma/HOAnalysis/requirements-pipeline.txt"
-        self.call("python-packages", [self.python, "-m", "pip", "install", "-r", requirements])
-        self.pdf_dir.mkdir(parents=True, exist_ok=True)
-        pdf_cmd = ["lhapdf", "--quiet", "--listdir", self.pdf_dir, "--pdfdir", self.pdf_dir, "--source", PDF_SOURCE]
-        self.call("pdf-index", [*pdf_cmd, "update"])
-        self.install_pdfs(pdf_cmd)
+    @property
+    def workflow(self):
+        workflow = getattr(self.args, "workflow", "gammagamma-ho")
+        if workflow not in WORKFLOWS:
+            raise ValueError(f"unknown workflow: {workflow}")
+        return workflow
 
+    @property
+    def pdf_sets(self):
+        return PDF_SETS if self.workflow == "gammagamma-ho" else LO_PDF_SETS
+
+    @property
+    def with_ml(self):
+        return getattr(self.args, "with_ml", False)
+
+    def components(self):
+        path = self.work / "components.json"
+        return json.loads(path.read_text()) if path.is_file() else {}
+
+    def record_component(self, name, metadata):
+        components = self.components()
+        components[name] = metadata
+        save(self.work / "components.json", components)
+
+    def setup_python(self):
+        created = not self.python.exists()
+        if created:
+            self.call("python-venv", ["python3", "-m", "venv", "--system-site-packages", self.work / "venv"])
+        components = self.components()
+        # The original HO installer already recorded its working environment.
+        # Do not let a later setup silently upgrade dependencies of saved runs.
+        legacy = (self.work / "installed.json").is_file() and not created
+        if created or "python_core" not in components and not legacy:
+            requirements = REPO / "hgammagamma/HOAnalysis/requirements-pipeline.txt"
+            self.call("python-packages", [self.python, "-m", "pip", "install", "-r", requirements])
+        self.call("check-python", [self.python, "-c", "import ROOT,numpy,matplotlib,yaml,six"])
+        if "python_core" not in components:
+            self.record_component("python_core", {"packages": self.capture([self.python, "-m", "pip", "freeze"])})
+        if self.with_ml:
+            if created or "python_ml" not in components:
+                # An optional classifier must not change the plotting/analysis
+                # dependencies that produced an already validated pilot.
+                versions = json.loads(self.capture([self.python, "-c",
+                    "import importlib.metadata,json; print(json.dumps({name: importlib.metadata.version(name) "
+                    f"for name in {CORE_PACKAGES!r}}}))"]))
+                constraints = self.work / "ml-core-constraints.txt"
+                constraints.write_text("".join(f"{name}=={versions[name]}\n" for name in CORE_PACKAGES))
+                self.call("python-ml", [self.python, "-m", "pip", "install", "--constraint", constraints,
+                          "--requirement", REPO / "requirements-ml.txt"])
+            self.call("check-python-ml", [self.python, "-c", "import xgboost,sklearn,tqdm"])
+            if "python_ml" not in components:
+                self.record_component("python_ml", {"packages": self.capture([self.python, "-m", "pip", "freeze"])})
+
+    def setup_cuba(self):
         if not (self.cuba / "lib/libcuba.a").is_file():
             archive = self.download(CUBA_URL, "Cuba-4.2.2.tar.gz", CUBA_SHA256)
             source = self.work / "Cuba-4.2.2"
@@ -281,7 +332,28 @@ class Pipeline:
                       extra_env={"CFLAGS": "-O2 -fPIC"})
             self.call("cuba-build", ["make", "-j1", "lib"], source)
             self.call("cuba-install", ["make", "-j1", "install", "TOOLS_DEFAULT="], source)
+        self.record_component("cuba", {"archive_sha256": CUBA_SHA256,
+                                      "library_sha256": digest(self.cuba / "lib/libcuba.a")})
 
+    def install_lo_model(self):
+        source = REPO / "MG5_aMC_v3_5_15/models/loop_sm_haa"
+        tracked = self.capture(["git", "-C", REPO, "ls-files", "--", source]).splitlines()
+        files = [REPO / name for name in tracked if Path(name).suffix in (".py", ".dat")]
+        if not files or not any(path.name == "parameters.py" for path in files):
+            raise ValueError("tracked loop_sm_haa model source is missing")
+        destination = self.mg5 / "models/loop_sm_haa"
+        for path in files:
+            target = destination / path.relative_to(source)
+            if target.exists() and digest(target) != digest(path):
+                raise ValueError(f"installed LO model differs from tracked source: {target}; use a new --work-dir")
+        for path in files:
+            target = destination / path.relative_to(source)
+            if not target.exists():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(path, target)
+        self.record_component("lo_model", {str(path.relative_to(source)): digest(path) for path in files})
+
+    def setup_mg5(self):
         if not (self.mg5 / "bin/mg5_aMC").is_file():
             archive = self.download(MG5_URL, "MG5-v3.5.15.tar.gz", MG5_SHA256)
             self.unpack(archive, f"mg5amcnlo-{MG5_COMMIT}", self.mg5)
@@ -311,22 +383,31 @@ class Pipeline:
                 shutil.copy2(cfg, backup)
             cfg.write_text(text)
 
-        # MG5 sometimes exits zero even when exporting a process failed. Test
-        # that boundary before investing in integrations. Each attempt is kept.
-        probe_marker = self.work / "mg5-export-checked.json"
-        probe_identity = {"configuration_sha256": digest(cfg), "release_packaging": True,
-                          "startup_sha256": digest(self.mg5 / "bin/mg5_aMC")}
-        previous = json.loads(probe_marker.read_text()) if probe_marker.exists() else {}
-        if previous.get("identity") != probe_identity:
-            probe = Path(tempfile.mkdtemp(prefix="mg5-export-", dir=self.work / "checks"))
-            card = probe / "process.mg5"
-            card.write_text("set automatic_html_opening False\nimport model loop_sm-no_b_mass\n"
-                            "generate p p > a a [QCD]\n" + f"output {probe / 'process'}\nquit\n")
-            self.call("check-mg5-export", [self.python, self.mg5 / "bin/mg5_aMC", card], probe, mg5=True)
-            if not (probe / "process/Cards/run_card.dat").is_file():
-                raise ValueError(f"MG5 did not export the probe process; inspect {probe}")
-            save(probe_marker, {"process": str(probe / "process"), "identity": probe_identity})
+        if self.workflow == "gammagamma-ho":
+            # MG5 sometimes exits zero even when exporting a process failed. Test
+            # that boundary before investing in integrations. Each attempt is kept.
+            probe_marker = self.work / "mg5-export-checked.json"
+            probe_identity = {"configuration_sha256": digest(cfg), "release_packaging": True,
+                              "startup_sha256": digest(self.mg5 / "bin/mg5_aMC")}
+            previous = json.loads(probe_marker.read_text()) if probe_marker.exists() else {}
+            if previous.get("identity") != probe_identity:
+                probe = Path(tempfile.mkdtemp(prefix="mg5-export-", dir=self.work / "checks"))
+                card = probe / "process.mg5"
+                card.write_text("set automatic_html_opening False\nimport model loop_sm-no_b_mass\n"
+                                "generate p p > a a [QCD]\n" + f"output {probe / 'process'}\nquit\n")
+                self.call("check-mg5-export", [self.python, self.mg5 / "bin/mg5_aMC", card], probe, mg5=True)
+                if not (probe / "process/Cards/run_card.dat").is_file():
+                    raise ValueError(f"MG5 did not export the probe process; inspect {probe}")
+                save(probe_marker, {"process": str(probe / "process"), "identity": probe_identity})
 
+        self.record_component("mg5", {"commit": MG5_COMMIT,
+                              "configuration_sha256": digest(cfg),
+                              "startup_sha256": digest(self.mg5 / "bin/mg5_aMC"),
+                              "ninja": str(ninja) if ninja else None})
+        if self.workflow == "gammagamma-lo":
+            self.install_lo_model()
+
+    def setup_powheg(self):
         if not self.powheg.exists():
             self.call("powheg-clone", ["git", "clone", "--filter=blob:none", "--sparse", "--no-checkout",
                                        POWHEG_URL, self.powheg])
@@ -348,50 +429,113 @@ class Pipeline:
         if not (process / "pwhg_main").is_file():
             self.call("powheg-build", ["make", "-j1", "pwhg_main", f"CXX={self.config['cxx']}",
                       f"CC={self.config['cc']}", f"FC={self.config['fc']}", "STDCLIB=-lstdc++"], process)
-        self.call("ihixs-source", ["git", "submodule", "update", "--init", "external/ihixs"])
-        self.call("analysis-build", ["make", "-C", REPO / "hgammagamma/LOAnalysis/Code",
-                  "HwSimPostAnalysis_gammagamma_SSC", f"CPP={self.config['cxx']}",
-                  f"CXX={self.config['cxx']}", "FASTJET_CPPFLAGS=", "FASTJET_LDFLAGS="])
-        self.check()
-        save(self.work / "installed.json", {"environment": self.config,
-             "downloads": {p.name: digest(p) for p in (self.work / "downloads").glob("*") if p.is_file()},
-             "powheg_commit": POWHEG_COMMIT, "hj_commit": HJ_COMMIT,
-             "mg5_commit": MG5_COMMIT,
-             "mg5_startup_repair": "import logging before Python-version warning",
-             "mg5_release_packaging": "archive bin/create_release.py outside bin, following upstream packaging",
-             "mg5_startup_sha256": digest(self.mg5 / "bin/mg5_aMC"),
-             "ninja": str(ninja) if ninja else None,
-             "python_packages": self.capture([self.python, "-m", "pip", "freeze"]),
-             "powheg_executable_sha256": digest(process / "pwhg_main")})
-        print("Setup complete. Run the 30-event pilot with the run action.")
+        self.record_component("powheg", {"commit": POWHEG_COMMIT, "hj_commit": HJ_COMMIT,
+                                         "executable_sha256": digest(process / "pwhg_main")})
 
-    def install_pdfs(self, command):
-        missing = [name for name in PDF_SETS if any(not p.is_file() or not p.stat().st_size
+    def setup_analysis(self):
+        if self.workflow == "fourlepton-lo":
+            directory = REPO / "hfourlepton/LOAnalysis/Code"
+            executable = "HwSimPostAnalysis_fourlepton"
+            command = ["make", "-C", directory, executable, f"CXX={self.config['cxx']}"]
+            component = "fourlepton_analysis"
+        else:
+            directory = REPO / "hgammagamma/LOAnalysis/Code"
+            executable = "HwSimPostAnalysis_gammagamma_SSC"
+            command = ["make", "-C", directory, executable, f"CPP={self.config['cxx']}",
+                       f"CXX={self.config['cxx']}", "FASTJET_CPPFLAGS=", "FASTJET_LDFLAGS="]
+            component = "gammagamma_analysis"
+        self.call("analysis-build", command)
+        self.record_component(component, {"executable_sha256": digest(directory / executable)})
+
+    def setup(self):
+        self.runtime_check()
+        self.setup_python()
+        self.pdf_dir.mkdir(parents=True, exist_ok=True)
+        pdf_cmd = ["lhapdf", "--quiet", "--listdir", self.pdf_dir, "--pdfdir", self.pdf_dir, "--source", PDF_SOURCE]
+        if not (self.pdf_dir / "pdfsets.index").is_file():
+            self.call("pdf-index", [*pdf_cmd, "update"])
+        self.install_pdfs(pdf_cmd, self.pdf_sets)
+        for name in self.pdf_sets:
+            self.record_component("pdf:" + name, {"members": 101,
+                                  "info_sha256": digest(self.pdf_dir / name / (name + ".info"))})
+        self.setup_mg5()
+        if self.workflow == "gammagamma-ho":
+            self.setup_cuba()
+            self.setup_powheg()
+            if not (REPO / "external/ihixs/CMakeLists.txt").is_file():
+                self.call("ihixs-source", ["git", "submodule", "update", "--init", "external/ihixs"])
+            self.record_component("ihixs", {"commit": self.capture(["git", "-C", REPO / "external/ihixs", "rev-parse", "HEAD"])})
+        self.setup_analysis()
+        self.check()
+        # Capabilities grow in components.json. Keep the legacy provenance file
+        # and every previously validated pilot byte-for-byte on extension.
+        if not (self.work / "installed.json").exists():
+            save(self.work / "installed.json", {"environment": self.config,
+                 "downloads": {p.name: digest(p) for p in (self.work / "downloads").glob("*") if p.is_file()},
+                 "components": self.components()})
+        self.record_component(self.workflow, {"ready": True})
+        print(f"Setup complete for {self.workflow}. Run its 30-event pilot next.")
+
+    def install_pdfs(self, command, names=None):
+        names = PDF_SETS if names is None else names
+        missing = [name for name in names if any(not p.is_file() or not p.stat().st_size
                    for p in pdf_files(self.pdf_dir, name))]
         if missing:
             # LHAPDF otherwise skips a set found anywhere on its search path,
             # even when --pdfdir requests a different, user-owned destination.
             # Never reinstall a complete private set used by a saved run.
             self.call("pdf-install", [*command, "install", "--upgrade", *missing])
-        for name in PDF_SETS:
+        for name in names:
             if any(not p.is_file() or not p.stat().st_size for p in pdf_files(self.pdf_dir, name)):
                 raise ValueError(f"LHAPDF did not install all members of {name}; see pdf-install.log")
 
     def check(self):
         self.runtime_check()
-        required = [self.python, self.mg5 / "bin/mg5_aMC", self.cuba / "include/cuba.h",
-                    self.cuba / "lib/libcuba.a", self.powheg / "HJ/HJMiNNLO/pwhg_main",
-                    REPO / "hgammagamma/LOAnalysis/Code/HwSimPostAnalysis_gammagamma_SSC",
-                    REPO / "external/ihixs/CMakeLists.txt", self.pdf_dir / "pdfsets.index"]
-        for name in PDF_SETS:
+        required = [self.python, self.mg5 / "bin/mg5_aMC", self.pdf_dir / "pdfsets.index"]
+        if self.workflow == "gammagamma-ho":
+            required.extend([self.cuba / "include/cuba.h", self.cuba / "lib/libcuba.a",
+                             self.powheg / "HJ/HJMiNNLO/pwhg_main", REPO / "external/ihixs/CMakeLists.txt"])
+        if self.workflow == "fourlepton-lo":
+            required.append(REPO / "hfourlepton/LOAnalysis/Code/HwSimPostAnalysis_fourlepton")
+        else:
+            required.append(REPO / "hgammagamma/LOAnalysis/Code/HwSimPostAnalysis_gammagamma_SSC")
+        if self.workflow == "gammagamma-lo":
+            required.append(self.mg5 / "models/loop_sm_haa/parameters.py")
+            for name, expected in self.components().get("lo_model", {}).items():
+                path = self.mg5 / "models/loop_sm_haa" / name
+                if not path.is_file() or digest(path) != expected:
+                    raise ValueError(f"installed LO model changed: {path}; preserve existing runs and use a new --work-dir")
+        for name in self.pdf_sets:
             required.extend(pdf_files(self.pdf_dir, name))
         missing = [str(p) for p in required if not p.is_file() or not p.stat().st_size]
         if missing:
-            raise ValueError("setup is incomplete; run setup first. Missing:\n" + "\n".join(missing[:12]))
-        self.call("check-python", [self.python, "-c", "import ROOT,numpy,matplotlib,yaml,six; print('Python dependencies ready')"])
-        print("Dependency checks passed; PDFs, generators, Cuba and analysis Python are available.")
+            raise ValueError(f"setup is incomplete for {self.workflow}; run setup first. Missing:\n" + "\n".join(missing[:12]))
+        imports = "import ROOT,numpy,matplotlib,yaml,six"
+        if self.with_ml:
+            imports += ",xgboost,sklearn,tqdm"
+        self.call("check-python", [self.python, "-c", imports + "; print('Python dependencies ready')"])
+        print(f"Dependency checks passed for {self.workflow}.")
+
+    def preflight_inputs(self):
+        """Reject supplied inputs before builds or an expensive ihixs calculation."""
+        args = self.args
+        record = args.signal_normalization
+        validated = None
+        if record:
+            if not record.is_file():
+                raise ValueError(f"supplied normalization is missing: {record}")
+            validated = norm.load_record(record)
+        if args.signal_lhe:
+            if not args.signal_lhe.is_file():
+                raise ValueError(f"supplied signal LHE is missing: {args.signal_lhe}")
+            options = SimpleNamespace(nevents=args.nevents, ebeam=20000.,
+                      expected_higgs_mass=validated["higgs_mass_gev"] if validated else 125.,
+                      expected_native_parameters=validated.get("native_parameters", {}) if validated else {})
+            ho_campaign.inspect_lhe(args.signal_lhe, ho_campaign.SAMPLES[0], options)
+            ho_campaign.shower_completion.source_weight_summary(args.signal_lhe, args.nevents)
 
     def run(self):
+        self.preflight_inputs()
         self.check()
         args = self.args
         if args.nevents > 30:
@@ -445,7 +589,9 @@ class Pipeline:
                   "--no-density", "--normalization", "event_xsec", "--luminosity-fb", args.luminosity_fb])
         artifacts = completed_artifacts(directory, report)
         if args.nevents <= 30:
-            save(self.work / "pilot-complete.json", {"environment": self.config, "artifacts": artifacts})
+            save(self.work / "pilot-complete.json", {"environment": self.config,
+                 "artifacts": {name: value for name, value in artifacts.items()
+                               if name != str(report / "index.html")}})
         print(f"Pipeline complete: {report / 'index.html'}")
 
 

@@ -1,13 +1,4 @@
-# Python packages for the repo-root gamma-gamma analysis CLI.
-#
-# PyROOT is also required and is normally provided by the local ROOT install,
-# not by pip.
-PyYAML
-numpy
-matplotlib
-
-# Optional, only needed for LO or HO XGBoost analyses:
-#   python3 analyze_lo_varfiles.py xgboost --config <config.yaml>
-xgboost
-scikit-learn
-tqdm
+# Basic plotting and cuts. PyROOT comes from the Herwig/ROOT runtime.
+PyYAML>=6,<7
+numpy>=1.23,<3
+matplotlib>=3.6,<4

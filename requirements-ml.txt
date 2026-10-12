@@ -1,0 +1,5 @@
+# Optional classifier tools: python3 run_pipeline.py setup --workflow WORKFLOW --with-ml
+-r requirements-analysis.txt
+xgboost>=1.7,<4
+scikit-learn>=1.2,<2
+tqdm>=4.64,<5

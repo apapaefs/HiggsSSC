@@ -712,6 +712,7 @@ def write_html_report(metadata: dict[str, Any], rows: Sequence[dict[str, Any]], 
     <div>Detector response: {html.escape(str(metadata.get('detector_response', 'unspecified')))}</div>
     <div>Luminosity: {metadata['luminosity_fb']:.6g} fb<sup>-1</sup></div>
   </div>
+  <p>{html.escape(str(metadata.get('evaluation_scope', '')))}</p>
   <p><a href="summary.csv">Download CSV</a> | <a href="summary.json">Download JSON</a></p>
   <h2>Selection</h2>
   <ul>{cuts_html}</ul>
@@ -826,18 +827,31 @@ def build_terminal_summary(
     ]
     for asset in assets:
         lines.append(f"    {asset}")
+    if metadata.get("evaluation_scope"):
+        lines.append(f"  {metadata['evaluation_scope']}")
     return "\n".join(lines)
 
 
 def load_analysis_inputs(
     config_path: Path,
     run_tag_override: str | None = None,
+    *,
+    analysis_root_override: Path | None = None,
+    output_dir_override: Path | None = None,
+    luminosity_fb_override: float | None = None,
 ) -> tuple[dict[str, Any], Path, str, str, float, list[SampleInfo], Path]:
     config = load_config(config_path)
     analysis = config["analysis"]
+    for key, value in (("analysis_root", analysis_root_override),
+                       ("output_dir", output_dir_override),
+                       ("luminosity_fb", luminosity_fb_override)):
+        if value is not None:
+            analysis[key] = value
     name = str(analysis.get("name", "analysis"))
     run_tag = resolve_run_tag(analysis, run_tag_override)
     luminosity_fb = float(analysis.get("luminosity_fb", DEFAULT_LUMINOSITY_FB))
+    if not math.isfinite(luminosity_fb) or luminosity_fb <= 0:
+        raise ValueError("luminosity_fb must be finite and positive")
     analysis_root = Path(analysis.get("analysis_root", DEFAULT_ANALYSIS_ROOT)).expanduser()
     rate_factors = parse_rate_factors(analysis.get("rate_factors"))
     samples = discover_samples(analysis_root, run_tag, requested_samples(analysis.get("samples")), rate_factors)
@@ -850,8 +864,12 @@ def load_analysis_inputs(
     return analysis, analysis_root, name, run_tag, luminosity_fb, samples, output_dir
 
 
-def run_cuts(config_path: Path, run_tag_override: str | None = None, progress_enabled: bool = True) -> AnalysisRunResult:
-    analysis, _, name, run_tag, luminosity_fb, samples, output_dir = load_analysis_inputs(config_path, run_tag_override)
+def run_cuts(config_path: Path, run_tag_override: str | None = None, progress_enabled: bool = True,
+             *, analysis_root_override: Path | None = None, output_dir_override: Path | None = None,
+             luminosity_fb_override: float | None = None) -> AnalysisRunResult:
+    analysis, _, name, run_tag, luminosity_fb, samples, output_dir = load_analysis_inputs(
+        config_path, run_tag_override, analysis_root_override=analysis_root_override,
+        output_dir_override=output_dir_override, luminosity_fb_override=luminosity_fb_override)
     cuts = [Cut.from_mapping(item) for item in analysis.get("cuts", [])]
     max_events = analysis.get("max_events")
     if max_events is not None and any(sample.requires_full_sample for sample in samples):
@@ -881,8 +899,12 @@ def run_cuts(config_path: Path, run_tag_override: str | None = None, progress_en
     return AnalysisRunResult(index_html=index, output_dir=output_dir, metadata=metadata, rows=rows, assets=[])
 
 
-def run_xgboost(config_path: Path, run_tag_override: str | None = None, progress_enabled: bool = True) -> AnalysisRunResult:
-    analysis, _, name, run_tag, luminosity_fb, samples, output_dir = load_analysis_inputs(config_path, run_tag_override)
+def run_xgboost(config_path: Path, run_tag_override: str | None = None, progress_enabled: bool = True,
+                *, analysis_root_override: Path | None = None, output_dir_override: Path | None = None,
+                luminosity_fb_override: float | None = None) -> AnalysisRunResult:
+    analysis, _, name, run_tag, luminosity_fb, samples, output_dir = load_analysis_inputs(
+        config_path, run_tag_override, analysis_root_override=analysis_root_override,
+        output_dir_override=output_dir_override, luminosity_fb_override=luminosity_fb_override)
     if any(sample.requires_full_sample for sample in samples):
         return run_ho_xgboost(analysis, name, run_tag, luminosity_fb, samples, output_dir,
                               progress_enabled=progress_enabled)
@@ -947,6 +969,7 @@ def run_xgboost(config_path: Path, run_tag_override: str | None = None, progress
         metadata = {
             "name": name,
             "mode": "xgboost",
+            "evaluation_scope": "exploratory LO classifier; threshold selection and yields are not an independent discovery test",
             "run_tag": run_tag,
             "luminosity_fb": luminosity_fb,
             "detector_response": analysis["_resolved_detector_response"],
@@ -1034,6 +1057,9 @@ def build_parser() -> argparse.ArgumentParser:
         subparser = subparsers.add_parser(command)
         subparser.add_argument("--config", type=Path, required=True)
         subparser.add_argument("--run-tag", help="Override analysis.run_tag from the YAML card.")
+        subparser.add_argument("--analysis-root", type=Path, help="Override analysis.analysis_root from the YAML card.")
+        subparser.add_argument("--output-dir", type=Path, help="Override analysis.output_dir from the YAML card.")
+        subparser.add_argument("--luminosity-fb", type=float, help="Override analysis.luminosity_fb from the YAML card.")
         subparser.add_argument("--no-progress", action="store_true", help="Disable terminal progress bars.")
     return parser
 
@@ -1041,9 +1067,13 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "cuts":
-        result = run_cuts(args.config, run_tag_override=args.run_tag, progress_enabled=not args.no_progress)
+        result = run_cuts(args.config, run_tag_override=args.run_tag, progress_enabled=not args.no_progress,
+                          analysis_root_override=args.analysis_root, output_dir_override=args.output_dir,
+                          luminosity_fb_override=args.luminosity_fb)
     elif args.command == "xgboost":
-        result = run_xgboost(args.config, run_tag_override=args.run_tag, progress_enabled=not args.no_progress)
+        result = run_xgboost(args.config, run_tag_override=args.run_tag, progress_enabled=not args.no_progress,
+                             analysis_root_override=args.analysis_root, output_dir_override=args.output_dir,
+                             luminosity_fb_override=args.luminosity_fb)
     else:  # pragma: no cover - argparse prevents this.
         raise RuntimeError(f"unknown command {args.command}")
     print(build_terminal_summary(result.metadata, result.rows, result.output_dir, result.assets))

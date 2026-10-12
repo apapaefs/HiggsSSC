@@ -84,7 +84,9 @@ class PipelineTests(unittest.TestCase):
                 pipeline.verify_pilot(obj.work)
 
     def test_existing_record_and_lhe_skip_expensive_upstream_stages(self):
-        with TemporaryDirectory() as tmp, mock.patch.object(pipeline.norm, "load_record"):
+        with TemporaryDirectory() as tmp, mock.patch.object(pipeline.norm, "load_record"), \
+                mock.patch.object(pipeline.ho_campaign, "inspect_lhe") as inspect, \
+                mock.patch.object(pipeline.ho_campaign.shower_completion, "source_weight_summary") as weights:
             root = Path(tmp)
             record, lhe = root / "rate.json", root / "events.lhe"
             record.write_text("SYNTHETIC record")
@@ -95,6 +97,28 @@ class PipelineTests(unittest.TestCase):
                 self.assertEqual([label for label, _ in calls], ["ho_pilot_01-campaign", "ho_pilot_01-report"])
                 campaign = calls[0][1]
                 self.assertEqual(campaign[campaign.index("--signal-lhe") + 1], str(lhe.resolve()))
+                inspect.assert_called_once()
+                weights.assert_called_once_with(lhe.resolve(), 30)
+
+    def test_supplied_missing_lhe_prevents_ihixs_and_dependency_work(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            obj, calls = self.fixture(root, "--signal-lhe", str(root / "missing.lhe"))
+            with self.assertRaisesRegex(ValueError, "supplied signal LHE is missing"):
+                obj.run()
+            obj.check.assert_not_called()
+            self.assertEqual(calls, [])
+
+    def test_supplied_invalid_lhe_prevents_ihixs_and_dependency_work(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            lhe = root / "incomplete.lhe"
+            lhe.write_text("<LesHouchesEvents>")
+            obj, calls = self.fixture(root, "--signal-lhe", str(lhe))
+            with self.assertRaisesRegex(ValueError, "empty or incomplete LHE"):
+                obj.run()
+            obj.check.assert_not_called()
+            self.assertEqual(calls, [])
 
     def test_invalid_record_prevents_generation(self):
         with TemporaryDirectory() as tmp:
@@ -215,6 +239,163 @@ class PipelineTests(unittest.TestCase):
             obj.call.reset_mock()
             obj.install_pdfs(["lhapdf", "--pdfdir", obj.pdf_dir])
             obj.call.assert_not_called()
+
+    def test_lo_setup_then_ho_extension_preserves_installation_and_pilot(self):
+        with TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()):
+            root = Path(tmp)
+            obj, _ = self.fixture(root)
+            obj.args.workflow = "gammagamma-lo"
+            obj.pdf_dir = obj.work / "pdfs"
+            obj.runtime_check = mock.Mock()
+            for name in ("setup_python", "setup_mg5", "setup_cuba", "setup_powheg", "setup_analysis"):
+                setattr(obj, name, mock.Mock())
+            def fake_pdfs(_command, names):
+                for name in names:
+                    info = obj.pdf_dir / name / (name + ".info")
+                    info.parent.mkdir(parents=True, exist_ok=True)
+                    info.write_text("synthetic PDF info")
+            obj.install_pdfs = mock.Mock(side_effect=fake_pdfs)
+            obj.call = mock.Mock()
+            obj.capture = mock.Mock(return_value="synthetic ihixs commit")
+            pipeline.save(obj.work / "pilot-complete.json", {"legacy": "untouched"})
+            pilot_before = (obj.work / "pilot-complete.json").read_bytes()
+            obj.setup()
+            obj.install_pdfs.assert_called_with(mock.ANY, pipeline.LO_PDF_SETS)
+            obj.setup_cuba.assert_not_called()
+            obj.setup_powheg.assert_not_called()
+            installed_before = (obj.work / "installed.json").read_bytes()
+            obj.args.workflow = "gammagamma-ho"
+            obj.setup()
+            obj.install_pdfs.assert_called_with(mock.ANY, pipeline.PDF_SETS)
+            obj.setup_cuba.assert_called_once()
+            obj.setup_powheg.assert_called_once()
+            self.assertEqual((obj.work / "installed.json").read_bytes(), installed_before)
+            self.assertEqual((obj.work / "pilot-complete.json").read_bytes(), pilot_before)
+            self.assertEqual(obj.components()["gammagamma-lo"], {"ready": True})
+            self.assertEqual(obj.components()["gammagamma-ho"], {"ready": True})
+
+    def test_optional_ml_is_additive_and_existing_python_packages_are_preserved(self):
+        with TemporaryDirectory() as tmp:
+            obj, _ = self.fixture(Path(tmp))
+            obj.python.write_text("synthetic installed interpreter")
+            pipeline.save(obj.work / "installed.json", {"legacy": True})
+            obj.call = mock.Mock()
+            versions = {"numpy": "1.24.4", "matplotlib": "3.8.4", "PyYAML": "6.0.2", "six": "1.17.0"}
+            def capture(command):
+                if "-c" in command:
+                    compile(command[-1], "dependency-probe", "exec")
+                    return json.dumps(versions)
+                return "numpy==1.24.4\n"
+            obj.capture = mock.Mock(side_effect=capture)
+            obj.setup_python()
+            self.assertEqual([call.args[0] for call in obj.call.call_args_list], ["check-python"])
+            obj.call.reset_mock()
+            obj.args.with_ml = True
+            obj.setup_python()
+            self.assertEqual([call.args[0] for call in obj.call.call_args_list],
+                             ["check-python", "python-ml", "check-python-ml"])
+            install = obj.call.call_args_list[1].args[1]
+            self.assertEqual(install[-2:], ["--requirement", pipeline.REPO / "requirements-ml.txt"])
+            constraints = Path(install[install.index("--constraint") + 1])
+            self.assertEqual(constraints.read_text(), "".join(f"{name}=={version}\n" for name, version in versions.items()))
+            obj.call.reset_mock()
+            obj.setup_python()
+            self.assertEqual([call.args[0] for call in obj.call.call_args_list],
+                             ["check-python", "check-python-ml"])
+
+    def test_incompatible_optional_ml_keeps_core_and_does_not_record_success(self):
+        with TemporaryDirectory() as tmp:
+            obj, _ = self.fixture(Path(tmp))
+            obj.python.write_text("synthetic installed interpreter")
+            obj.args.with_ml = True
+            obj.record_component("python_core", {"packages": "saved validated core"})
+            obj.capture = mock.Mock(return_value=json.dumps({name: "1.0" for name in pipeline.CORE_PACKAGES}))
+            def install(label, command):
+                if label == "python-ml":
+                    self.assertIn("--constraint", command)
+                    raise RuntimeError("dependencies cannot be resolved with pinned core versions")
+            obj.call = mock.Mock(side_effect=install)
+            with self.assertRaisesRegex(RuntimeError, "pinned core"):
+                obj.setup_python()
+            self.assertNotIn("python_ml", obj.components())
+            self.assertEqual(obj.components()["python_core"], {"packages": "saved validated core"})
+
+    def test_lo_model_copies_only_tracked_source_and_rejects_changed_installation(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            obj, _ = self.fixture(root)
+            source = root / "MG5_aMC_v3_5_15/models/loop_sm_haa"
+            source.mkdir(parents=True)
+            for name in ("parameters.py", "restrict_default.dat", "py3_model.pkl", "untracked.py"):
+                (source / name).write_text("synthetic model source")
+            tracked = [source / name for name in ("parameters.py", "restrict_default.dat", "py3_model.pkl")]
+            obj.capture = mock.Mock(return_value="\n".join(str(path.relative_to(root)) for path in tracked))
+            with mock.patch.object(pipeline, "REPO", root):
+                obj.install_lo_model()
+                target = obj.mg5 / "models/loop_sm_haa"
+                self.assertEqual({path.name for path in target.iterdir()}, {"parameters.py", "restrict_default.dat"})
+                obj.install_lo_model()
+                (target / "parameters.py").write_text("different saved model")
+                with self.assertRaisesRegex(ValueError, "installed LO model differs"):
+                    obj.install_lo_model()
+                self.assertEqual((target / "parameters.py").read_text(), "different saved model")
+
+    def test_fourlepton_build_selects_its_own_analyzer(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            obj, _ = self.fixture(root)
+            obj.args.workflow = "fourlepton-lo"
+            target = root / "hfourlepton/LOAnalysis/Code/HwSimPostAnalysis_fourlepton"
+            target.parent.mkdir(parents=True)
+            target.write_text("synthetic analyzer")
+            obj.call = mock.Mock()
+            with mock.patch.object(pipeline, "REPO", root):
+                obj.setup_analysis()
+            self.assertIn("HwSimPostAnalysis_fourlepton", obj.call.call_args.args[1])
+            self.assertIn("fourlepton_analysis", obj.components())
+            self.assertEqual(obj.pdf_sets, pipeline.LO_PDF_SETS)
+
+    def test_lo_dependency_check_does_not_require_ho_installation(self):
+        with TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()):
+            root = Path(tmp)
+            obj, _ = self.fixture(root)
+            del obj.check
+            obj.args.workflow = "gammagamma-lo"
+            obj.pdf_dir = obj.work / "pdfs"
+            paths = [obj.python, obj.mg5 / "bin/mg5_aMC",
+                     obj.mg5 / "models/loop_sm_haa/parameters.py", obj.pdf_dir / "pdfsets.index",
+                     root / "hgammagamma/LOAnalysis/Code/HwSimPostAnalysis_gammagamma_SSC"]
+            paths.extend(pipeline.pdf_files(obj.pdf_dir, pipeline.LO_PDF_SETS[0]))
+            for path in paths:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("synthetic dependency")
+            obj.runtime_check = mock.Mock()
+            obj.call = mock.Mock()
+            with mock.patch.object(pipeline, "REPO", root):
+                obj.check()
+                obj.args.workflow = "gammagamma-ho"
+                with self.assertRaisesRegex(ValueError, "setup is incomplete for gammagamma-ho"):
+                    obj.check()
+
+    def test_activated_private_interpreter_is_first_for_child_launchers(self):
+        with TemporaryDirectory() as tmp:
+            args = pipeline.parse_args(["setup", "--work-dir", str(Path(tmp) / "work")])
+            config = pipeline.configuration(args)
+            with mock.patch.object(pipeline, "activated_environment", return_value={"PATH": "/shared/bin"}), \
+                    mock.patch.object(pipeline.Pipeline, "capture", return_value="/shared"):
+                obj = pipeline.Pipeline(args, config)
+            self.assertEqual(obj.env["PATH"].split(":")[0], str(obj.python.parent))
+            self.assertEqual(obj.env["PYTHONNOUSERSITE"], "1")
+
+    def test_new_pilot_evidence_excludes_report_presentation(self):
+        with TemporaryDirectory() as tmp, mock.patch.object(pipeline.norm, "load_record"):
+            root = Path(tmp)
+            with self.ho_fixture(root), contextlib.redirect_stdout(io.StringIO()):
+                obj, _ = self.fixture(root)
+                obj.run()
+                report = pipeline.HO / "plots/ho_pilot_01/index.html"
+                report.write_text("Updated report presentation")
+                pipeline.verify_pilot(obj.work)
 
     def test_tag_archive_uses_release_packaging_and_keeps_development_utility(self):
         with TemporaryDirectory() as tmp:

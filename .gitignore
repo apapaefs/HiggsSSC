@@ -7,6 +7,8 @@
 /py.py
 
 # Generated LO gamma-gamma campaign outputs.
+/inputs/pipeline/
+/hgammagamma/LOAnalysis/runs/
 /hgammagamma/LOAnalysis/Signal/events/
 /hgammagamma/LOAnalysis/Backgrounds/events/
 /hgammagamma/LOAnalysis/plots/
