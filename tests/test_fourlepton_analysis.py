@@ -13,8 +13,6 @@ import ROOT
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CODE_DIR = REPO_ROOT / "hfourlepton" / "LOAnalysis" / "Code"
-ANALYZER = CODE_DIR / "HwSimPostAnalysis_fourlepton"
-FIXTURE = CODE_DIR / "make_synthetic_hw_sim_fourlepton"
 
 
 def tree_rows(path: Path, tree_name: str, branches: tuple[str, ...]) -> list[dict]:
@@ -50,10 +48,16 @@ class FourLeptonAnalyzerIntegrationTest(unittest.TestCase):
             raise unittest.SkipTest("ROOT development tools are unavailable")
         cls._temporary = tempfile.TemporaryDirectory()
         cls.work = Path(cls._temporary.name)
+        cls.build = cls.work / "code"
+        cls.build.mkdir()
+        for name in ("Makefile", "HwSimPostAnalysis_fourlepton.cc", "make_synthetic_hw_sim_fourlepton.cc"):
+            shutil.copy2(CODE_DIR / name, cls.build / name)
+        cls.analyzer = cls.build / "HwSimPostAnalysis_fourlepton"
+        cls.fixture = cls.build / "make_synthetic_hw_sim_fourlepton"
         build_environment = dict(os.environ)
         build_environment["CXX"] = "/definitely/missing/herwig-exported-cxx -std=c++14"
         subprocess.run(
-            ["make", "-C", str(CODE_DIR), "clean", "all", "fixture"],
+            ["make", "-C", str(cls.build), "all", "fixture"],
             check=True,
             capture_output=True,
             text=True,
@@ -62,23 +66,17 @@ class FourLeptonAnalyzerIntegrationTest(unittest.TestCase):
         cls.full_input = cls.work / "synthetic-full.root"
         cls.minimal_input = cls.work / "synthetic-minimal.root"
         cls.unnamed_weights_input = cls.work / "synthetic-unnamed-weights.root"
-        subprocess.run([str(FIXTURE), str(cls.full_input)], check=True)
+        subprocess.run([str(cls.fixture), str(cls.full_input)], check=True)
         subprocess.run(
-            [str(FIXTURE), str(cls.minimal_input), "minimal"], check=True
+            [str(cls.fixture), str(cls.minimal_input), "minimal"], check=True
         )
         subprocess.run(
-            [str(FIXTURE), str(cls.unnamed_weights_input), "unnamed-weights"],
+            [str(cls.fixture), str(cls.unnamed_weights_input), "unnamed-weights"],
             check=True,
         )
 
     @classmethod
     def tearDownClass(cls) -> None:
-        subprocess.run(
-            ["make", "-C", str(CODE_DIR), "clean"],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
         cls._temporary.cleanup()
 
     def run_analyzer(
@@ -92,7 +90,7 @@ class FourLeptonAnalyzerIntegrationTest(unittest.TestCase):
         extra_args: tuple[str, ...] = (),
     ) -> Path:
         command = [
-            str(ANALYZER),
+            str(self.analyzer),
             str(input_path),
             "--response-profile",
             profile,
@@ -254,7 +252,7 @@ class FourLeptonAnalyzerIntegrationTest(unittest.TestCase):
     def test_invalid_profile_is_rejected(self) -> None:
         result = subprocess.run(
             [
-                str(ANALYZER),
+                str(self.analyzer),
                 str(self.minimal_input),
                 "--response-profile",
                 "not-a-profile",
@@ -338,7 +336,7 @@ class FourLeptonAnalyzerIntegrationTest(unittest.TestCase):
         names_file.write_text("only_one_name\n")
         result = subprocess.run(
             [
-                str(ANALYZER),
+                str(self.analyzer),
                 str(self.unnamed_weights_input),
                 "--response-profile",
                 "perfect",
@@ -409,7 +407,7 @@ class FourLeptonAnalyzerIntegrationTest(unittest.TestCase):
 
         result = subprocess.run(
             [
-                str(ANALYZER),
+                str(self.analyzer),
                 str(overflow_input),
                 "--response-profile",
                 "perfect",
@@ -435,7 +433,7 @@ class FourLeptonAnalyzerIntegrationTest(unittest.TestCase):
         tree.Write()
         root_file.Close()
         result = subprocess.run(
-            [str(ANALYZER), str(malformed)],
+            [str(self.analyzer), str(malformed)],
             capture_output=True,
             text=True,
         )
