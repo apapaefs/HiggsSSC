@@ -6,11 +6,13 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import datetime as dt
+import filecmp
 import os
 import platform
 import re
 import shlex
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Iterable
@@ -30,6 +32,7 @@ SEED_LHE_MANIFEST_NAME = "powheg-lhe-seed-files.txt"
 SUMMARY_NAME = "powheg-run-summary.txt"
 RESUME_BACKUP_DIR_NAME = "resume-backups"
 LHE_EVENT_START_RE = re.compile(r"^\s*<event\b", re.IGNORECASE)
+LHE_EVENT_END_RE = re.compile(r"^\s*</event\s*>", re.IGNORECASE)
 LHE_CLOSE_RE = re.compile(r"^\s*</LesHouchesEvents\s*>", re.IGNORECASE)
 LHE_SEED_RE = re.compile(r"^pwgevents-(?P<seed>\d+)\.lhe$")
 RUN_LOG_RE = re.compile(r"^run-(?P<label>.+)-(?P<seed>\d+)\.log$")
@@ -705,31 +708,54 @@ def merge_lhe_files(lhe_files: list[Path], output: Path, dry_run: bool) -> int:
 
     event_count = 0
     output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open("w") as out:
-        wrote_header = False
-        for source in lhe_files:
-            in_events = False
-            saw_event = False
-            with source.open(errors="replace") as handle:
-                for line in handle:
-                    if LHE_CLOSE_RE.match(line):
-                        break
-                    if not in_events:
+    with tempfile.NamedTemporaryFile(mode="w", dir=output.parent,
+                                     prefix=f".{output.name}.merge-", suffix=".partial", delete=False) as out:
+        attempt = Path(out.name)
+        try:
+            wrote_header = False
+            for source in lhe_files:
+                in_events = event_open = saw_close = False
+                with source.open(errors="replace") as handle:
+                    for line in handle:
+                        if LHE_CLOSE_RE.match(line):
+                            saw_close = True
+                            break
                         if LHE_EVENT_START_RE.match(line):
-                            in_events = True
-                            saw_event = True
+                            if event_open:
+                                raise SystemExit(f"nested/incomplete <event> block in {source}")
+                            in_events = event_open = True
                             event_count += 1
+                        elif LHE_EVENT_END_RE.match(line):
+                            if not event_open:
+                                raise SystemExit(f"unmatched </event> in {source}")
+                            event_open = False
+                        if in_events or not wrote_header:
                             out.write(line)
-                        elif not wrote_header:
-                            out.write(line)
-                        continue
-                    if LHE_EVENT_START_RE.match(line):
-                        event_count += 1
-                    out.write(line)
-            if not saw_event:
-                raise SystemExit(f"no <event> blocks found in {source}")
-            wrote_header = True
-        out.write("</LesHouchesEvents>\n")
+                if not in_events:
+                    raise SystemExit(f"no <event> blocks found in {source}")
+                if event_open or not saw_close:
+                    raise SystemExit(f"incomplete LHE file: {source}")
+                wrote_header = True
+            out.write("</LesHouchesEvents>\n")
+        except BaseException:
+            print(f"Merge failed; partial attempt retained at {attempt}", flush=True)
+            raise
+
+    try:
+        # Both paths share a filesystem. Link publishes the complete file
+        # atomically, and unlike replace/rename cannot overwrite another run.
+        os.link(attempt, output)
+    except FileExistsError:
+        if not output.is_file() or not filecmp.cmp(attempt, output, shallow=False):
+            raise SystemExit(
+                f"existing merged LHE differs: {output}; preserved it and the candidate {attempt}. "
+                "Inspect the seed inputs and use a new --run-dir/run tag for changed events."
+            )
+        print(f"+ merged LHE unchanged; keep existing {output}", flush=True)
+    except OSError:
+        print(f"Could not publish merged LHE; attempt retained at {attempt}", flush=True)
+        raise
+    attempt.unlink()
     return event_count
 
 
