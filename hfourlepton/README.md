@@ -6,61 +6,25 @@ This directory contains the LO campaign for
 pp -> H -> ZZ* -> 4e, 4mu, 2e2mu
 ```
 
-and its neutral-current and heavy-flavour backgrounds.  The same generated
-events can be analyzed with the `perfect` or `ssc` response profile.
+and its neutral-current and heavy-flavour backgrounds. The `perfect` and
+`ssc` profiles reuse generated LHE events but have separate showers/analyses.
 
-## Quick start
+## Run and inspect
 
-Inspect the complete irreducible campaign without running external programs:
+Follow the [common workflow](../README.md) with `--workflow fourlepton-lo`.
+The default pilot runs nine irreducible samples, shares stable-H production
+between its three MadSpin decay channels, analyzes both `perfect` and `ssc`
+profiles, and writes `hfourlepton/runs/TAG/report/index.html`.
 
-```bash
-python3 hfourlepton/run_four_lepton_campaign.py \
-  --sample-set irreducible \
-  --detector-response perfect \
-  --nevents 100 \
-  --run-tag smoke \
-  --dry-run
-```
+The report runs in strict mode: audit errors yield exit status 2 even if HTML
+was written. Accelerated heavy-flavour strata remain excluded from nominal
+totals until closure is established. See [validation](../VALIDATION.md).
 
-Run it after MG5, Herwig, HwSim, ROOT, and LHAPDF are available:
-
-```bash
-python3 hfourlepton/run_four_lepton_campaign.py \
-  --sample-set irreducible \
-  --detector-response perfect \
-  --nevents 10000 \
-  --run-tag lo_4l_v1
-```
-
-Repeat with `--detector-response ssc` to apply the GEM response in the common
-post-analyzer.  Products live under `hfourlepton/runs/RUN_TAG/`, and each
-response profile has a versioned JSON manifest.
-
-`--sample-nevents NAME=N` may be repeated to override the global event count.
-`--run-samples NAME1,NAME2` restricts the selected sample set.  Stable-H signal
-production is shared by the three MadSpin decay channels rather than generated
-three times.  The aliases `signal`, `bkg_qq`, `bkg_gg`, `bkg_zbb`, and
-`bkg_ttz` select the corresponding groups.
-
-Build the combined perfect-versus-SSC report with:
-
-```bash
-python3 hfourlepton/make_fourlepton_report.py \
-  hfourlepton/runs/lo_4l_v1/manifest_perfect.json \
-  hfourlepton/runs/lo_4l_v1/manifest_ssc.json \
-  --output-dir hfourlepton/runs/lo_4l_v1/report \
-  --luminosity-fb 100 \
-  --signal-region 120 130 \
-  --mass-range 70 200 \
-  --mass-bin-width 5 \
-  --strict
-```
-
-`--strict` still writes the report but exits with status 2 when an audit error
-is present.  Semileptonically biased samples are displayed but excluded from
-combined totals until closure is established; `--allow-unvalidated-bias`
-provides an explicit diagnostic override.  Other useful options are
-`--closure-tolerance EPS` and `--title TEXT`.
+The direct [`run_four_lepton_campaign.py`](run_four_lepton_campaign.py)
+retains `--sample-nevents NAME=N`, `--run-samples NAME1,NAME2` and group aliases
+`signal`, `bkg_qq`, `bkg_gg`, `bkg_zbb`, `bkg_ttz` for advanced campaigns.
+Use its `--help` and a new run tag for changed configurations. Direct report
+calls accept both response manifests; `--strict` enables the same audit guard.
 
 ## External LHE and future NLO input
 
@@ -114,6 +78,15 @@ Default channel fractions were integrated
 with MG5_aMC 3.5.15 using direct SM `1 -> 4` matrix elements at
 `mH=125.09 GeV`; they are stored with their provenance in every manifest and
 can be overridden with `--signal-channel-fractions`.
+
+## Optional-weight provenance
+
+Stable `gg -> H` generation produced nine nonfinite sum-pT scale alternatives
+because the Born Higgs has zero transverse momentum. MadSpin dropped those
+invalid alternatives. The explicit mapping preserves all 136 finite variations
+and records the invalid alternatives with their pre-MadSpin provenance. Losing
+any finite source weight is rejected. This does not validate a complete
+scale-uncertainty ensemble.
 
 ## Reducible backgrounds and decay bias
 

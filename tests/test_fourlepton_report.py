@@ -5,12 +5,14 @@ import math
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from hfourlepton.make_fourlepton_report import (
     DEFAULT_CUT_STAGES,
     RootRecords,
     WeightStats,
     _comparison_identity,
+    _manifest_optional_weight_names,
     cutflow_stats,
     generate_report,
     grouped_weight_stats,
@@ -171,6 +173,54 @@ class FourLeptonReportHelpersTest(unittest.TestCase):
             any("despite manifest definitions" in message for message in audit["errors"])
         )
 
+    def test_manifest_optional_mapping_uses_populated_ids_in_source_order(self) -> None:
+        definitions = [
+            {"id": "1", "label": "lhe_id=1:scale up", "source_name": "scale up"},
+            {"id": "2", "label": "lhe_id=2:sum pt", "source_name": "sum pt"},
+            {"id": "45", "label": "lhe_id=45", "source_name": ""},
+        ]
+        sample = SimpleNamespace(raw={
+            "optional_weight_definitions": definitions,
+            "optional_weight_mapping": {"mapping": [definitions[2], definitions[0]],
+                                        "absent_declared_ids": ["2"]},
+        })
+        names = _manifest_optional_weight_names(sample)
+        self.assertEqual(names, ["lhe_id=45", "lhe_id=1:scale up"])
+        audit = optional_weight_audit([{
+            "source_index": 0, "optional_weight_names": names,
+            "optional_weights": [1., 1.2], "optional_selected_event_weights": [0., 0.],
+        }], expected_names=names)
+        self.assertEqual(audit["errors"], [])
+        self.assertEqual(audit["variation_count"], 2)
+        del sample.raw["optional_weight_mapping"]
+        self.assertEqual(_manifest_optional_weight_names(sample),
+                         [definition["label"] for definition in definitions])
+
+    def test_manifest_optional_mapping_rejects_corrupt_or_duplicate_entries(self) -> None:
+        row = {"id": "1", "label": "lhe_id=1:scale up", "source_name": "scale up"}
+        for recorded in (None, {}, {"mapping": "invalid"}, {"mapping": [{}]},
+                         {"mapping": [row, row]},
+                         {"mapping": [row, {**row, "id": "2", "label": "lhe_id=2"}]},
+                         {"mapping": [row, {"id": "45", "label": "lhe_id=45", "source_name": ""}]}):
+            with self.subTest(recorded=recorded):
+                with self.assertRaisesRegex(ValueError, "optional-weight mapping"):
+                    _manifest_optional_weight_names(SimpleNamespace(raw={"optional_weight_mapping": recorded}))
+
+    def test_manifest_optional_mapping_must_partition_and_match_declarations(self) -> None:
+        row = {"id": "1", "label": "lhe_id=1:scale up", "source_name": "scale up"}
+        for rows, absent in (([{**row, "id": "999"}], []),
+                             ([{**row, "label": "wrong"}], []),
+                             ([{**row, "source_name": "wrong"}], []),
+                             ([], []), ([row], ["1"]), ([], ["1", "1"])):
+            with self.subTest(rows=rows, absent=absent):
+                raw = {"optional_weight_definitions": [row],
+                       "optional_weight_mapping": {"mapping": rows, "absent_declared_ids": absent}}
+                with self.assertRaisesRegex(ValueError, "optional-weight mapping"):
+                    _manifest_optional_weight_names(SimpleNamespace(raw=raw))
+        raw = {"optional_weight_definitions": [row],
+               "optional_weight_mapping": {"mapping": [], "absent_declared_ids": ["1"]}}
+        self.assertEqual(_manifest_optional_weight_names(SimpleNamespace(raw=raw)), [])
+
     def test_profile_identity_handles_background_na_and_detects_mismatch(self) -> None:
         def sample(source_checksum: str | None) -> dict:
             return {
@@ -205,6 +255,20 @@ class FourLeptonReportHelpersTest(unittest.TestCase):
 
 
 class FourLeptonReportOutputTest(unittest.TestCase):
+    def test_empty_populated_mapping_rejects_root_variations(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            manifest = self._manifest(directory)
+            raw = json.loads(manifest.read_text())
+            raw["samples"][0]["optional_weight_definitions"] = []
+            raw["samples"][0]["optional_weight_mapping"] = {
+                "mapping": [], "absent_declared_ids": [],
+            }
+            manifest.write_text(json.dumps(raw))
+            report = generate_report([manifest], directory / "report", record_loader=self._loader)
+            self.assertTrue(any("empty populated optional-weight mapping" in error
+                                for error in report["audit"]["errors"]))
+
     def _manifest(self, directory: Path) -> Path:
         manifest = {
             "schema_version": 1,

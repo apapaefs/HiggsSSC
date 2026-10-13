@@ -13,8 +13,6 @@ import ROOT
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CODE_DIR = REPO_ROOT / "hfourlepton" / "LOAnalysis" / "Code"
-ANALYZER = CODE_DIR / "HwSimPostAnalysis_fourlepton"
-FIXTURE = CODE_DIR / "make_synthetic_hw_sim_fourlepton"
 
 
 def tree_rows(path: Path, tree_name: str, branches: tuple[str, ...]) -> list[dict]:
@@ -50,10 +48,16 @@ class FourLeptonAnalyzerIntegrationTest(unittest.TestCase):
             raise unittest.SkipTest("ROOT development tools are unavailable")
         cls._temporary = tempfile.TemporaryDirectory()
         cls.work = Path(cls._temporary.name)
+        cls.build = cls.work / "code"
+        cls.build.mkdir()
+        for name in ("Makefile", "HwSimPostAnalysis_fourlepton.cc", "make_synthetic_hw_sim_fourlepton.cc"):
+            shutil.copy2(CODE_DIR / name, cls.build / name)
+        cls.analyzer = cls.build / "HwSimPostAnalysis_fourlepton"
+        cls.fixture = cls.build / "make_synthetic_hw_sim_fourlepton"
         build_environment = dict(os.environ)
         build_environment["CXX"] = "/definitely/missing/herwig-exported-cxx -std=c++14"
         subprocess.run(
-            ["make", "-C", str(CODE_DIR), "clean", "all", "fixture"],
+            ["make", "-C", str(cls.build), "all", "fixture"],
             check=True,
             capture_output=True,
             text=True,
@@ -62,23 +66,17 @@ class FourLeptonAnalyzerIntegrationTest(unittest.TestCase):
         cls.full_input = cls.work / "synthetic-full.root"
         cls.minimal_input = cls.work / "synthetic-minimal.root"
         cls.unnamed_weights_input = cls.work / "synthetic-unnamed-weights.root"
-        subprocess.run([str(FIXTURE), str(cls.full_input)], check=True)
+        subprocess.run([str(cls.fixture), str(cls.full_input)], check=True)
         subprocess.run(
-            [str(FIXTURE), str(cls.minimal_input), "minimal"], check=True
+            [str(cls.fixture), str(cls.minimal_input), "minimal"], check=True
         )
         subprocess.run(
-            [str(FIXTURE), str(cls.unnamed_weights_input), "unnamed-weights"],
+            [str(cls.fixture), str(cls.unnamed_weights_input), "unnamed-weights"],
             check=True,
         )
 
     @classmethod
     def tearDownClass(cls) -> None:
-        subprocess.run(
-            ["make", "-C", str(CODE_DIR), "clean"],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
         cls._temporary.cleanup()
 
     def run_analyzer(
@@ -92,7 +90,7 @@ class FourLeptonAnalyzerIntegrationTest(unittest.TestCase):
         extra_args: tuple[str, ...] = (),
     ) -> Path:
         command = [
-            str(ANALYZER),
+            str(self.analyzer),
             str(input_path),
             "--response-profile",
             profile,
@@ -254,7 +252,7 @@ class FourLeptonAnalyzerIntegrationTest(unittest.TestCase):
     def test_invalid_profile_is_rejected(self) -> None:
         result = subprocess.run(
             [
-                str(ANALYZER),
+                str(self.analyzer),
                 str(self.minimal_input),
                 "--response-profile",
                 "not-a-profile",
@@ -338,7 +336,7 @@ class FourLeptonAnalyzerIntegrationTest(unittest.TestCase):
         names_file.write_text("only_one_name\n")
         result = subprocess.run(
             [
-                str(ANALYZER),
+                str(self.analyzer),
                 str(self.unnamed_weights_input),
                 "--response-profile",
                 "perfect",
@@ -355,6 +353,55 @@ class FourLeptonAnalyzerIntegrationTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("contains 1 names", result.stderr)
         self.assertIn("contains 2 weights", result.stderr)
+
+    def test_optional_weight_mapping_preserves_values_and_rejects_wrong_names(self) -> None:
+        names_file = self.work / "optional-weight-map.tsv"
+        names_file.write_text("lhe_id=2:scale_down\tscale_down\nlhe_id=1:scale_up\tscale_up\n")
+        output = self.run_analyzer(
+            self.full_input, profile="perfect", sample="mapped_weights",
+            extra_args=("--optional-weight-names-file", str(names_file)),
+        )
+        sources = tree_rows(output, "SourceEvents", ("optional_weight_names", "optional_weights"))
+        self.assertEqual(sources[0]["optional_weight_names"], ["lhe_id=2:scale_down", "lhe_id=1:scale_up"])
+        self.assertEqual(sources[0]["optional_weights"], [0.9, 1.1])
+        for source, content, message in (
+            (self.full_input, "lhe_id=2\tscale_up\nlhe_id=1\tscale_down\n", "names disagree"),
+            (self.full_input, "lhe_id=2\tscale_up\nlhe_id=1\tscale_up\n", "duplicate optional-weight"),
+            (self.unnamed_weights_input, names_file.read_text(), "requires HwSim names"),
+            (self.minimal_input, names_file.read_text(), "requires HwSim weights"),
+        ):
+            with self.subTest(message=message):
+                names_file.write_text(content)
+                result = subprocess.run(
+                    [str(self.analyzer), str(source), "--optional-weight-names-file", str(names_file),
+                     "--output-dir", str(self.work), "--sample", "bad_mapping"],
+                    capture_output=True, text=True,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(message, result.stderr)
+
+    def test_optional_weight_mapping_accepts_explicit_blank_central_name(self) -> None:
+        source = self.work / "blank-central-name.root"
+        subprocess.run([str(self.fixture), str(source), "blank-weight-name"], check=True)
+        names_file = self.work / "blank-central-map.tsv"
+        names_file.write_text("lhe_id=45\t\nlhe_id=1:scale_up\tscale_up\n")
+        output = self.run_analyzer(
+            source, profile="perfect", sample="blank_central",
+            extra_args=("--optional-weight-names-file", str(names_file)),
+        )
+        rows = tree_rows(output, "SourceEvents", ("optional_weight_names", "optional_weights"))
+        self.assertEqual(rows[0]["optional_weight_names"], ["lhe_id=45", "lhe_id=1:scale_up"])
+        self.assertEqual(rows[0]["optional_weights"], [0.9, 1.1])
+
+    def test_nonfinite_hwsim_optional_weight_is_rejected(self) -> None:
+        source = self.work / "nonfinite-optional.root"
+        subprocess.run([str(self.fixture), str(source), "nonfinite-weight"], check=True)
+        result = subprocess.run(
+            [str(self.analyzer), str(source), "--output-dir", str(self.work), "--sample", "nonfinite"],
+            capture_output=True, text=True,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("non-finite HwSim optional weight at event 0", result.stderr)
 
     def test_selected_zero_weights_are_counted(self) -> None:
         output = self.run_analyzer(
@@ -409,7 +456,7 @@ class FourLeptonAnalyzerIntegrationTest(unittest.TestCase):
 
         result = subprocess.run(
             [
-                str(ANALYZER),
+                str(self.analyzer),
                 str(overflow_input),
                 "--response-profile",
                 "perfect",
@@ -435,7 +482,7 @@ class FourLeptonAnalyzerIntegrationTest(unittest.TestCase):
         tree.Write()
         root_file.Close()
         result = subprocess.run(
-            [str(ANALYZER), str(malformed)],
+            [str(self.analyzer), str(malformed)],
             capture_output=True,
             text=True,
         )

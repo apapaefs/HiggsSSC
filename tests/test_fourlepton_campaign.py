@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import gzip
 import io
 import json
@@ -16,9 +18,45 @@ from hfourlepton import run_four_lepton_campaign as campaign
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
+def setUpModule() -> None:
+    """Card tests use a small fixture, independent of a user's MG5 install."""
+    global MG5_FIXTURE, MG5_TEMPORARY
+    MG5_TEMPORARY = TemporaryDirectory()
+    MG5_FIXTURE = Path(MG5_TEMPORARY.name)
+    (MG5_FIXTURE / "VERSION").write_text("version = 3.5.15\n")
+    model = MG5_FIXTURE / "models/sm"
+    model.mkdir(parents=True)
+    # Relevant entries from the SM restriction card; MASS 24 is deliberately
+    # absent so the runner must derive the dependent W mass.
+    (model / "restrict_default.dat").write_text("""Block SMINPUTS
+    1 1.325070e+02
+    2 1.166390e-05
+    3 1.180000e-01
+Block MASS
+    5 4.700000e+00
+    6 1.730000e+02
+   15 1.777000e+00
+   23 9.118800e+01
+   25 1.250000e+02
+DECAY 6 1.491500e+00
+DECAY 23 2.441404e+00
+DECAY 24 2.047600e+00
+DECAY 25 6.38233934e-03
+Block YUKAWA
+    5 4.700000e+00
+    6 1.730000e+02
+   15 1.777000e+00
+""")
+
+
+def tearDownModule() -> None:
+    MG5_TEMPORARY.cleanup()
+
+
 def config(*extra: str) -> campaign.Config:
     with patch.dict("os.environ", {}, clear=True):
-        return campaign.parse_config(["--dry-run", "--no-herwig-module", *extra])
+        return campaign.parse_config(["--dry-run", "--no-herwig-module",
+                                      "--mg5-dir", str(MG5_FIXTURE), *extra])
 
 
 def lhe_text(cross_sections: list[float], weights: list[float] | None = None) -> str:
@@ -644,6 +682,36 @@ DECAY 25 4.070000000e-03
 
 
 class FourLeptonNormalizationTests(unittest.TestCase):
+    def test_optional_weight_mapping_uses_populated_ids_and_lexical_source_names(self) -> None:
+        definitions = [
+            {"id": "1", "label": "lhe_id=1:scale_up", "description": "scale_up"},
+            {"id": "2", "label": "lhe_id=2:unavailable", "description": "unavailable"},
+            {"id": "3", "label": "lhe_id=3", "description": ""},
+        ]
+        event = '<event>\n1 1 1 1 1 1\n<rwgt><wgt id="1">1.1</wgt><wgt id="3">1</wgt></rwgt>\n</event>\n'
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "weights.lhe"
+            path.write_text(event * 2)
+            result = campaign.lhe_optional_weight_mapping(path, definitions)
+            self.assertEqual([item["id"] for item in result["mapping"]], ["3", "1"])
+            self.assertEqual(result["absent_declared_ids"], ["2"])
+            self.assertEqual(result["validated_events"], 2)
+            for invalid, message in (
+                (event + event.replace('id="3"', 'id="2"'), "IDs change"),
+                (event.replace('id="3"', 'id="999"'), "undeclared or duplicate"),
+                (event.replace('id="3"', 'id="1"'), "undeclared or duplicate"),
+                (event.replace('>1.1<', '>inf<'), "non-finite"),
+                (event.replace('</wgt>', '', 1), "malformed|invalid"),
+            ):
+                with self.subTest(message=message):
+                    path.write_text(invalid)
+                    with self.assertRaisesRegex(ValueError, message):
+                        campaign.lhe_optional_weight_mapping(path, definitions)
+            path.write_text(event)
+            definitions[2]["description"] = "scale_up"
+            with self.assertRaisesRegex(ValueError, "colliding descriptions"):
+                campaign.lhe_optional_weight_mapping(path, definitions)
+
     def test_lhe_optional_weight_definitions_preserve_semantic_order(self) -> None:
         text = """<LesHouchesEvents version="3.0">
 <header>
@@ -668,6 +736,7 @@ class FourLeptonNormalizationTests(unittest.TestCase):
             [definition["id"] for definition in definitions],
             ["1002", "1001"],
         )
+        self.assertEqual(definitions[0]["source_name"], "mur = 2.0   muf = 1.0")
         self.assertEqual(
             [definition["label"] for definition in definitions],
             [
@@ -675,6 +744,31 @@ class FourLeptonNormalizationTests(unittest.TestCase):
                 "lhe_id=1001:mur = 0.5 muf = 1.0",
             ],
         )
+
+    def test_madspin_boundary_preserves_finite_weights_and_records_invalid_source(self) -> None:
+        header = ('<LesHouchesEvents><header><initrwgt><weightgroup>'
+                  '<weight id="1">scale_up</weight><weight id="2">sum pt</weight>'
+                  '</weightgroup></initrwgt></header>\n<init>\n</init>\n')
+        event = '<event>\n1 1 1 1 1 1\n<rwgt><wgt id="1">1.1</wgt><wgt id="2">+inf</wgt></rwgt>\n</event>\n'
+        with TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "source.lhe"
+            path.write_text(header + event * 2 + '</LesHouchesEvents>')
+            definitions = campaign.parse_lhe_optional_weight_definitions(path)
+            decayed = {"mapping": [definitions[0]]}
+            diagnostic = campaign.validate_optional_weight_decay_boundary(path, decayed)
+            self.assertEqual(diagnostic["absent_after_decay_ids"], ["2"])
+            self.assertEqual(diagnostic["nonfinite_source_weights"][0]["nonfinite_events"], 2)
+            self.assertEqual(diagnostic["nonfinite_source_weights"][0]["finite_events"], 0)
+            path.write_text(header + event.replace('+inf', '0.8') + '</LesHouchesEvents>')
+            with self.assertRaisesRegex(ValueError, "finite optional weights disappeared"):
+                campaign.validate_optional_weight_decay_boundary(path, decayed)
+            path.write_text(header + event + '</LesHouchesEvents>')
+            changed = {"mapping": [{**definitions[0], "source_name": "wrong"}]}
+            with self.assertRaisesRegex(ValueError, "identity changed"):
+                campaign.validate_optional_weight_decay_boundary(path, changed)
+            changed = {"mapping": [{**definitions[0], "attributes": 'id="1" MUR="2"'}]}
+            with self.assertRaisesRegex(ValueError, "identity changed"):
+                campaign.validate_optional_weight_decay_boundary(path, changed)
 
     def test_stable_higgs_validation_uses_event_records_without_banner_slha(
         self,
@@ -1233,6 +1327,55 @@ class FourLeptonManifestAndCliTests(unittest.TestCase):
         )
         self.assertIn("--no-pileup-noise", command)
         self.assertFalse(campaign.build_manifest(cfg, [sample])["detector"]["pileup_noise_enabled"])
+
+
+class PipelineRuntimeTests(unittest.TestCase):
+    def test_incomplete_export_is_preserved_without_force(self):
+        with TemporaryDirectory() as tmp:
+            with patch.object(campaign, "SCRIPT_DIR", Path(tmp)):
+                cfg = config("--run-samples", "bkg_qq_4e")
+                cfg.dry_run = False
+                sample = campaign.SAMPLES_BY_NAME["bkg_qq_4e"]
+                process = campaign.production_dir(sample, cfg) / "mg5_process"
+                process.mkdir(parents=True)
+                evidence = process / "partial.dat"
+                evidence.write_text("preserve")
+                with patch.object(campaign, "production_stage_identity", return_value={}):
+                    with patch.object(campaign, "run_runtime_command", side_effect=AssertionError("exported")):
+                        with self.assertRaisesRegex(SystemExit, "incomplete production export"):
+                            campaign.obtain_mg5_lhe(sample, [sample], cfg)
+                self.assertEqual(evidence.read_text(), "preserve")
+
+    def test_dry_run_is_dependency_free_and_nonmutating(self):
+        import io
+        with TemporaryDirectory() as tmp:
+            with patch.object(campaign, "SCRIPT_DIR", Path(tmp)):
+                with patch.object(campaign.subprocess, "run", side_effect=AssertionError("runtime invoked")):
+                    with patch("sys.stdout", new=io.StringIO()):
+                        result = campaign.main(["--dry-run", "--mg5-dir", "/missing/mg5",
+                                                "--no-herwig-env", "--no-herwig-module"])
+            self.assertEqual(result, 0)
+            self.assertEqual(list(Path(tmp).iterdir()), [])
+
+    def test_explicit_prefix_and_disabled_runtime_autodiscovery(self):
+        with TemporaryDirectory() as tmp:
+            cfg = campaign.parse_config(["--herwig-env", tmp, "--no-herwig-module"])
+            self.assertEqual(cfg.herwig_env, Path(tmp) / "bin/activate")
+            with patch.object(campaign, "guess_default_herwig_env", side_effect=AssertionError("discovered")):
+                with patch.dict("os.environ", {"HERWIG_ENV": tmp}, clear=True):
+                    cfg = campaign.parse_config(["--no-herwig-env", "--no-herwig-module"])
+            self.assertIsNone(cfg.herwig_env)
+            self.assertIsNone(cfg.herwig_module)
+            self.assertIsNone(cfg.collier_library)
+
+    def test_generated_lhe_uses_requested_tag(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for tag in ("pilot", "zzz_other"):
+                path = root / "Events" / tag / "unweighted_events.lhe"
+                path.parent.mkdir(parents=True)
+                path.write_text("events")
+            self.assertEqual(campaign.find_lhe_file(root, "pilot"), root / "Events/pilot/unweighted_events.lhe")
 
 
 if __name__ == "__main__":

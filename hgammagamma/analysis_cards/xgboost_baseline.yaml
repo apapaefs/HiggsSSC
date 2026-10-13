@@ -1,6 +1,7 @@
 analysis:
   name: xgboost_baseline
-  run_tag: run_01
+  # Exploratory LO classifier; use the pipeline to select a completed campaign.
+  samples: signal_gg_h_aa,bkg_prompt_aa,bkg_gamma_j,bkg_dy_ee
   # Require matching detector-response provenance in every campaign .dat file.
   detector_response: ssc
   luminosity_fb: 100.0

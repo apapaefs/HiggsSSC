@@ -153,7 +153,8 @@ class HOCutSummaryTests(unittest.TestCase):
                     actual = self.subject.run_xgboost(
                         Path("card.yaml"), run_tag_override="override", progress_enabled=False)
         self.assertIs(actual, result)
-        loader.assert_called_once_with(Path("card.yaml"), "override")
+        loader.assert_called_once_with(Path("card.yaml"), "override", analysis_root_override=None,
+                                       output_dir_override=None, luminosity_fb_override=None)
         ho_runner.assert_called_once_with(
             analysis, "classifier", RUN_TAG, 10., samples, Path("out"), progress_enabled=False)
 

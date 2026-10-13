@@ -1,83 +1,19 @@
 # SSC/GEM Detector Response For The Gamma-Gamma Analysis
 
 This document is the implementation and operating reference for the optional
-SSC/GEM detector response in the leading-order `H -> gamma gamma` workflow.
+SSC/GEM detector response in the LO and HO `H -> gamma gamma` workflows.
 The historical inputs and their broader physics context are summarized in
 [`SSCInfo.md`](../SSCInfo.md). The executable implementation is
 [`LOAnalysis/Code/HwSimPostAnalysis_gammagamma_SSC.cc`](LOAnalysis/Code/HwSimPostAnalysis_gammagamma_SSC.cc).
 
-## Quick Start And Option Semantics
+## Use and scope
 
-The campaign has two detector-response choices:
-
-```bash
-# Recommended physics workflow: GEM smearing, efficiencies, and photon fakes.
-python3 hgammagamma/run_gammagamma_campaign.py \
-  --detector-response ssc \
-  --run-tag run_02_ssc
-
-# Original unsmeared HwSim photon analysis, for genuine-photon samples only.
-python3 hgammagamma/run_gammagamma_campaign.py \
-  --detector-response none \
-  --run-samples signal_gg_h_aa,bkg_prompt_aa \
-  --run-tag run_02_legacy
-```
-
-`ssc` is the default and can also be selected with
-`DETECTOR_RESPONSE=ssc`. It runs `HwSimPostAnalysis_gammagamma_SSC`.
-`none` runs the original `HwSimPostAnalysis_gammagamma` executable.
-
-Important: `none` is a legacy baseline, not an otherwise identical SSC
-analysis with only the Gaussian randomization disabled. The legacy executable
-uses `pT > 10 GeV` and `|eta| < 6`, with no GEM transition veto, isolation, or
-efficiency weights. The SSC executable uses the selection documented below.
-Consequently, an `ssc` versus `none` comparison changes acceptance and object
-selection as well as detector response. Use separate run tags because both
-executables otherwise use the same output filename pattern.
-
-The campaign rejects `bkg_gamma_j` and `bkg_dy_ee` under `none`: the legacy
-executable has no jet-to-photon or electron-to-photon transfer model. It is
-better to stop than to produce physically misleading zero-fake samples.
-
-The cut and XGBoost analysis cards support a provenance guard:
-
-```yaml
-analysis:
-  detector_response: ssc
-```
-
-The analysis then checks every campaign `.dat` file and stops if its recorded
-detector profile does not match. Use `none` in a card intended for legacy
-outputs.
-
-## Simulation Chain And Samples
-
-The automated chain is:
-
-```text
-MG5_aMC -> LHE -> Herwig shower/hadronization -> HwSim ROOT
-        -> selected post-analysis executable -> plots/cuts/XGBoost
-```
-
-The campaign defaults are 20 TeV per proton beam, NNPDF40 LO through LHAPDF
-ID 331900 in both MG5 and Herwig, and deterministic sample seeds
-`seed_base + sample_index`. `HW-template.in` has `SavePartons Yes`, allowing
-the gamma+jet response to distinguish quark and gluon jets using the hard
-record.
-
-The default samples are:
-
-| Sample | MG5 process | Response topology |
-| --- | --- | --- |
-| `signal_gg_h_aa` | `g g > h [noborn=QCD]`, MadSpin `h > a a` | `genuine` |
-| `bkg_prompt_aa` | `p p > a a` | `genuine` |
-| `bkg_gamma_j` | `p p > a j` | `gammajet` |
-| `bkg_dy_ee` | `p p > e+ e-` | `dielectron` |
-
-The full `p p > e+ e-` sample contains on-shell Z and virtual-photon
-Drell--Yan. The tree-level `p p > a a` sample does not contain the separate
-loop-induced `g g > a a` continuum, which remains a future sample. Signal and
-continuum interference is also not included.
+The common [student workflow](../README.md) selects `ssc`; the
+[LO sample definitions](README.md) and [HO processes](HOAnalysis/README.md)
+share this response. The direct runner's `none` option invokes the legacy
+analyzer (`pT>10 GeV`, `|eta|<6`, no GEM isolation/efficiency/fakes), so it
+changes more than smearing and rejects fake-background samples.
+Analysis cards enforce matching `detector_response` provenance.
 
 ## Electromagnetic Response
 
@@ -94,7 +30,7 @@ with energies and transverse momenta in GeV. The constants are:
 
 | Region | Sampling term `a` | Constant term `b` | Thermal `ET` noise |
 | --- | ---: | ---: | ---: |
-| barrel, `|eta| < 1.01` | 0.060 | 0.004 | 0.100 GeV |
+| barrel, `\|eta\| < 1.01` | 0.060 | 0.004 | 0.100 GeV |
 | outside the barrel | 0.085 | 0.004 | 0.175 GeV |
 
 The pileup-noise term is 0.120 GeV for `|eta| < 1.4` and
@@ -130,9 +66,9 @@ uses the electromagnetic response above. No jet angular smearing is applied.
 All thresholds are applied after energy smearing, except the unchanged muon
 diagnostic objects.
 
-| Object or use | Minimum `pT` | Accepted `|eta|` | Additional condition |
+| Object or use | Minimum `pT` | Accepted `\|eta\|` | Additional condition |
 | --- | ---: | ---: | --- |
-| photon or fake-photon candidate | 20 GeV | 0.1 to 2.5 | veto `1.01 < |eta| < 1.16` |
+| photon or fake-photon candidate | 20 GeV | 0.1 to 2.5 | veto `1.01 < \|eta\| < 1.16` |
 | reconstructed jet diagnostic | 20 GeV | 0.1 to 5.5 | none |
 | jet used for photon isolation | 10 GeV | 0.1 to 5.5 | veto candidate for `DeltaR < 0.4` |
 | electron diagnostic | 10 GeV | 0.1 to 2.5 | same crack veto |
@@ -202,7 +138,7 @@ positron to photon candidates. The tracker-veto probability per electron is:
 
 | Source-pair region | Tracker-veto probability |
 | --- | ---: |
-| `|m(ee) - 91.1876 GeV| < 10 GeV` | 0.0015 |
+| `\|m(ee) - 91.1876 GeV\| < 10 GeV` | 0.0015 |
 | continuum | 0.020 |
 
 Each probability is multiplied by the independent 0.90 EM shower-ID
@@ -239,8 +175,10 @@ One source event can therefore create several ROOT rows. Counts such as
 two-candidate rows, not expected event yields. Physical yields must use the
 sum of `eventweight`. Cut mode reads the complete tree and the baseline card
 explicitly requires `n_selected_photons >= 2`. XGBoost filters to those
-two-candidate rows before training and scoring. Both workflows retain the
-complete-tree weight sum as the normalization denominator.
+two-candidate rows before training and scoring. LO retains the complete-tree
+weight sum as the normalization denominator. New HO campaigns use the signed
+consumed-source population, including discarded shower events, as documented
+in the [HO normalization reference](HOAnalysis/README.md#signed-normalization).
 
 ## Configuration Reference
 
@@ -248,7 +186,7 @@ Campaign-level controls are:
 
 | CLI | Environment | Meaning |
 | --- | --- | --- |
-| `--detector-response ssc|none` | `DETECTOR_RESPONSE` | choose SSC/GEM or legacy post-analysis |
+| `--detector-response ssc\|none` | `DETECTOR_RESPONSE` | choose SSC/GEM or legacy post-analysis |
 | `--seed-base N` | `SEED_BASE` | base seed; sample index is added |
 | `--run-samples LIST` | `RUN_SAMPLES` | select campaign samples |
 | `--run-tag TAG` | `RUN_TAG` | output/generation tag |
@@ -260,7 +198,7 @@ The SSC executable accepts the following direct controls:
 | `-t TAG` | empty | output tag |
 | `-n N`, `-nmin N`, `-nmax N` | all events | event range |
 | `-w X`, `--weight-scale X` | 1 | sample-wide event weight |
-| `--response-mode genuine|gammajet|dielectron` | `genuine` | source topology |
+| `--response-mode genuine\|gammajet\|dielectron` | `genuine` | source topology |
 | `--seed N` | 14101983 | deterministic smearing seed |
 | `--photon-id-efficiency X` | 0.90 | photon shower ID |
 | `--photon-electron-veto-efficiency X` | 0.96 | continuum track veto |
@@ -315,60 +253,10 @@ inferred as `ssc`, a metadata-free legacy file as `none`, and an unrecognized
 future analysis as `unknown`. A plot report warns if one run tag mixes detector
 profiles. Analysis cards with `detector_response` reject such a mismatch.
 
-For physical rate plots, use:
-
-```bash
-python3 hgammagamma/make_gammagamma_report.py \
-  --run-tag run_02_ssc \
-  --no-density \
-  --normalization event_xsec
-```
-
-Density plots are unit-area shapes and intentionally hide rate differences.
-
-## Validation Record
-
-The following development checks were run on 2026-07-16. They are technical
-validation of implementation and bookkeeping, not a detector-performance or
-physics validation of the phenomenological model.
-
-- Both post-analysis executables compiled against the Herwig/HwSim ROOT stack
-  on `timur.kennesaw.edu`.
-- All 40 gamma-gamma Python campaign and analysis unit tests passed locally
-  and on Timur, including response selection, provenance guards, and
-  weighted-row reading. Executable smoke checks and synthetic ROOT inputs
-  collectively cover q/g rates, electron fakes, deterministic smearing, and
-  weight closure.
-- A 50,000-event signal response test gave mean `m(gamma gamma) = 124.997 GeV`
-  and RMS `0.877 GeV` in the 121--129 GeV window. The input-weight sum was
-  50,000 and the output-tree sum agreed within floating-point precision.
-- A near-Z Drell--Yan smoke test reproduced the expected pair probability
-  `1.8225e-6` with zero reported closure difference.
-- A gamma+jet smoke test exercised hard-parton flavor assignment and its
-  geometric/fallback counters with no unknown-flavor hypotheses.
-- Separate synthetic-input executable checks exercise both quark- and
-  gluon-rate interpolation and endpoint behavior.
-
-Recommended repeatable checks after any response change are:
-
-```bash
-python3 -m unittest tests.test_gammagamma_campaign tests.test_gammagamma_analysis
-
-python3 hgammagamma/run_gammagamma_campaign.py \
-  --dry-run --nevents 10 --detector-response ssc
-
-python3 hgammagamma/run_gammagamma_campaign.py \
-  --dry-run --nevents 10 --detector-response none \
-  --run-samples signal_gg_h_aa,bkg_prompt_aa
-```
-
-On the current Timur checkout, add
-`--mg5-dir /home/apapaefs/Projects/MG5_aMC_v3_5_15` if the clone-local MG5
-directory is absent.
-
-For SSC output, require
-`abs(tree_weight_closure_difference)` to be consistent with accumulated
-floating-point roundoff relative to `sum_weight`.
+Use the common `report` command for physical rates; unit-area density plots
+hide normalization differences. Require weight closure consistent with
+floating-point roundoff relative to the input weight sum. Historical checks
+are recorded in [VALIDATION.md](../VALIDATION.md).
 
 ## Known Limitations
 
@@ -389,9 +277,9 @@ floating-point roundoff relative to `sum_weight`.
   systematic nuisance models are not implemented.
 - The input arrays are capped at 100 objects per collection. Truncation is
   counted in `.dat`.
-- The default samples are leading order. Higher-order background corrections,
-  the loop-induced prompt continuum, and signal-background interference are
-  not included by default.
+- The LO workflow has LO hard processes; the HO workflow has the orders
+  documented in its reference. Neither includes the separate loop-induced
+  prompt continuum or signal–background interference by default.
 - No standard detector-response uncertainty envelope has yet been defined;
   the fake-rate scale options are variation hooks, not a complete uncertainty
   prescription.

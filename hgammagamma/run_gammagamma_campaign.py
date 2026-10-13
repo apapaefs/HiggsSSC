@@ -8,6 +8,10 @@ or reweight samples without having to chase shell quoting.
 from __future__ import annotations
 
 import argparse
+import gzip
+import hashlib
+import json
+import math
 import os
 import platform
 import re
@@ -15,7 +19,9 @@ import shlex
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass
+import xml.etree.ElementTree as ET
+from dataclasses import asdict, dataclass
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -108,6 +114,13 @@ class Config:
     gen_dral_min: float
     gen_drjj_min: float
     gen_drll_min: float
+    output_dir: Path | None = None
+    stage: str = "all"
+    resume: bool = False
+
+    @property
+    def analysis_root(self) -> Path:
+        return self.output_dir or SCRIPT_DIR / "LOAnalysis" / "runs" / self.run_tag
 
     @property
     def template_in(self) -> Path:
@@ -220,6 +233,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--herwig", default=env_text("HERWIG", "Herwig"))
     parser.add_argument("--herwig-env", type=Path, default=maybe_path(os.environ.get("HERWIG_ENV")))
+    parser.add_argument("--no-herwig-env", action="store_true",
+                        help="use the inherited environment without discovering an activation script")
     parser.add_argument(
         "--herwig-module",
         default=os.environ.get("HERWIG_MODULE"),
@@ -237,6 +252,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--herwig-pdf", default=env_text("HERWIG_PDF", LO_PDF_NAME))
     parser.add_argument("--collier-library", type=Path, default=None)
     parser.add_argument("--run-tag", default=env_text("RUN_TAG", "run_01"))
+    parser.add_argument("--output-dir", type=Path, help="campaign root; default: LOAnalysis/runs/RUN_TAG")
+    parser.add_argument("--stage", choices=("generate", "shower", "analyze", "all"), default="all")
+    parser.add_argument("--resume", action="store_true", help="reuse completed stages after checking their outputs")
     parser.add_argument(
         "--run-samples",
         default=env_text("RUN_SAMPLES", "signal_gg_h_aa,bkg_prompt_aa,bkg_gamma_j,bkg_dy_ee"),
@@ -277,11 +295,18 @@ def parse_config(argv: Sequence[str]) -> Config:
             f"argument --detector-response: invalid choice: {args.detector_response!r} "
             f"(choose from {', '.join(DETECTOR_RESPONSES)})"
         )
-    explicit_herwig_env = args.herwig_env.expanduser() if args.herwig_env else None
+    if args.run_tag in {".", ".."} or re.fullmatch(r"[A-Za-z0-9_.-]+", args.run_tag) is None:
+        parser.error("--run-tag must be a name containing letters, digits, '.', '_' or '-'")
+    if args.nevents <= 0 or args.nb_core <= 0 or not math.isfinite(args.ebeam) or args.ebeam <= 0:
+        parser.error("event count, worker count and beam energy must be positive")
+    explicit_herwig_env = args.herwig_env.expanduser() if args.herwig_env and not args.no_herwig_env else None
     # Site modules commonly export HERWIG_ENV as an installation directory,
     # whereas this option means a sourceable activation script.
     if explicit_herwig_env is not None and explicit_herwig_env.is_dir():
-        explicit_herwig_env = None
+        if any(arg == "--herwig-env" or arg.startswith("--herwig-env=") for arg in argv):
+            explicit_herwig_env /= "bin/activate"
+        else:
+            explicit_herwig_env = None
     herwig_module = clean_optional_text(args.herwig_module)
     if herwig_module is None and explicit_herwig_env is None and not args.no_herwig_module:
         system = platform.system()
@@ -295,14 +320,14 @@ def parse_config(argv: Sequence[str]) -> Config:
     # than an activation script.  A selected module takes precedence and must
     # not also be sourced as though that prefix were a shell file.
     herwig_env = None if herwig_module is not None else explicit_herwig_env
-    if herwig_env is None and herwig_module is None:
+    if herwig_env is None and herwig_module is None and not args.no_herwig_env:
         herwig_env = guess_default_herwig_env()
 
-    collier_library = args.collier_library or guess_collier_library(herwig_env)
+    collier_library = args.collier_library or (None if args.no_herwig_env else guess_collier_library(herwig_env))
     return Config(
         nevents=args.nevents,
         ebeam=args.ebeam,
-        mg5_dir=args.mg5_dir.expanduser(),
+        mg5_dir=args.mg5_dir.expanduser().resolve(),
         mg5_python=clean_optional_text(args.mg5_python),
         herwig=args.herwig,
         herwig_env=herwig_env,
@@ -326,6 +351,9 @@ def parse_config(argv: Sequence[str]) -> Config:
         gen_dral_min=args.gen_dral_min,
         gen_drjj_min=args.gen_drjj_min,
         gen_drll_min=args.gen_drll_min,
+        output_dir=args.output_dir.expanduser().resolve() if args.output_dir else None,
+        stage=args.stage,
+        resume=args.resume,
     )
 
 
@@ -417,9 +445,11 @@ def run_runtime_command(
 
 
 def require_inputs(cfg: Config) -> None:
+    if cfg.dry_run:
+        return
     if not cfg.template_in.exists():
         die(f"missing Herwig template: {cfg.template_in}")
-    if not (cfg.mg5_dir / "bin" / "mg5_aMC").exists():
+    if cfg.stage in {"all", "generate"} and not (cfg.mg5_dir / "bin" / "mg5_aMC").exists():
         die(f"missing MG5 executable: {cfg.mg5_dir / 'bin' / 'mg5_aMC'}")
     if cfg.mg5_python and shutil.which(cfg.mg5_python) is None:
         die(f"MG5 Python executable not found on PATH: {cfg.mg5_python}")
@@ -439,6 +469,11 @@ def sample_requested(sample: Sample, cfg: Config) -> bool:
 
 
 def selected_samples(cfg: Config) -> list[tuple[int, Sample]]:
+    if cfg.run_samples != "all":
+        requested = {name.strip() for name in cfg.run_samples.split(",") if name.strip()}
+        unknown = requested - {sample.name for sample in SAMPLES}
+        if unknown:
+            die(f"unknown sample(s): {', '.join(sorted(unknown))}")
     return [
         (sample_index, sample)
         for sample_index, sample in enumerate(SAMPLES)
@@ -481,7 +516,7 @@ define l- = e- mu-
 define vl = ve vm vt
 define vl~ = ve~ vm~ vt~
 generate {sample.process}
-output {output_dir} -f
+output {output_dir}
 """
     if cfg.dry_run:
         print(f"+ write MG5 process card {card}")
@@ -875,15 +910,20 @@ def run_herwig(cwd: Path, cfg: Config, args: Sequence[object]) -> None:
     run_runtime_command([cfg.herwig, *args], cfg, cwd=cwd)
 
 
-def find_lhe_file(process_dir: Path, prefer_decayed: bool) -> Path:
-    candidates = sorted((process_dir / "Events").glob("*/unweighted_events.lhe*"))
-    if prefer_decayed:
-        for candidate in candidates:
-            if "decayed" in str(candidate):
-                return candidate
-    if candidates:
-        return candidates[-1]
-    die(f"could not locate MG5 LHE output in {process_dir}")
+def find_lhe_file(process_dir: Path, prefer_decayed: bool, run_tag: str | None = None) -> Path:
+    directories = sorted((process_dir / "Events").glob("*"))
+    if run_tag is not None:
+        directories = [path for path in directories
+                       if (re.fullmatch(re.escape(run_tag) + r"_decayed_[0-9]+", path.name)
+                           if prefer_decayed else path.name == run_tag)]
+    elif prefer_decayed:
+        directories = [path for path in directories if "_decayed_" in path.name]
+    candidates = [path for directory in directories
+                  for name in ("unweighted_events.lhe.gz", "unweighted_events.lhe")
+                  if (path := directory / name).is_file()]
+    if len(candidates) != 1:
+        die(f"expected one {'decayed ' if prefer_decayed else ''}LHE file for tag {run_tag!r} in {process_dir}; found {len(candidates)}")
+    return candidates[0]
 
 
 def write_root_input_list(herwig_events_dir: Path, root_input: Path, cfg: Config) -> None:
@@ -896,65 +936,319 @@ def write_root_input_list(herwig_events_dir: Path, root_input: Path, cfg: Config
     root_input.write_text("".join(f"{root}\n" for root in roots))
 
 
+def sample_directory(sample: Sample, cfg: Config) -> Path:
+    return cfg.analysis_root / sample.category / "events" / sample.name
+
+
+def artifact_record(path: Path) -> dict[str, object]:
+    if not path.is_file() or path.stat().st_size == 0:
+        die(f"missing or empty stage output: {path}")
+    before = path.stat()
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    after = path.stat()
+    if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+        die(f"output changed during validation: {path}")
+    return {"path": str(path.resolve()), "size": after.st_size, "sha256": digest.hexdigest()}
+
+
+def save_manifest(path: Path, manifest: dict, cfg: Config) -> None:
+    if cfg.dry_run:
+        return
+    temporary = path.with_name(path.name + f".tmp.{os.getpid()}")
+    temporary.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    temporary.replace(path)
+
+
+def configuration(sample: Sample, index: int, cfg: Config) -> dict:
+    values = asdict(cfg)
+    # Worker count and stage selection do not change the scientific sample.
+    for key in ("dry_run", "resume", "stage", "run_samples", "nb_core"):
+        values.pop(key)
+    values = {key: str(value) if isinstance(value, Path) else value for key, value in values.items()}
+    values["output_dir"] = str(cfg.analysis_root.resolve())
+    values["sample"] = asdict(sample)
+    values["seed"] = cfg.seed_base + index
+    values["herwig_template_sha256"] = hashlib.sha256(cfg.template_in.read_bytes()).hexdigest()
+    values["analysis_sources"] = {
+        path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in sorted(cfg.analysis_code_dir.iterdir())
+        if path.is_file() and path.suffix in {".cc", ".h", ".hh"}
+    }
+    return values
+
+
+def prepare_manifest(sample: Sample, index: int, cfg: Config) -> tuple[Path, dict]:
+    directory = sample_directory(sample, cfg)
+    path = directory / "campaign.json"
+    settings = configuration(sample, index, cfg)
+    if path.exists() and not cfg.dry_run:
+        try:
+            manifest = json.loads(path.read_text())
+        except (OSError, ValueError) as error:
+            die(f"cannot read {path}: {error}")
+        if manifest.get("schema_version") != 1 or manifest.get("configuration") != settings:
+            die(f"configuration changed in {directory}; use a new --run-tag/output-dir")
+        if not cfg.resume:
+            die(f"campaign already exists at {directory}; use --resume or a new --run-tag/output-dir")
+        for records in manifest.get("artifacts", {}).values():
+            for record in records:
+                if artifact_record(Path(record["path"])) != record:
+                    die(f"completed output changed: {record['path']}; preserve this run and use a new tag")
+        return path, manifest
+    if directory.exists() and any(directory.iterdir()) and not cfg.dry_run:
+        die(f"unmanaged sample directory {directory}; preserve it and use a new --run-tag/output-dir")
+    manifest = {"schema_version": 1, "sample": sample.name, "run_tag": cfg.run_tag,
+                "ebeam_gev": cfg.ebeam, "hard_accuracy": "LO", "matching": "LO",
+                "nevents_requested": cfg.nevents, "configuration": settings,
+                "completed": [], "artifacts": {}, "status": "planned"}
+    ensure_dir(directory, cfg)
+    save_manifest(path, manifest, cfg)
+    return path, manifest
+
+
+def validate_lhe(path: Path, cfg: Config) -> int:
+    """Require a complete event file for this campaign before showering it."""
+    count = 0
+    has_init = False
+    opener = gzip.open if path.suffix == ".gz" else open
+    try:
+        with opener(path, "rb") as stream:
+            for event, element in ET.iterparse(stream, events=("end",)):
+                if element.tag == "init":
+                    lines = [line.strip() for line in (element.text or "").splitlines()
+                             if line.strip() and not line.lstrip().startswith("#")]
+                    header = lines[0].split()
+                    if len(header) != 10 or header[:2] != ["2212", "2212"]:
+                        raise ValueError("unexpected LHE beams")
+                    if any(not math.isclose(float(value), cfg.ebeam, rel_tol=1.e-9)
+                           for value in header[2:4]):
+                        raise ValueError("LHE beam energy differs from the campaign")
+                    has_init = True
+                if element.tag == "event":
+                    lines = [line.strip() for line in (element.text or "").splitlines()
+                             if line.strip() and not line.lstrip().startswith("#")]
+                    header = lines[0].split()
+                    if len(header) != 6 or int(header[0]) <= 0 or len(lines) < int(header[0]) + 1:
+                        raise ValueError("incomplete LHE event")
+                    if not math.isfinite(float(header[2].replace("D", "E"))):
+                        raise ValueError("non-finite LHE weight")
+                    count += 1
+                element.clear()
+        if not has_init or count != cfg.nevents:
+            raise ValueError(f"expected {cfg.nevents} events, found {count}")
+    except (OSError, EOFError, ET.ParseError, ValueError, IndexError) as error:
+        die(f"invalid LHE {path}: {error}; preserve this run and use a new tag")
+    return count
+
+
+def run_logged(args: Sequence[object], cfg: Config, cwd: Path, logfile: Path,
+               env: dict[str, str] | None = None) -> None:
+    print(f"+ [{cwd}] {format_command(args)} > {logfile}", flush=True)
+    if cfg.dry_run:
+        return
+    shell = "\n".join([*runtime_setup_commands(cfg), format_command(args)])
+    with logfile.open("w") as stream:
+        result = subprocess.run(["bash", "-c", shell], cwd=cwd, env=clean_shell_env(env),
+                                stdout=stream, stderr=subprocess.STDOUT)
+    if result.returncode or re.search(r"interrupted with error:|Error detected in", logfile.read_text(errors="replace")):
+        die(f"stage failed (exit {result.returncode}); see {logfile}")
+
+
+ROOT_COUNT_SCRIPT = """
+import json, math, sys, ROOT
+ROOT.gROOT.SetBatch(True)
+result = []
+tree_name = sys.argv[1]
+for filename in sys.argv[2:]:
+    handle = ROOT.TFile.Open(filename, "READ")
+    if not handle or handle.IsZombie() or handle.TestBit(ROOT.TFile.kRecovered):
+        raise ValueError("invalid or unfinished ROOT file: " + filename)
+    tree = handle.Get(tree_name)
+    if not tree or not tree.InheritsFrom("TTree"):
+        raise ValueError("missing " + tree_name + " tree: " + filename)
+    leaf = tree.GetLeaf("evweight" if tree_name == "Data" else "eventweight")
+    if not leaf:
+        raise ValueError("missing event weight: " + filename)
+    weights = []
+    for index in range(int(tree.GetEntries())):
+        if leaf.GetBranch().GetEntry(index) <= 0:
+            raise ValueError("unreadable weight: " + filename)
+        weight = float(leaf.GetValue())
+        if not math.isfinite(weight):
+            raise ValueError("non-finite weight: " + filename)
+        weights.append(weight)
+    result.append({"path": filename, "entries": int(tree.GetEntries()),
+                   "sum_weight": math.fsum(weights)})
+    handle.Close()
+print(json.dumps(result))
+"""
+
+
+def validate_shower(directory: Path, cfg: Config) -> list[Path]:
+    roots = sorted((directory / "herwig/events").rglob("*.root"))
+    if not roots:
+        die(f"no HwSim ROOT outputs in {directory}; run --stage shower first")
+    for path in roots:
+        artifact_record(path)
+    log_path = directory / "root-validation.log"
+    run_logged([cfg.mg5_python or sys.executable, "-c", ROOT_COUNT_SCRIPT, "Data", *roots],
+               cfg, directory, log_path)
+    try:
+        records = json.loads(log_path.read_text().splitlines()[-1])
+        count = sum(record["entries"] for record in records)
+    except (ValueError, KeyError, IndexError) as error:
+        die(f"cannot validate ROOT event count in {log_path}: {error}")
+    if count != cfg.nevents:
+        die(f"incomplete shower at {directory}: expected {cfg.nevents} events, found {count}; preserve it and use a new tag")
+    return roots
+
+
+def analysis_outputs(sample: Sample, cfg: Config) -> list[Path]:
+    prefix = sample_directory(sample, cfg) / f"{sample.name}_hwsim_roots-{cfg.run_tag}"
+    return [Path(str(prefix) + suffix) for suffix in (".dat", ".top", "_var.root")]
+
+
+def analysis_root_metadata(path: Path, cfg: Config) -> dict:
+    logfile = path.parent / "analysis-root-validation.log"
+    run_logged([cfg.mg5_python or sys.executable, "-c", ROOT_COUNT_SCRIPT, "Data2", path],
+               cfg, path.parent, logfile)
+    try:
+        return json.loads(logfile.read_text().splitlines()[-1])[0]
+    except (ValueError, IndexError) as error:
+        die(f"cannot validate ROOT analysis in {logfile}: {error}")
+
+
+def validate_analysis(sample: Sample, cfg: Config) -> list[Path]:
+    outputs = analysis_outputs(sample, cfg)
+    for path in outputs:
+        artifact_record(path)
+    summary = dict(line.split(None, 1) for line in outputs[0].read_text().splitlines()
+                   if line.strip() and not line.startswith("#") and len(line.split(None, 1)) == 2)
+    if int(summary.get("events_read", -1)) != cfg.nevents:
+        die(f"incomplete analysis in {outputs[0]}; expected {cfg.nevents} events")
+    if "tree_weight_closure_difference" in summary:
+        closure = float(summary["tree_weight_closure_difference"])
+        weight = float(summary["sum_abs_weight"])
+        if not math.isfinite(closure) or not math.isfinite(weight) or abs(closure) > max(1.e-10, 1.e-9 * abs(weight)):
+            die(f"analysis weight closure failed in {outputs[0]}")
+    metadata = analysis_root_metadata(outputs[2], cfg)
+    expected_entries = int(summary.get("tree_entries", summary["events_read"]))
+    if metadata["entries"] != expected_entries:
+        die(f"analysis ROOT entries differ from {outputs[0]}")
+    expected_weight = float(summary.get("sum_tree_weight", summary.get("sum_weight", "nan")))
+    if not math.isfinite(expected_weight) or not math.isclose(metadata["sum_weight"], expected_weight,
+                                                              rel_tol=1.e-8, abs_tol=1.e-10):
+        die(f"analysis ROOT weights differ from {outputs[0]}")
+    return outputs
+
+
 def run_sample(index: int, sample: Sample, cfg: Config) -> None:
     seed = cfg.seed_base + index
-    sample_dir = SCRIPT_DIR / "LOAnalysis" / sample.category / "events" / sample.name
+    sample_dir = sample_directory(sample, cfg)
+    manifest_path, manifest = prepare_manifest(sample, index, cfg)
     card_dir = sample_dir / "cards"
-    mg5_process_dir = sample_dir / "mg5_process"
+    process = sample_dir / "mg5_process"
     herwig_dir = sample_dir / "herwig"
-    herwig_events_dir = herwig_dir / "events"
     root_input = sample_dir / f"{sample.name}_hwsim_roots.input"
     mg5_card = card_dir / f"{sample.name}_proc_card.dat"
     herwig_input = herwig_dir / f"{sample.name}.in"
+    stages = ("generate", "shower", "analyze") if cfg.stage == "all" else (cfg.stage,)
+    lhe_file = Path(manifest["lhe_file"]) if manifest.get("lhe_file") else process / "Events" / (
+        f"{cfg.run_tag}_decayed_1" if sample.madspin_decay else cfg.run_tag) / "unweighted_events.lhe.gz"
 
-    log(f"Running sample {sample.name}")
-    print(
-        f"category={sample.category} model={sample.model} process={sample.process} "
-        f"weight_scale={sample.weight_scale} detector_response={cfg.detector_response} "
-        f"response_mode={sample.response_mode} seed={seed}"
-    )
-
-    ensure_dir(card_dir, cfg)
-    ensure_dir(herwig_events_dir, cfg)
-
-    runtime_lib_dir: Path | None = None
-    if cfg.collier_library is not None:
-        runtime_lib_dir = sample_dir / "lib"
-        prepare_collier_runtime(runtime_lib_dir, cfg)
-
-    write_mg5_process_card(mg5_card, sample, mg5_process_dir, cfg)
-    # The Herwig runtime module also supplies the LHAPDF installation used by
-    # the forced NNPDF4.0 run-card settings, so MG5 generation must share it.
-    run_runtime_command(mg5_command(cfg, mg5_card), cfg)
-
-    inject_mg5_runtime_rpath(mg5_process_dir, runtime_lib_dir, cfg)
-    link_madloop_runtime_dirs(mg5_process_dir, runtime_lib_dir, cfg)
-    restore_mg5_symmetry_factors(mg5_process_dir, cfg)
-
-    patch_mg5_pdf_defaults(mg5_process_dir, cfg)
-    patch_mg5_pdf_label_sync(mg5_process_dir, cfg)
-    patch_run_card(mg5_process_dir / "Cards" / "run_card.dat", seed, cfg)
-    generate_run_card_include(mg5_process_dir, cfg)
-    patch_run_card_include(mg5_process_dir, cfg)
-    if sample.madspin_decay:
-        write_madspin_card(mg5_process_dir / "Cards" / "madspin_card.dat", sample.madspin_decay, cfg)
-
-    run_generate_events(mg5_process_dir, runtime_lib_dir, cfg)
-
-    if cfg.dry_run:
-        if sample.madspin_decay:
-            lhe_file = mg5_process_dir / "Events" / f"{cfg.run_tag}_decayed_1" / "unweighted_events.lhe.gz"
+    for stage in stages:
+        if stage in manifest["completed"]:
+            # The manifest already verifies hashes; repeat semantic checks at the relevant boundary.
+            if stage == "generate":
+                validate_lhe(lhe_file, cfg)
+            elif stage == "shower":
+                validate_shower(sample_dir, cfg)
+            else:
+                validate_analysis(sample, cfg)
+            log(f"Resume: {sample.name} {stage} is complete")
+            continue
+        if not cfg.dry_run:
+            prerequisites = {"generate": (), "shower": ("generate",), "analyze": ("generate", "shower")}[stage]
+            if any(previous not in manifest["completed"] for previous in prerequisites):
+                die(f"{sample.name}: run --stage {prerequisites[-1]} --resume before --stage {stage}")
+        log(f"{sample.name}: {stage}")
+        manifest["status"] = "running"
+        manifest["current_stage"] = stage
+        save_manifest(manifest_path, manifest, cfg)
+        ensure_dir(card_dir, cfg)
+        artifacts: list[Path] = []
+        if stage == "generate":
+            runtime_lib = sample_dir / "lib" if cfg.collier_library else None
+            if runtime_lib:
+                prepare_collier_runtime(runtime_lib, cfg)
+            if not process.exists() or cfg.dry_run:
+                write_mg5_process_card(mg5_card, sample, process, cfg)
+                run_logged(mg5_command(cfg, mg5_card), cfg, sample_dir, sample_dir / "mg5-process.log")
+            elif not (process / "bin/generate_events").is_file():
+                die(f"incomplete MG5 export at {process}; preserve it and use a new tag")
+            event_dirs = [p for p in (process / "Events").glob("*")
+                          if p.name == cfg.run_tag or p.name.startswith(cfg.run_tag + "_decayed_")]
+            if event_dirs and not cfg.dry_run:
+                # Recover a finished generation after an interrupted manifest write, without exporting again.
+                lhe_file = find_lhe_file(process, bool(sample.madspin_decay), cfg.run_tag)
+            else:
+                inject_mg5_runtime_rpath(process, runtime_lib, cfg)
+                link_madloop_runtime_dirs(process, runtime_lib, cfg)
+                restore_mg5_symmetry_factors(process, cfg)
+                patch_mg5_pdf_defaults(process, cfg)
+                patch_mg5_pdf_label_sync(process, cfg)
+                patch_run_card(process / "Cards/run_card.dat", seed, cfg)
+                generate_run_card_include(process, cfg)
+                patch_run_card_include(process, cfg)
+                if sample.madspin_decay:
+                    write_madspin_card(process / "Cards/madspin_card.dat", sample.madspin_decay, cfg)
+                run_logged([process / "bin/generate_events", cfg.run_tag, "-f", f"--nb_core={cfg.nb_core}"],
+                           cfg, process, sample_dir / "mg5-generate.log", generation_environment(runtime_lib))
+                if not cfg.dry_run:
+                    lhe_file = find_lhe_file(process, bool(sample.madspin_decay), cfg.run_tag)
+            if not cfg.dry_run:
+                manifest["lhe_events"] = validate_lhe(lhe_file, cfg)
+                manifest["lhe_file"] = str(lhe_file.resolve())
+                artifacts = [lhe_file, mg5_card, process / "Cards/run_card.dat", process / "Cards/param_card.dat"]
+                if sample.madspin_decay:
+                    artifacts.append(process / "Cards/madspin_card.dat")
+        elif stage == "shower":
+            if not cfg.dry_run:
+                validate_lhe(lhe_file, cfg)
+            existing_roots = list((herwig_dir / "events").rglob("*.root"))
+            if not existing_roots or cfg.dry_run:
+                # A previous failed shower may have other recoverable outputs; do not overwrite them.
+                if herwig_dir.exists() and any(herwig_dir.iterdir()) and not cfg.dry_run:
+                    die(f"unfinished shower at {herwig_dir}; preserve it and use a new tag")
+                ensure_dir(herwig_dir / "events", cfg)
+                write_herwig_input(sample, lhe_file, seed, herwig_input, cfg)
+                run_logged([cfg.herwig, "read", herwig_input], cfg, herwig_dir, herwig_dir / "read.log")
+                run_logged([cfg.herwig, "run", f"{sample.name}.run", f"-N{cfg.nevents}"],
+                           cfg, herwig_dir, herwig_dir / "run.log")
+            if not cfg.dry_run:
+                artifacts = [*validate_shower(sample_dir, cfg), herwig_input]
+                manifest["root_files"] = [str(path) for path in artifacts[:-1]]
         else:
-            lhe_file = mg5_process_dir / "Events" / cfg.run_tag / "unweighted_events.lhe.gz"
-    else:
-        lhe_file = find_lhe_file(mg5_process_dir, prefer_decayed=bool(sample.madspin_decay))
-
-    write_herwig_input(sample, lhe_file, seed, herwig_input, cfg)
-    run_herwig(herwig_dir, cfg, ["read", herwig_input])
-    run_herwig(herwig_dir, cfg, ["run", f"{sample.name}.run", f"-N{cfg.nevents}"])
-
-    write_root_input_list(herwig_events_dir, root_input, cfg)
-    run_runtime_command(analysis_command(sample, root_input, seed, cfg), cfg)
+            if not cfg.dry_run:
+                validate_shower(sample_dir, cfg)
+            outputs = analysis_outputs(sample, cfg)
+            if not cfg.dry_run and any(path.exists() for path in outputs):
+                artifacts = validate_analysis(sample, cfg)
+            else:
+                write_root_input_list(herwig_dir / "events", root_input, cfg)
+                run_logged(analysis_command(sample, root_input, seed, cfg), cfg, sample_dir, sample_dir / "analysis.log")
+                if not cfg.dry_run:
+                    artifacts = validate_analysis(sample, cfg)
+            if not cfg.dry_run:
+                artifacts.append(root_input)
+        if not cfg.dry_run:
+            manifest["completed"].append(stage)
+            manifest["artifacts"][stage] = [artifact_record(path) for path in artifacts]
+            manifest["status"] = "complete" if "analyze" in manifest["completed"] else "ready"
+            save_manifest(manifest_path, manifest, cfg)
 
 
 def main(argv: Sequence[str]) -> int:
@@ -965,16 +1259,34 @@ def main(argv: Sequence[str]) -> int:
     validate_detector_response(cfg, selected)
     require_inputs(cfg)
 
-    log(
-        f"Building gamma-gamma post-analysis "
-        f"(detector_response={cfg.detector_response}, target={cfg.analysis_target})"
-    )
-    run_runtime_command(["make", "-C", cfg.analysis_code_dir, cfg.analysis_target], cfg)
+    if cfg.stage in {"all", "analyze"}:
+        log(f"Building gamma-gamma post-analysis ({cfg.analysis_target})")
+        run_runtime_command(["make", "-C", cfg.analysis_code_dir, cfg.analysis_target], cfg)
 
-    for sample_index, sample in selected:
-        run_sample(sample_index, sample, cfg)
+    with campaign_lock(cfg):
+        for sample_index, sample in selected:
+            run_sample(sample_index, sample, cfg)
 
     return 0
+
+
+@contextmanager
+def campaign_lock(cfg: Config):
+    """Prevent two invocations from modifying the same campaign concurrently."""
+    if cfg.dry_run:
+        yield
+        return
+    import fcntl
+    cfg.analysis_root.mkdir(parents=True, exist_ok=True)
+    with (cfg.analysis_root / ".campaign.lock").open("a+") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            die(f"another process owns {cfg.analysis_root}; inspect its logs before resuming")
+        try:
+            yield
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 if __name__ == "__main__":

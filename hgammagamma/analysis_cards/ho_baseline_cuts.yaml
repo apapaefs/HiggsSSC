@@ -1,12 +1,10 @@
 analysis:
   name: baseline_cuts
-  analysis_root: hgammagamma/HOAnalysis/runs/ho_100k_02
-  run_tag: ho_100k_02
+  # The pipeline supplies the run tag and campaign paths.
   detector_response: ssc
   luminosity_fb: 100.0
   # Keep all four samples explicit so missing outputs cannot produce a partial report.
   samples: signal_gg_h_aa,bkg_prompt_aa,bkg_gamma_j,bkg_dy_ee
-  output_dir: hgammagamma/HOAnalysis/analyses/ho_100k_02/baseline_cuts
   # HO rates come from the validated normalization sidecars. The saved signal
   # weights already contain BR(H -> gamma gamma) once; no LO K-factor applies.
   cuts:

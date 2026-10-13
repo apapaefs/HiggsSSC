@@ -605,7 +605,8 @@ def publication_color(sample: SampleResult, background_index: int) -> str:
 def add_publication_labels(ax, title: str, normalization: str, density: bool,
                            simulation_label: str = "LO simulation", energy_tev: float = 40.) -> None:
     ax.text(0.06, 0.94, "SSCwf?", transform=ax.transAxes, ha="left", va="top", fontweight="bold", fontstyle="italic", fontsize=14)
-    ax.text(0.06, 0.875, simulation_label + rf", $\sqrt{{s}}={energy_tev:g}$ TeV", transform=ax.transAxes, ha="left", va="top", fontsize=10)
+    # Keep long accuracy/normalization metadata outside the data and legend.
+    ax.text(0.0, 1.035, simulation_label + rf", $\sqrt{{s}}={energy_tev:g}$ TeV", transform=ax.transAxes, ha="left", va="bottom", fontsize=10)
     if title == "diphoton invariant mass":
         ax.text(0.06, 0.815, r"$H\rightarrow\gamma\gamma$", transform=ax.transAxes, ha="left", va="top", fontsize=10)
     if density:
@@ -1133,6 +1134,28 @@ def write_html(
     return index
 
 
+def campaign_context(campaigns: Sequence[dict]) -> tuple[bool, float]:
+    """Infer accuracy from physics metadata, independently of manifest presence."""
+    higher_order = any(
+        data.get("matching") in {"POWHEG", "MC@NLO"}
+        or str(data.get("hard_accuracy", "")).startswith(("NLO", "NNLO", "N3LO"))
+        for data in campaigns
+    )
+    energies = set()
+    for data in campaigns:
+        # Early resumable LO manifests kept the energy inside configuration.
+        beam = data.get("ebeam_gev", data.get("configuration", {}).get("ebeam"))
+        if beam is None:
+            raise ValueError("campaign manifest does not record its beam energy")
+        beam = float(beam)
+        if not math.isfinite(beam) or beam <= 0:
+            raise ValueError("campaign manifest has an invalid beam energy")
+        energies.add(2 * beam / 1000)
+    if len(energies) > 1:
+        raise ValueError("cannot combine different beam energies in one report")
+    return higher_order, next(iter(energies), 40.)
+
+
 def main(argv: Sequence[str]) -> int:
     args = build_parser().parse_args(argv)
     analysis_root = args.analysis_root.resolve()
@@ -1148,15 +1171,12 @@ def main(argv: Sequence[str]) -> int:
 
     campaigns = [json.loads((sample.sample_dir / "campaign.json").read_text())
                  for sample in samples if (sample.sample_dir / "campaign.json").exists()]
-    simulation_label = args.simulation_label or ("Higher-order simulation" if campaigns else "LO simulation")
+    higher_order, energy_tev = campaign_context(campaigns)
+    simulation_label = args.simulation_label or ("Higher-order simulation" if higher_order else "LO simulation")
     if not args.simulation_label and any(sample.normalization_kind == "ihixs_n3lo" for sample in samples):
         simulation_label = "HO simulation, N3LO ggF normalization"
-    energies = {2 * float(data["ebeam_gev"]) / 1000 for data in campaigns}
-    if len(energies) > 1:
-        die("cannot combine different beam energies in one report")
-    energy_tev = next(iter(energies), 40.)
     if args.title is None:
-        args.title = ("Higher-order" if campaigns else "LO") + " h -> gamma gamma analysis"
+        args.title = ("Higher-order" if higher_order else "LO") + " h -> gamma gamma analysis"
 
     log(f"Loaded {len(samples)} samples")
     detector_responses = sorted({sample.detector_response for sample in samples})

@@ -1,15 +1,11 @@
 # Four-lepton HwSim analyzer
 
-Build the analyzer with:
+The [common setup](../../../README.md) builds this analyzer. To develop it,
+use an activated Herwig/ROOT runtime from the repository root:
 
 ```bash
-make
-```
-
-Run the committed core regression test with:
-
-```bash
-make check
+make -C hfourlepton/LOAnalysis/Code
+make -C hfourlepton/LOAnalysis/Code check
 ```
 
 The core test directly checks the GEM muon-resolution anchors, clamping and
@@ -23,7 +19,7 @@ The mandatory input is a `Data` tree containing `numparticles/I`,
 `theETmiss[4]`, and `theOptWeights` with `theOptWeightsNames` when those
 branches are present. All optional groups may be absent.
 
-The primary command-line contract is:
+Run the executable from `hfourlepton/LOAnalysis/Code`:
 
 ```bash
 ./HwSimPostAnalysis_fourlepton INPUT.root \
@@ -79,7 +75,7 @@ response space.
 
 ## Synthetic smoke input
 
-Build the small fixture generator and run both the full optional schema and
+From `hfourlepton/LOAnalysis/Code`, test both the full optional schema and
 the required-branches-only schema:
 
 ```bash

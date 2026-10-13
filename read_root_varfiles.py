@@ -9,10 +9,11 @@ from typing import Iterable
 
 try:
     import ROOT
-except ImportError as exc:  # pragma: no cover - depends on the local HEP stack.
-    raise RuntimeError("PyROOT is required to read gamma-gamma variable ROOT files") from exc
+except ImportError:  # Reading configuration and CLI help does not require ROOT.
+    ROOT = None
 
-ROOT.gROOT.SetBatch(True)
+if ROOT is not None:
+    ROOT.gROOT.SetBatch(True)
 
 FEATURE_NAMES = [
     "m_gg",
@@ -43,6 +44,14 @@ def _finite(values: Iterable[float]) -> bool:
 
 
 def _open_tree(filename: str | Path, strict: bool = False):
+    global ROOT
+    if ROOT is None:
+        try:
+            import ROOT as root_module
+        except ImportError as exc:
+            raise RuntimeError("PyROOT is required to read gamma-gamma variable ROOT files; use the configured pipeline runtime") from exc
+        ROOT = root_module
+        ROOT.gROOT.SetBatch(True)
     path = Path(filename)
     if not path.exists():
         raise FileNotFoundError(f"ROOT variable file does not exist: {path}")

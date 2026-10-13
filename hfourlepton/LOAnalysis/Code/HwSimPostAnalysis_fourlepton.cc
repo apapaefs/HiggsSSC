@@ -344,7 +344,7 @@ void print_usage(std::ostream& output) {
       << "  --weight-scale FLOAT             Sample normalization factor (default: 1)\n"
       << "  --muon-resolution-scale FLOAT    Multiplier for sigma(pT)/pT (default: 1)\n"
       << "  --optional-weight-names-file FILE\n"
-      << "                                    One semantic optional-weight name per line\n"
+      << "                                    Names, or canonical<TAB>source-name mapping\n"
       << "  --tag TAG                        Output tag\n"
       << "  --output-dir DIRECTORY           Output directory\n"
       << "  --sample NAME                    Sample metadata and output stem\n"
@@ -501,7 +501,13 @@ std::string trim(const std::string& text) {
   return text.substr(first, last - first + 1);
 }
 
-std::vector<std::string> load_optional_weight_names(
+struct OptionalWeightNames {
+  std::vector<std::string> canonical;
+  std::vector<std::string> source;
+  bool explicit_mapping = false;
+};
+
+OptionalWeightNames load_optional_weight_names(
     const std::string& path) {
   if (path.empty()) {
     return {};
@@ -511,20 +517,27 @@ std::vector<std::string> load_optional_weight_names(
     throw std::runtime_error(
         "failed to open optional-weight names file " + path);
   }
-  std::vector<std::string> names;
+  OptionalWeightNames names;
   std::string line;
   while (std::getline(input, line)) {
-    const std::string name = trim(line);
-    if (name.empty() || name.front() == '#') {
+    if (trim(line).empty() || trim(line).front() == '#') {
       continue;
     }
-    if (std::find(names.begin(), names.end(), name) != names.end()) {
+    const auto separator = line.find('\t');
+    const std::string name = trim(line.substr(0, separator));
+    const std::string source = separator == std::string::npos
+                                   ? name : trim(line.substr(separator + 1));
+    if (name.empty() ||
+        std::find(names.canonical.begin(), names.canonical.end(), name) != names.canonical.end() ||
+        std::find(names.source.begin(), names.source.end(), source) != names.source.end()) {
       throw std::runtime_error(
-          "duplicate optional-weight name in " + path + ": " + name);
+          "empty or duplicate optional-weight mapping in " + path + ": " + name);
     }
-    names.push_back(name);
+    names.explicit_mapping = names.explicit_mapping || separator != std::string::npos;
+    names.canonical.push_back(name);
+    names.source.push_back(source);
   }
-  if (names.empty()) {
+  if (names.canonical.empty()) {
     throw std::runtime_error(
         "optional-weight names file contains no names: " + path);
   }
@@ -1511,8 +1524,9 @@ int main(int argc, char* argv[]) {
       return 1;
     }
     const Config config = parse_config(argc, argv);
-    const std::vector<std::string> configured_optional_weight_names =
+    const OptionalWeightNames configured_optional_weight_mapping =
         load_optional_weight_names(config.optional_weight_names_file);
+    const auto& configured_optional_weight_names = configured_optional_weight_mapping.canonical;
 
     TChain chain("Data");
     add_input_files(chain, config.input_name);
@@ -1775,8 +1789,21 @@ int main(int argc, char* argv[]) {
       source_record.raw_lepton_count = raw_lepton_count;
       source_record.accepted_lepton_count = accepted_lepton_count;
 
+      if (configured_optional_weight_mapping.explicit_mapping &&
+          (!optional_weights_available || input_optional_weights == nullptr ||
+           input_optional_weights->empty())) {
+        throw std::runtime_error(
+            "explicit LHE optional-weight mapping requires HwSim weights at event " +
+            std::to_string(event_index));
+      }
       if (optional_weights_available && input_optional_weights != nullptr) {
         source_record.optional_weights = *input_optional_weights;
+        for (const double weight : source_record.optional_weights) {
+          if (!std::isfinite(weight)) {
+            throw std::runtime_error(
+                "non-finite HwSim optional weight at event " + std::to_string(event_index));
+          }
+        }
         if (optional_names_available &&
             input_optional_weight_names != nullptr &&
             !input_optional_weight_names->empty()) {
@@ -1786,16 +1813,22 @@ int main(int argc, char* argv[]) {
           if (!configured_optional_weight_names.empty()) {
             ++diagnostics.optional_weight_name_file_validations;
             if (source_record.optional_weight_names !=
-                configured_optional_weight_names) {
+                configured_optional_weight_mapping.source) {
               ++diagnostics.optional_weight_name_mismatches;
               throw std::runtime_error(
                   "HwSim optional-weight names disagree with " +
                   config.optional_weight_names_file + " at event " +
                   std::to_string(event_index));
             }
+            source_record.optional_weight_names = configured_optional_weight_names;
           }
         } else if (!source_record.optional_weights.empty() &&
                    !configured_optional_weight_names.empty()) {
+          if (configured_optional_weight_mapping.explicit_mapping) {
+            throw std::runtime_error(
+                "explicit LHE optional-weight mapping requires HwSim names at event " +
+                std::to_string(event_index));
+          }
           if (configured_optional_weight_names.size() !=
               source_record.optional_weights.size()) {
             ++diagnostics.optional_weight_name_mismatches;

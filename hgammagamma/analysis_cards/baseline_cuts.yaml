@@ -1,6 +1,7 @@
 analysis:
   name: baseline_cuts
-  run_tag: run_02
+  # The pipeline supplies the run tag and campaign paths.
+  samples: signal_gg_h_aa,bkg_prompt_aa,bkg_gamma_j,bkg_dy_ee
   # Require matching detector-response provenance in every campaign .dat file.
   detector_response: ssc
   luminosity_fb: 100.0

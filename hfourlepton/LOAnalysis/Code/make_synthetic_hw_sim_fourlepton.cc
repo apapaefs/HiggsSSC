@@ -2,6 +2,7 @@
 #include <array>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -52,16 +53,20 @@ int main(int argc, char* argv[]) {
     if (argc < 2 || argc > 3) {
       std::cerr
           << "Usage: make_synthetic_hw_sim_fourlepton OUTPUT.root "
-             "[minimal|unnamed-weights]\n";
+             "[minimal|unnamed-weights|blank-weight-name|nonfinite-weight]\n";
       return 1;
     }
     const std::string output_name = argv[1];
     const bool minimal = argc == 3 && std::string(argv[2]) == "minimal";
     const bool unnamed_weights =
         argc == 3 && std::string(argv[2]) == "unnamed-weights";
-    if (argc == 3 && !minimal && !unnamed_weights) {
+    const bool blank_weight_name =
+        argc == 3 && std::string(argv[2]) == "blank-weight-name";
+    const bool nonfinite_weight =
+        argc == 3 && std::string(argv[2]) == "nonfinite-weight";
+    if (argc == 3 && !minimal && !unnamed_weights && !blank_weight_name && !nonfinite_weight) {
       throw std::runtime_error(
-          "the supported modes are 'minimal' and 'unnamed-weights'");
+          "unsupported synthetic fixture mode");
     }
 
     TFile output(output_name.c_str(), "RECREATE");
@@ -183,9 +188,12 @@ int main(int argc, char* argv[]) {
         theETmiss[1] = met_pt * std::cos(met_phi);
         theETmiss[2] = met_pt * std::sin(met_phi);
         theOptWeights = {evweight * 0.9, evweight * 1.1};
+        if (nonfinite_weight) {
+          theOptWeights[0] = std::numeric_limits<double>::infinity();
+        }
         theOptWeightsNames =
             unnamed_weights ? std::vector<std::string>{}
-                            : std::vector<std::string>{"scale_down", "scale_up"};
+                            : std::vector<std::string>{blank_weight_name ? "" : "scale_down", "scale_up"};
       }
       tree.Fill();
     }
