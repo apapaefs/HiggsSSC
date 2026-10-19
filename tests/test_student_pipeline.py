@@ -11,6 +11,8 @@ import unittest
 from unittest import mock
 
 import run_pipeline as cli
+from hgammagamma import make_gammagamma_report as diphoton_report
+from hfourlepton import make_fourlepton_report as fourlepton_report
 
 
 class StudentPipelineTests(unittest.TestCase):
@@ -146,16 +148,20 @@ class StudentPipelineTests(unittest.TestCase):
                 cli.physics_artifacts(args)
 
     def test_report_only_never_calls_campaign_or_generator(self):
-        with self.repository() as root:
-            args = self.args(root)
-            self.artifacts(args)
-            pipeline = SimpleNamespace(args=args, python=Path("private-python"), call=mock.Mock())
-            with contextlib.redirect_stdout(io.StringIO()):
-                cli.report(pipeline)
-            pipeline.call.assert_called_once()
-            command = [str(v) for v in pipeline.call.call_args.args[1]]
-            self.assertTrue(command[1].endswith("make_gammagamma_report.py"))
-            self.assertEqual(command[command.index("--analysis-root") + 1], str(cli.locations(args)[0]))
+        for workflow in ("gammagamma-lo", "gammagamma-ho"):
+            with self.subTest(workflow=workflow), self.repository() as root:
+                args = self.args(root, "--workflow", workflow)
+                self.artifacts(args)
+                pipeline = SimpleNamespace(args=args, python=Path("private-python"), call=mock.Mock())
+                with contextlib.redirect_stdout(io.StringIO()):
+                    cli.report(pipeline)
+                pipeline.call.assert_called_once()
+                command = [str(v) for v in pipeline.call.call_args.args[1]]
+                self.assertTrue(command[1].endswith("make_gammagamma_report.py"))
+                report_args = diphoton_report.build_parser().parse_args(command[2:])
+                self.assertEqual(report_args.analysis_root, cli.locations(args)[0])
+                self.assertEqual(report_args.plot_mode, "both")
+                self.assertEqual(report_args.normalization, "event_xsec")
 
     def test_report_refuses_incomplete_analysis_without_external_call(self):
         with self.repository() as root:
@@ -345,6 +351,21 @@ class StudentPipelineTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "completed analysis product changed"):
                     cli.report(pipeline)
                 pipeline.call.assert_not_called()
+
+    def test_fourlepton_report_uses_paired_default_and_strict_audit(self):
+        with self.repository() as root:
+            args = self.args(root, "--workflow", "fourlepton-lo")
+            self.fourlepton_artifacts(args)
+            pipeline = SimpleNamespace(args=args, python=Path("private-python"), call=mock.Mock())
+            with contextlib.redirect_stdout(io.StringIO()):
+                cli.report(pipeline)
+            pipeline.call.assert_called_once()
+            command = [str(value) for value in pipeline.call.call_args.args[1]]
+            self.assertTrue(command[1].endswith("make_fourlepton_report.py"))
+            report_args = fourlepton_report.build_parser().parse_args(command[2:])
+            self.assertEqual(report_args.plot_mode, "both")
+            self.assertTrue(report_args.strict)
+            self.assertEqual(len(report_args.manifests), 2)
 
     def test_ho_legacy_summary_contract_and_matching_pilot_snapshot(self):
         with self.repository() as root:

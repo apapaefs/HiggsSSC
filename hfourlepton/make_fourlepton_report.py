@@ -5,6 +5,9 @@ The module deliberately keeps ROOT at the I/O boundary.  All bookkeeping,
 normalisation, cut-flow, and response-closure functions operate on ordinary
 Python mappings and are therefore testable on machines without ROOT.
 
+Each mass spectrum shows a unit-area density beside the expected event counts
+by default. Use ``--plot-mode density`` or ``--no-density`` for a single view.
+
 Normalisation convention
 ------------------------
 The campaign's ``normalization.denominator_sumw`` is the preferred
@@ -44,6 +47,7 @@ DEFAULT_LUMINOSITY_FB = 100.0
 DEFAULT_SIGNAL_REGION_GEV = (120.0, 130.0)
 DEFAULT_MASS_RANGE_GEV = (70.0, 200.0)
 DEFAULT_MASS_BIN_WIDTH_GEV = 5.0
+PLOT_MODES = ("both", "density", "counts")
 REPORT_SCHEMA_VERSION = 1
 SUPPORTED_MANIFEST_MAJOR = 1
 CHANNEL_CODES = {0: "unknown", 1: "4e", 2: "4mu", 3: "2e2mu"}
@@ -2673,14 +2677,35 @@ def _audit_html(audit: Mapping[str, Any]) -> str:
     return "".join(parts)
 
 
-def _spectrum_svg(spectrum: Mapping[str, Any]) -> str:
+def spectrum_plot_values(spectrum: Mapping[str, Any], *, density: bool = False) -> list[float] | None:
+    """Plot physical counts or a signed unit-area density over regular bins."""
     regular = [bin_value for bin_value in spectrum["bins"] if bin_value["type"] == "regular"]
-    values = [bin_value["events"] for bin_value in regular]
+    field = "cross_section_pb" if density else "events"
+    values = [optional_float(bin_value.get(field)) for bin_value in regular]
     if not regular or any(value is None for value in values):
-        return '<p class="note">Normalized spectrum unavailable.</p>'
+        return None
     numeric = [float(value) for value in values]
-    width, height = 820.0, 260.0
-    left, right, top, bottom = 62.0, 18.0, 18.0, 42.0
+    if density:
+        total = math.fsum(numeric)
+        if total <= 0.0:
+            return None
+        return [value / total / (bin_value["high_gev"] - bin_value["low_gev"])
+                for value, bin_value in zip(numeric, regular)]
+    return numeric
+
+
+def _spectrum_svg(spectrum: Mapping[str, Any], *, density: bool = False) -> str:
+    numeric = spectrum_plot_values(spectrum, density=density)
+    if numeric is None:
+        message = (
+            "Unit-area shape unavailable: finite physical bin weights and a positive signed "
+            "sum within the displayed mass range are required."
+            if density else "Expected-event spectrum unavailable: physical normalization is missing."
+        )
+        return f'<p class="note">{message}</p>'
+    regular = [bin_value for bin_value in spectrum["bins"] if bin_value["type"] == "regular"]
+    width, height = 640.0, 340.0
+    left, right, top, bottom = 80.0, 18.0, 22.0, 56.0
     plot_width = width - left - right
     plot_height = height - top - bottom
     minimum = min(0.0, min(numeric, default=0.0))
@@ -2691,40 +2716,49 @@ def _spectrum_svg(spectrum: Mapping[str, Any]) -> str:
     def y_position(value: float) -> float:
         return top + (maximum - value) / (maximum - minimum) * plot_height
 
+    mass_low, mass_high = spectrum["mass_range_gev"]
+    x_scale = plot_width / (mass_high - mass_low)
     baseline = y_position(0.0)
-    bin_width = plot_width / len(regular)
+    value_unit = "1/GeV" if density else "events"
+    y_label = "Unit-area density [1/GeV]" if density else "Events / bin"
+    accessible_label = "Unit-area four-lepton mass density" if density else "Expected four-lepton events per bin"
     bars: list[str] = []
-    for index, value in enumerate(numeric):
+    for bin_value, value in zip(regular, numeric):
         y_value = y_position(value)
         y = min(y_value, baseline)
-        bar_height = max(0.8, abs(y_value - baseline))
+        bar_height = abs(y_value - baseline)
+        x = left + (bin_value["low_gev"] - mass_low) * x_scale
+        bin_width = (bin_value["high_gev"] - bin_value["low_gev"]) * x_scale
         color = "#2474b5" if value >= 0.0 else "#b33b33"
         bars.append(
-            f'<rect x="{left + index * bin_width + 0.7:.2f}" y="{y:.2f}" '
+            f'<rect x="{x + 0.7:.2f}" y="{y:.2f}" '
             f'width="{max(0.5, bin_width - 1.4):.2f}" height="{bar_height:.2f}" '
-            f'fill="{color}"><title>{value:.8g} events</title></rect>'
+            f'fill="{color}"><title>{bin_value["low_gev"]:g} to {bin_value["high_gev"]:g} GeV: '
+            f'{value:.8g} {value_unit}</title></rect>'
         )
-    mass_low, mass_high = spectrum["mass_range_gev"]
     return (
-        f'<svg class="spectrum" viewBox="0 0 {width:g} {height:g}" '
-        'role="img" aria-label="Signed normalized four-lepton mass spectrum">'
+        f'<svg xmlns="http://www.w3.org/2000/svg" class="spectrum" viewBox="0 0 {width:g} {height:g}" '
+        f'role="img" aria-label="{accessible_label}">'
         f'<line x1="{left:g}" y1="{baseline:.2f}" x2="{width-right:g}" '
         f'y2="{baseline:.2f}" stroke="#263746" stroke-width="1"/>'
         f'<line x1="{left:g}" y1="{top:g}" x2="{left:g}" '
         f'y2="{height-bottom:g}" stroke="#263746" stroke-width="1"/>'
         + "".join(bars)
-        + f'<text x="{left:g}" y="{height-13:g}" font-size="12">{mass_low:g}</text>'
-        f'<text x="{width-right:g}" y="{height-13:g}" text-anchor="end" '
-        f'font-size="12">{mass_high:g} GeV</text>'
-        f'<text x="14" y="{top+5:g}" font-size="11">{maximum:.4g}</text>'
-        f'<text x="14" y="{height-bottom:g}" font-size="11">{minimum:.4g}</text>'
-        '<text x="18" y="135" transform="rotate(-90 18 135)" '
-        'font-size="12">events / bin</text></svg>'
+        + f'<text x="{left:g}" y="{height-bottom+20:g}" font-size="13">{mass_low:g}</text>'
+        f'<text x="{width-right:g}" y="{height-bottom+20:g}" text-anchor="end" '
+        f'font-size="13">{mass_high:g}</text>'
+        f'<text x="{left+plot_width/2:g}" y="{height-10:g}" text-anchor="middle" '
+        'font-size="14">m4l [GeV]</text>'
+        f'<text x="{left-8:g}" y="{top+5:g}" text-anchor="end" font-size="12">{maximum:.4g}</text>'
+        f'<text x="{left-8:g}" y="{height-bottom:g}" text-anchor="end" font-size="12">{minimum:.4g}</text>'
+        '<text x="18" y="153" transform="rotate(-90 18 153)" text-anchor="middle" '
+        f'font-size="14">{y_label}</text></svg>'
     )
 
 
 def render_html(report: Mapping[str, Any]) -> str:
     metadata = report["metadata"]
+    plot_mode = metadata.get("plot_mode", "both")
     summary = report["summary"]
     low, high = metadata["signal_region_gev"]
     sample_rows: list[str] = []
@@ -2842,14 +2876,29 @@ def render_html(report: Mapping[str, Any]) -> str:
             f"{spectrum['detector_profile']} / {spectrum['channel']} / "
             f"{spectrum['category']}"
         )
+        panels = []
+        if plot_mode in ("both", "density"):
+            panels.append(
+                '<div class="spectrum-panel"><h4>Unit-area shape</h4>'
+                '<p class="note">Normalized within the displayed mass range.</p>'
+                f'{_spectrum_svg(spectrum, density=True)}</div>'
+            )
+        if plot_mode in ("both", "counts"):
+            panels.append(
+                '<div class="spectrum-panel"><h4>Expected events</h4>'
+                f'<p class="note">Physical yield at {metadata["luminosity_fb"]:g} fb<sup>&minus;1</sup>.</p>'
+                f'{_spectrum_svg(spectrum)}</div>'
+            )
         spectrum_sections.append(
-            f"<details><summary>{html.escape(heading)}</summary>"
-            f"{_spectrum_svg(spectrum)}"
+            f'<details class="spectrum-section" open><summary>{html.escape(heading)}</summary>'
+            f'<div class="spectrum-views{" paired" if plot_mode == "both" else ""}">'
+            + "".join(panels) + '</div>'
             f"<p class=\"note\">Samples: {html.escape(', '.join(spectrum['samples']))}. "
             f"Underflow: {_format_number(underflow['events'])} events; "
             f"overflow: {_format_number(overflow['events'])} events. "
-            f"Each bin is {spectrum['bin_width_gev']:g} GeV and retains signed "
-            "sumw and sumw2 in report.json.</p></details>"
+            f"Nominal bin width: {spectrum['bin_width_gev']:g} GeV; the final bin ends at the mass-range boundary. "
+            "Underflow and overflow are excluded from the unit-area shape. "
+            "Physical bin yields and their statistical variances are in report.json.</p></details>"
         )
     comparison_rows = "".join(
         "<tr>"
@@ -2892,7 +2941,7 @@ def render_html(report: Mapping[str, Any]) -> str:
   --blue:#1557a0; --pale:#f4f7fb; --red:#a12622; --amber:#815500; --green:#18733f; }}
 * {{ box-sizing:border-box; }}
 body {{ margin:0; color:var(--ink); background:#fff; font:15px/1.48 system-ui,sans-serif; }}
-main {{ max-width:1180px; margin:0 auto; padding:32px 24px 56px; }}
+main {{ max-width:1440px; margin:0 auto; padding:32px 24px 56px; }}
 h1 {{ margin:0 0 6px; font-size:2rem; }}
 h2 {{ margin-top:34px; border-bottom:2px solid var(--line); padding-bottom:7px; }}
 h3 {{ margin-bottom:5px; }}
@@ -2909,11 +2958,21 @@ code {{ color:var(--muted); font-size:.82em; }}
 details {{ border:1px solid var(--line); border-radius:6px; margin:8px 0; padding:8px 12px; }}
 summary {{ cursor:pointer; font-weight:650; }}
 .spectrum {{ display:block; width:100%; max-width:820px; height:auto; margin:10px auto; background:#fff; }}
+.spectrum-views {{ display:grid; grid-template-columns:minmax(0,1fr); gap:20px; margin-top:12px; }}
+.spectrum-views.paired {{ grid-template-columns:repeat(2,minmax(0,1fr)); }}
+.spectrum-panel {{ min-width:0; }}
+.spectrum-panel h4 {{ margin:0 0 4px; }}
+.spectrum-panel .note {{ margin:4px 0; }}
+.spectrum-panel + .spectrum-panel {{ border-left:1px solid var(--line); padding-left:20px; }}
 .ok {{ color:var(--green); font-weight:650; }}
 .errors {{ color:var(--red); }}
 .warnings {{ color:var(--amber); }}
 .note {{ color:var(--muted); font-size:.9rem; }}
-@media(max-width:760px) {{ main {{ padding:20px 12px; }} table {{ font-size:.82rem; }} th,td {{ padding:6px 4px; }} }}
+@media(max-width:800px) {{
+  main {{ padding:20px 12px; }} table {{ font-size:.82rem; }} th,td {{ padding:6px 4px; }}
+  .spectrum-views.paired {{ grid-template-columns:minmax(0,1fr); }}
+  .spectrum-panel + .spectrum-panel {{ border-left:0; border-top:1px solid var(--line); padding-left:0; padding-top:20px; }}
+}}
 </style>
 </head>
 <body><main>
@@ -2940,7 +2999,7 @@ are never added together.</p>
 <th>Generated sumw</th><th>Selected cross section [pb]</th><th>Signal-region events</th><th>Audit</th>
 </tr></thead><tbody>{''.join(sample_rows)}</tbody></table>
 <p class="note">Uncertainties are propagated from source-grouped sumw2. Negative and exactly
-zero signed totals are retained; an em dash denotes unavailable normalization.
+zero signed totals are shown; an em dash denotes unavailable normalization.
 Samples with unvalidated decay-bias closure are visibly excluded from combined totals.</p>
 
 <h2>Background composition in the signal region</h2>
@@ -2953,6 +3012,8 @@ Samples with unvalidated decay-bias closure are visibly excluded from combined t
 <tbody>{resolution_rows or '<tr><td colspan="6">No signal mass entries</td></tr>'}</tbody></table>
 
 <h2>Full selected m<sub>4l</sub> spectra</h2>
+<p class="note">Shapes and physical yields are calculated separately for each detector profile,
+final-state channel and process category. Signed bins can be negative.</p>
 {''.join(spectrum_sections) or '<p>No normalized spectra are available.</p>'}
 
 <h2>Perfect versus SSC detector response</h2>
@@ -3025,7 +3086,10 @@ def generate_report(
     closure_tolerance: float = 1.0e-9,
     record_loader: Callable[[Path], RootRecords] = load_root_records,
     allow_unvalidated_bias: bool = False,
+    plot_mode: str = "both",
 ) -> dict[str, Any]:
+    if plot_mode not in PLOT_MODES:
+        raise ValueError(f"unknown plot mode {plot_mode!r}; choose from {', '.join(PLOT_MODES)}")
     manifests = [load_manifest(path) for path in expand_manifest_paths(manifest_paths)]
     if not manifests:
         raise ValueError("no campaign manifests found")
@@ -3129,6 +3193,7 @@ def generate_report(
             "signal_region_gev": [low, high],
             "mass_spectrum_range_gev": list(mass_range_gev),
             "mass_spectrum_bin_width_gev": mass_bin_width_gev,
+            "plot_mode": plot_mode,
             "normalization_convention": (
                 "native_cross_section_pb * sum(event_weight) / "
                 "normalization.denominator_sumw; unforced-sample fallback: "
@@ -3199,13 +3264,22 @@ def build_parser() -> argparse.ArgumentParser:
         nargs=2,
         metavar=("LOW", "HIGH"),
         default=DEFAULT_MASS_RANGE_GEV,
-        help="Regular m4l spectrum bounds in GeV; under/overflow are retained.",
+        help="Regular m4l spectrum bounds in GeV; underflow and overflow are included in the report.",
     )
     parser.add_argument(
         "--mass-bin-width",
         type=positive_float,
         default=DEFAULT_MASS_BIN_WIDTH_GEV,
         help="m4l spectrum bin width in GeV (default: 5).",
+    )
+    plot_mode = parser.add_mutually_exclusive_group()
+    plot_mode.add_argument(
+        "--plot-mode", choices=PLOT_MODES, default="both",
+        help="Show both views side by side (default), only unit-area densities, or only physical event counts.",
+    )
+    plot_mode.add_argument(
+        "--no-density", dest="plot_mode", action="store_const", const="counts",
+        help="Show only physical event counts; alias for --plot-mode counts.",
     )
     parser.add_argument("--title", default="LO H -> ZZ* -> 4l analysis")
     parser.add_argument("--closure-tolerance", type=positive_float, default=1.0e-9)
@@ -3237,6 +3311,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         title=args.title,
         closure_tolerance=args.closure_tolerance,
         allow_unvalidated_bias=args.allow_unvalidated_bias,
+        plot_mode=args.plot_mode,
     )
     print(f"Report JSON: {args.output_dir / 'report.json'}")
     print(f"Report HTML: {args.output_dir / 'index.html'}")

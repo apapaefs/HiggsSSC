@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Build an HTML report from h -> gamma gamma analysis .top files.
 
-The report overlays transparent per-sample histograms for the default density
-plots, with each histogram normalized to unit area.  With ``--no-density``,
-backgrounds are stacked first and the Higgs signal is stacked on top.  In
-non-density mode, histogram bins are scaled by the generated event cross
-section and detector-response weights.  Diphoton-only histograms then
-integrate to sigma * weight_scale * analysis efficiency, while the exclusive
-photon-multiplicity histogram retains its physical normalization.
+By default, each observable shows unit-area density plots beside physical
+cross-section plots.  Density plots overlay the samples; cross-section plots
+stack backgrounds first and the Higgs signal on top.  Cross-section bins use
+the generated event cross section and detector-response weights.
+Diphoton-only histograms then integrate to sigma * weight_scale * analysis
+efficiency, while the exclusive photon-multiplicity histogram keeps its
+physical normalization.  Use ``--plot-mode density`` or ``--no-density`` to
+show only one view.
 """
 
 from __future__ import annotations
@@ -136,23 +137,32 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("selected_xsec", "event_xsec", "unit_area"),
         default="event_xsec",
         help=(
-            "Non-density scaling mode. event_xsec preserves detector-outcome weights; "
+            "Stacked-plot scaling mode. event_xsec preserves detector-outcome weights; "
             "selected_xsec forces every shape to sigma*weight_scale*efficiency. "
             "Density plots are always unit-normalized."
         ),
     )
-    parser.add_argument(
+    plot_mode = parser.add_mutually_exclusive_group()
+    plot_mode.add_argument(
+        "--plot-mode",
+        choices=("both", "density", "stacked"),
+        default="both",
+        help="Show both views side by side (default), only unit-area densities, or only stacked plots.",
+    )
+    plot_mode.add_argument(
         "--no-density",
-        action="store_true",
-        help="Do not divide by bin width.  Non-density plots stack backgrounds and signal.",
+        dest="plot_mode",
+        action="store_const",
+        const="stacked",
+        help="Show only stacked plots without dividing by bin width; alias for --plot-mode stacked.",
     )
     parser.add_argument(
         "--signal-scale",
         type=positive_float,
         default=1.0,
         help=(
-            "Multiply Signal histograms by this factor in --no-density stacked "
-            "plots; non-default values are shown in the legend."
+            "Multiply Signal histograms by this factor in stacked plots only; "
+            "non-default values are shown in the legend."
         ),
     )
     parser.add_argument("--title", default=None, help="default inferred from LO or HO campaign provenance")
@@ -626,6 +636,7 @@ def plot_histogram(
     signal_scale: float = 1.0,
     simulation_label: str = "LO simulation",
     energy_tev: float = 40.,
+    filename_suffix: str = "",
 ) -> dict[str, str | float]:
     plt = ensure_matplotlib(output_dir)
     meta = PLOT_META.get(title, PlotMeta(slugify(title), title.title(), title, ""))
@@ -741,9 +752,9 @@ def plot_histogram(
     data_dir = output_dir / "data"
     plot_dir.mkdir(parents=True, exist_ok=True)
     data_dir.mkdir(parents=True, exist_ok=True)
-    png_path = plot_dir / f"{meta.slug}.png"
-    svg_path = plot_dir / f"{meta.slug}.svg"
-    csv_path = data_dir / f"{meta.slug}.csv"
+    png_path = plot_dir / f"{meta.slug}{filename_suffix}.png"
+    svg_path = plot_dir / f"{meta.slug}{filename_suffix}.svg"
+    csv_path = data_dir / f"{meta.slug}{filename_suffix}.csv"
     fig.savefig(png_path, dpi=220)
     fig.savefig(svg_path)
     plt.close(fig)
@@ -859,6 +870,7 @@ def write_html(
     plots: Sequence[dict[str, str | float]],
     summary_csv: str,
     luminosity_fb: float | None = None,
+    density_plots: Sequence[dict[str, str | float]] | None = None,
 ) -> Path:
     zip_name = "gammagamma_report_assets.zip"
     shutil.make_archive(str(output_dir / "gammagamma_report_assets"), "zip", root_dir=output_dir, base_dir="plots")
@@ -926,27 +938,61 @@ def write_html(
         for sample in ordered_samples(samples)
     )
 
-    plot_cards = "\n".join(
-        f"""
+    density_heading = "Unit-area shapes"
+    density_description = "Normalized over the full histogram range; samples overlaid."
+    stacked_heading = "Physical cross sections"
+    stacked_description = "Cross section per bin [pb]; backgrounds and signal stacked."
+    if normalization == "unit_area":
+        stacked_heading = "Unit-normalized bins"
+        stacked_description = "Each sample's bin contents sum to one; samples stacked."
+
+    def plot_panel(plot, heading, description):
+        if "error" in plot:
+            content = f'<p class="warning">{html.escape(str(plot["error"]))}</p>'
+        else:
+            content = f"""
+            <div class="downloads">
+              <a href="{html.escape(str(plot['png']))}" download>PNG</a>
+              <a href="{html.escape(str(plot['svg']))}" download>SVG</a>
+              <a href="{html.escape(str(plot['csv']))}" download>CSV</a>
+            </div>
+            <a href="{html.escape(str(plot['png']))}" target="_blank">
+              <img src="{html.escape(str(plot['png']))}" alt="{html.escape(str(plot['title']) + ': ' + heading)}">
+            </a>
+            """
+        return f"""
+          <div class="plot-panel">
+            <h3>{html.escape(heading)}</h3>
+            <p>{html.escape(description)}</p>
+            {content}
+          </div>
+        """
+
+    density_by_slug = {plot["slug"]: plot for plot in density_plots or []}
+    paired = density_plots is not None
+    plot_cards = []
+    for plot in plots:
+        if paired:
+            panels = plot_panel(density_by_slug[plot["slug"]], density_heading, density_description)
+            panels += plot_panel(plot, stacked_heading, stacked_description)
+        elif density:
+            panels = plot_panel(plot, density_heading, density_description)
+        else:
+            panels = plot_panel(plot, stacked_heading, stacked_description)
+        plot_cards.append(f"""
         <section class="plot-card" id="{html.escape(str(plot['slug']))}">
           <div class="plot-head">
             <div>
               <h2>{html.escape(str(plot['title']))}</h2>
               <p>x range: {plot['x_min']:.6g} to {plot['x_max']:.6g}</p>
             </div>
-            <div class="downloads">
-              <a href="{html.escape(str(plot['png']))}" download>PNG</a>
-              <a href="{html.escape(str(plot['svg']))}" download>SVG</a>
-              <a href="{html.escape(str(plot['csv']))}" download>CSV</a>
-            </div>
           </div>
-          <a href="{html.escape(str(plot['png']))}" target="_blank">
-            <img src="{html.escape(str(plot['png']))}" alt="{html.escape(str(plot['title']))}">
-          </a>
+          <div class="plot-views{' paired' if paired else ''}">
+            {panels}
+          </div>
         </section>
-        """
-        for plot in plots
-    )
+        """)
+    plot_cards = "\n".join(plot_cards)
 
     if density:
         normalization_text = (
@@ -958,6 +1004,12 @@ def write_html(
             "event_xsec": "Histogram bins are scaled by the event cross section and weight scale; selected-only histograms integrate to cross section times weight scale times efficiency.",
             "unit_area": "Each sample histogram is unit-area normalized before stacking.",
         }[normalization]
+    if paired:
+        normalization_text = (
+            f"Each observable shows unit-area shapes on the left and {stacked_heading.lower()} "
+            "on the right. Shape densities use the full histogram range and are divided by bin width. "
+            + normalization_text
+        )
 
     html_text = f"""<!doctype html>
 <html lang="en">
@@ -996,6 +1048,10 @@ def write_html(
       font-size: 18px;
       letter-spacing: 0;
     }}
+    h3 {{
+      margin: 0;
+      font-size: 15px;
+    }}
     p {{
       margin: 4px 0;
       color: var(--muted);
@@ -1009,7 +1065,7 @@ def write_html(
       margin-top: 12px;
     }}
     main {{
-      max-width: 1180px;
+      max-width: 1440px;
       margin: 0 auto;
       padding: 24px;
     }}
@@ -1066,6 +1122,26 @@ def write_html(
       display: flex;
       gap: 10px;
       flex-wrap: wrap;
+      margin-bottom: 10px;
+    }}
+    .plot-views {{
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 20px;
+    }}
+    .plot-views.paired {{
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }}
+    .plot-panel {{
+      min-width: 0;
+    }}
+    .plot-panel > p {{
+      font-size: 13px;
+      margin: 6px 0 10px;
+    }}
+    .plot-panel + .plot-panel {{
+      border-left: 1px solid var(--line);
+      padding-left: 20px;
     }}
     .downloads a, .toolbar a {{
       border: 1px solid var(--line);
@@ -1079,6 +1155,17 @@ def write_html(
       max-width: 920px;
       height: auto;
       margin: 0 auto;
+    }}
+    @media (max-width: 800px) {{
+      header {{ padding: 20px; }}
+      main {{ padding: 12px; }}
+      .plot-views.paired {{ grid-template-columns: minmax(0, 1fr); }}
+      .plot-panel + .plot-panel {{
+        border-left: 0;
+        border-top: 1px solid var(--line);
+        padding-left: 0;
+        padding-top: 20px;
+      }}
     }}
   </style>
 </head>
@@ -1197,30 +1284,52 @@ def main(argv: Sequence[str]) -> int:
                   f"{expected_events(sample, args.luminosity_fb):.6g}")
 
     titles = common_histogram_titles(samples)
-    plots = [
-        plot_histogram(
+    plots = []
+    density_plots = [] if args.plot_mode == "both" else None
+    for title in titles:
+        plots.append(plot_histogram(
             title,
             samples,
             output_dir,
             args.normalization,
-            density=not args.no_density,
+            density=args.plot_mode == "density",
             signal_scale=args.signal_scale,
             simulation_label=simulation_label,
             energy_tev=energy_tev,
-        )
-        for title in titles
-    ]
+        ))
+        if density_plots is not None:
+            # Sparse signed HO histograms need not admit a unit-area shape.
+            # Keep their physical plot and explain the missing companion view.
+            invalid_samples = [
+                sample.label for sample in samples
+                if title in sample.histograms
+                and sum(sample.histograms[title].y) <= 0
+                and any(sample.histograms[title].y)
+            ]
+            if invalid_samples:
+                density_plots.append({
+                    "slug": plots[-1]["slug"],
+                    "error": "Unit-area shapes unavailable: a positive signed histogram sum is required. "
+                             "Non-positive sums for: " + ", ".join(invalid_samples) + ".",
+                })
+            else:
+                density_plots.append(plot_histogram(
+                    title, samples, output_dir, args.normalization, density=True,
+                    simulation_label=simulation_label, energy_tev=energy_tev,
+                    filename_suffix="_density",
+                ))
     summary_csv = write_summary_csv(samples, output_dir, luminosity_fb=args.luminosity_fb)
     index = write_html(
         output_dir,
         args.title,
         args.run_tag,
         args.normalization,
-        density=not args.no_density,
+        density=args.plot_mode == "density",
         samples=samples,
         plots=plots,
         summary_csv=summary_csv,
         luminosity_fb=args.luminosity_fb,
+        density_plots=density_plots,
     )
     log(f"Wrote report: {index}")
     return 0

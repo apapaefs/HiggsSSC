@@ -16,6 +16,7 @@ import unittest
 from unittest import mock
 
 from hgammagamma import run_gammagamma_ho_pipeline as pipeline
+from hgammagamma import make_gammagamma_report as diphoton_report
 
 
 class PipelineTests(unittest.TestCase):
@@ -78,6 +79,9 @@ class PipelineTests(unittest.TestCase):
                     "ho_pilot_01-powheg", "ho_pilot_01-campaign", "ho_pilot_01-report"])
                 validate.assert_called_once()
                 self.assertIn("--refine-failed", calls[2][1])
+                report_args = diphoton_report.build_parser().parse_args(calls[-1][1][2:])
+                self.assertEqual(report_args.plot_mode, "both")
+                self.assertEqual(report_args.normalization, "event_xsec")
                 card = (pipeline.HO / "runs/ho_pilot_01/powheg-pipeline.input").read_text()
                 self.assertIn("ncall2 500000", card)
                 self.assertIn("check_bad_st2 1", card)

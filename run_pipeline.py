@@ -305,7 +305,7 @@ def report(pipeline):
     else:
         command = [pipeline.python, REPO / "hgammagamma/make_gammagamma_report.py",
                    "--analysis-root", directory, "--run-tag", args.run_tag, "--output-dir", output,
-                   "--no-density", "--normalization", "event_xsec", "--luminosity-fb", args.luminosity_fb]
+                   "--normalization", "event_xsec", "--luminosity-fb", args.luminosity_fb]
     pipeline.call(args.run_tag + "-report", command)
     if not (output / "index.html").is_file():
         raise ValueError(f"report did not produce {output / 'index.html'}")

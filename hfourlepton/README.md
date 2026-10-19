@@ -16,6 +16,21 @@ The default pilot runs nine irreducible samples, shares stable-H production
 between its three MadSpin decay channels, analyzes both `perfect` and `ssc`
 profiles, and writes `hfourlepton/runs/TAG/report/index.html`.
 
+Each mass spectrum shows a unit-area density on the left and expected events
+per bin at the report's luminosity on the right. These pairs are displayed
+separately for every detector profile, final-state channel and process
+category, and appear vertically on narrow screens. Shapes use the signed
+cross sections within the displayed mass range, divided by the actual bin
+width. Underflow and overflow are excluded from the unit-area normalization;
+their physical yields are listed below each pair and in `report.json`.
+A non-positive signed sum makes the shape unavailable, while the physical
+event-count plot remains visible.
+
+The direct report command accepts `--plot-mode density` for shapes only and
+`--plot-mode counts` (or `--no-density`) for physical counts only. The default
+is `--plot-mode both`. These display options do not change the physical
+yields, cutflows or audit results in `report.json`.
+
 The report runs in strict mode: audit errors yield exit status 2 even if HTML
 was written. Accelerated heavy-flavour strata remain excluded from nominal
 totals until closure is established. See [validation](../VALIDATION.md).

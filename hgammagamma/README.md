@@ -49,6 +49,21 @@ weights for yields, not ROOT row counts. The physical yield is
 `1000 * luminosity_fb * selected_cross_section_pb`. Unit-area plots show shapes
 only; display magnification does not increase the signal yield.
 
+LO and HO reports show both views by default: unit-area densities on the left
+and stacked cross sections per bin in pb on the right. On narrow screens the
+views appear one below the other. Each view has its own PNG, SVG and CSV
+downloads; the density files have a `_density` suffix. Cross-section files
+keep their existing names. A non-positive signed histogram sum can prevent
+unit-area normalization; in that case the report explains why the shape is
+unavailable and still shows the physical cross-section plot.
+
+The direct `make_gammagamma_report.py` command accepts
+`--plot-mode density` for shapes only and `--plot-mode stacked` (or the
+existing `--no-density`) for stacked plots only. Single-view reports use the
+original filenames without a suffix. `--normalization` controls the stacked
+view; its default is `event_xsec`. `--luminosity-fb` adds physical event yields
+to the summary, without changing the plotted cross sections.
+
 The default `ssc` analysis includes smearing, acceptance, isolation,
 efficiencies and fake probabilities. The direct runner's legacy `none` mode
 uses different cuts and cannot model gamma+jet or dielectron fakes; it is not

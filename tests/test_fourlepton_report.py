@@ -13,12 +13,15 @@ from hfourlepton.make_fourlepton_report import (
     WeightStats,
     _comparison_identity,
     _manifest_optional_weight_names,
+    _spectrum_svg,
+    build_parser,
     cutflow_stats,
     generate_report,
     grouped_weight_stats,
     mass_spectrum,
     optional_weight_audit,
     response_closure_audit,
+    spectrum_plot_values,
 )
 
 
@@ -26,6 +29,49 @@ SELECTED_MASK = (1 << 10) - 1
 
 
 class FourLeptonReportHelpersTest(unittest.TestCase):
+    def spectrum(self, cross_sections=(4., -1., 1.)):
+        return {
+            "mass_range_gev": [100., 112.], "bin_width_gev": 5.,
+            "bins": [
+                {"type": "underflow", "cross_section_pb": 50., "events": 100000.},
+                *[{"type": "regular", "low_gev": low, "high_gev": high,
+                   "cross_section_pb": value, "events": 2000. * value}
+                  for low, high, value in zip((100., 105., 110.), (105., 110., 112.), cross_sections)],
+                {"type": "overflow", "cross_section_pb": 100., "events": 200000.},
+            ],
+        }
+
+    def test_density_uses_signed_bins_and_actual_widths_without_flow_bins(self) -> None:
+        spectrum = self.spectrum()
+        before = json.dumps(spectrum, sort_keys=True)
+        density = spectrum_plot_values(spectrum, density=True)
+        for value, expected in zip(density, (.2, -.05, .125)):
+            self.assertAlmostEqual(value, expected)
+        self.assertAlmostEqual(sum(value * width for value, width in zip(density, (5., 5., 2.))), 1.)
+        self.assertEqual(spectrum_plot_values(spectrum), [8000., -2000., 2000.])
+        self.assertEqual(json.dumps(spectrum, sort_keys=True), before)
+        for bin_value in spectrum["bins"]:
+            bin_value["events"] *= 10.
+        self.assertEqual(spectrum_plot_values(spectrum, density=True), density)
+        self.assertEqual(spectrum_plot_values(spectrum), [80000., -20000., 20000.])
+
+    def test_nonpositive_signed_sum_keeps_counts_but_has_no_unit_area_shape(self) -> None:
+        for cross_sections in ((1., -1., 0.), (-4., 1., 1.), (0., 0., 0.)):
+            with self.subTest(cross_sections=cross_sections):
+                spectrum = self.spectrum(cross_sections)
+                self.assertIsNone(spectrum_plot_values(spectrum, density=True))
+                self.assertIn("Unit-area shape unavailable", _spectrum_svg(spectrum, density=True))
+                self.assertIn('<svg ', _spectrum_svg(spectrum))
+                self.assertEqual(spectrum_plot_values(spectrum), [2000. * value for value in cross_sections])
+
+    def test_missing_normalization_is_not_replaced_by_zero(self) -> None:
+        spectrum = self.spectrum()
+        spectrum["bins"][1].update(cross_section_pb=None, events=None)
+        self.assertIsNone(spectrum_plot_values(spectrum, density=True))
+        self.assertIsNone(spectrum_plot_values(spectrum))
+        self.assertNotIn('<svg ', _spectrum_svg(spectrum, density=True))
+        self.assertIn("physical normalization is missing", _spectrum_svg(spectrum))
+
     def test_signed_weight_stats_keep_negative_and_zero_totals(self) -> None:
         stats = WeightStats()
         for value in (2.0, -3.0, 1.0):
@@ -255,6 +301,48 @@ class FourLeptonReportHelpersTest(unittest.TestCase):
 
 
 class FourLeptonReportOutputTest(unittest.TestCase):
+    def test_plot_modes_change_display_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            manifest = self._manifest(directory)
+            baseline = generate_report([manifest], directory / "both", record_loader=self._loader)
+            page = (directory / "both/index.html").read_text()
+            spectra = baseline["summary"]["mass_spectra"]
+            self.assertEqual(baseline["metadata"]["plot_mode"], "both")
+            self.assertEqual(page.count('class="spectrum-views paired"'), len(spectra))
+            self.assertEqual(page.count('<svg '), 2 * len(spectra))
+            self.assertLess(page.index('<h4>Unit-area shape</h4>'), page.index('<h4>Expected events</h4>'))
+            self.assertIn('class="spectrum-section" open', page)
+            self.assertIn("Underflow and overflow are excluded", page)
+            for mode, heading, other_heading in (
+                ("density", "Unit-area shape", "Expected events"),
+                ("counts", "Expected events", "Unit-area shape"),
+            ):
+                with self.subTest(mode=mode):
+                    result = generate_report([manifest], directory / mode,
+                                             record_loader=self._loader, plot_mode=mode)
+                    self.assertEqual(result["summary"], baseline["summary"])
+                    self.assertEqual(result["samples"], baseline["samples"])
+                    self.assertEqual(result["audit"], baseline["audit"])
+                    page = (directory / mode / "index.html").read_text()
+                    self.assertEqual(page.count('<svg '), len(spectra))
+                    self.assertIn(f'<h4>{heading}</h4>', page)
+                    self.assertNotIn(f'<h4>{other_heading}</h4>', page)
+                    self.assertNotIn('class="spectrum-views paired"', page)
+
+    def test_cli_selects_paired_default_and_single_views(self) -> None:
+        parser = build_parser()
+        for options, expected in (([], "both"), (["--no-density"], "counts"),
+                                  (["--plot-mode", "counts"], "counts"),
+                                  (["--plot-mode", "density"], "density")):
+            with self.subTest(options=options):
+                self.assertEqual(parser.parse_args(["manifest.json", *options]).plot_mode, expected)
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "report"
+            with self.assertRaisesRegex(ValueError, "unknown plot mode"):
+                generate_report([], output, plot_mode="invalid")
+            self.assertFalse(output.exists())
+
     def test_empty_populated_mapping_rejects_root_variations(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)

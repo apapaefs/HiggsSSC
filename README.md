@@ -63,6 +63,9 @@ python3 run_pipeline.py report --workflow gammagamma-lo \
   --run-tag lo_10k_01 --luminosity-fb 100
 ```
 
+Diphoton reports show unit-area shapes and physical cross-section plots side
+by side for each observable, with separate PNG, SVG and CSV downloads.
+
 A report cannot replace missing analysis. Read
 [recovery instructions](docs/TROUBLESHOOTING.md) before deleting files or
 starting another calculation.
@@ -91,6 +94,8 @@ python3 run_pipeline.py run --workflow fourlepton-lo --run-tag fourl_pilot_01
 ```
 
 Its report is `hfourlepton/runs/fourl_pilot_01/report/index.html`.
+Each mass spectrum pairs a unit-area shape with physical event counts,
+separately for each response profile, channel and process category.
 See [four-lepton physics and advanced samples](hfourlepton/README.md).
 
 ## Next steps and references
