@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "sqrt_s_tev": 40,
+  "higgs_mass_gev": 125.0,
+  "selection_profile": "ssc",
+  "detector_profiles": [
+    "perfect",
+    "ssc"
+  ],
+  "signal_modes": [
+    "ggf",
+    "vbf",
+    "wh",
+    "zh",
+    "tth"
+  ],
+  "ggzh_included": true,
+  "nominal_backgrounds": [
+    "qq_4l_NLO",
+    "gg_4l_loop_LO"
+  ],
+  "reducible_controls": [
+    "zbb",
+    "ttz",
+    "ttbar"
+  ],
+  "required_samples": [
+    "signal_gg_h_4e",
+    "signal_gg_h_4mu",
+    "signal_gg_h_2e2mu",
+    "signal_vbf_h_4e",
+    "signal_vbf_h_4mu",
+    "signal_vbf_h_2e2mu",
+    "signal_wp_h_4e",
+    "signal_wp_h_4mu",
+    "signal_wp_h_2e2mu",
+    "signal_wm_h_4e",
+    "signal_wm_h_4mu",
+    "signal_wm_h_2e2mu",
+    "signal_z_h_4e",
+    "signal_z_h_4mu",
+    "signal_z_h_2e2mu",
+    "signal_gg_z_h_4e",
+    "signal_gg_z_h_4mu",
+    "signal_gg_z_h_2e2mu",
+    "signal_tt_h_4e",
+    "signal_tt_h_4mu",
+    "signal_tt_h_2e2mu",
+    "bkg_qq_4e",
+    "bkg_qq_4mu",
+    "bkg_qq_2e2mu",
+    "bkg_gg_4e",
+    "bkg_gg_4mu",
+    "bkg_gg_2e2mu"
+  ],
+  "numerical_lhc_validation": "not_run",
+  "omissions": [
+    "bbH and tH",
+    "data-driven light-jet fakes",
+    "electroweak ZZjj and triboson backgrounds",
+    "signal-continuum interference"
+  ],
+  "higher_order_policy": "ggF: HJMiNNLO shapes + pure-HEFT ihixs N3LO rate; VBF/WH/qqZH/ttH and qq4l: native NLO+PS; ggZH and gg4l: loop-induced LO"
+}

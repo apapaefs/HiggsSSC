@@ -24,6 +24,7 @@
 # Generated LO four-lepton campaign and report outputs.
 /hfourlepton/runs/
 /hfourlepton/reports/
+/hfourlepton/plans/
 
 # Local four-lepton analysis build products.
 /hfourlepton/LOAnalysis/Code/*.o

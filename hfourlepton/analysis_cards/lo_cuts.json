@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "detector_response": "ssc",
+  "selection_profile": "gem",
+  "required_samples": [
+    "signal_gg_h_4e",
+    "signal_gg_h_4mu",
+    "signal_gg_h_2e2mu",
+    "bkg_qq_4e",
+    "bkg_qq_4mu",
+    "bkg_qq_2e2mu",
+    "bkg_gg_4e",
+    "bkg_gg_4mu",
+    "bkg_gg_2e2mu"
+  ],
+  "preselection": {
+    "m4l": {
+      "min": 105.0,
+      "max": 140.0
+    }
+  },
+  "cuts": {
+    "m4l": {
+      "min": 120.0,
+      "max": 130.0
+    }
+  },
+  "features": [
+    "mZ1",
+    "mZ2",
+    "pt4l",
+    "abs_y4l",
+    "pt1",
+    "pt2",
+    "pt3",
+    "pt4",
+    "min_delta_r"
+  ],
+  "split_fractions": [
+    0.6,
+    0.2,
+    0.2
+  ],
+  "seed": 12345,
+  "background_fractional_uncertainty": 0.1,
+  "min_background_effective_events": 25.0,
+  "xgboost": {
+    "n_estimators": 200,
+    "max_depth": 3,
+    "learning_rate": 0.05,
+    "n_jobs": 1
+  }
+}

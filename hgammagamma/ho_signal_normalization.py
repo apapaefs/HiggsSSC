@@ -1,6 +1,6 @@
 """Validated, portable inclusive normalization for the HJMiNNLO HO signal.
 
-Only the HO diphoton ggF sample consumes these records.  The production rate
+The HO diphoton and four-lepton ggF samples consume these records. The production rate
 excludes the Higgs branching fraction, detector response and generator cuts.
 Numerical integration errors and theory uncertainties remain separate.
 """
@@ -24,6 +24,7 @@ NATIVE_PDF_ID = 336100
 GF = 1.1663899987193257e-5
 NUMERICAL_TOLERANCE = 0.0005
 PROFILE = "ssc40-ho-pure-heft-v1"
+PROFILE_ENERGIES = {PROFILE: 40000., "lhc13-ho-pure-heft-v1": 13000.}
 SCALE_POINTS = ((1., 1.), (.5, .5), (.5, 1.), (1., .5), (1., 2.), (2., 1.), (2., 2.))
 
 
@@ -53,7 +54,7 @@ def finite_number(value, name, *, positive=False, nonnegative=False):
 
 def _equal_number(value, expected, name):
     if not math.isclose(finite_number(value, name), expected, rel_tol=1e-10, abs_tol=1e-12):
-        raise ValueError(f"{name} differs from the {PROFILE} normalization profile")
+        raise ValueError(f"{name} differs from the required normalization convention")
 
 
 def _hash(value, name):
@@ -178,7 +179,11 @@ def validate_record(record):
         _hash(record["fingerprint"], "record fingerprint")
         if record["fingerprint"] != record_sha256(record):
             raise ValueError("ihixs record fingerprint does not match its contents")
-        expected = {"schema_version": 1, "profile": PROFILE, "normalization_kind": "ihixs_n3lo",
+        profile = record.get("profile")
+        if profile not in PROFILE_ENERGIES:
+            raise ValueError("unknown ihixs energy profile")
+        energy = PROFILE_ENERGIES[profile]
+        expected = {"schema_version": 1, "profile": profile, "normalization_kind": "ihixs_n3lo",
                     "process": "ggF", "hard_model": "pure_heft", "qcd_order": "N3LO",
                     "top_scheme": "on-shell", "pdf_set": PDF_SET, "pdf_member": 0,
                     "electroweak_corrections": False, "resummation": False,
@@ -187,7 +192,7 @@ def validate_record(record):
         for key, value in expected.items():
             if record[key] != value:
                 raise ValueError(f"ihixs record has incompatible {key}")
-        for key, value in {"sqrt_s_gev": 40000., "higgs_mass_gev": 125.,
+        for key, value in {"sqrt_s_gev": energy, "higgs_mass_gev": 125.,
                            "top_mass_gev": 173.2, "gf_gev_minus2": GF,
                            "mur_gev": 62.5, "muf_gev": 62.5, "alpha_s_mz": .118}.items():
             _equal_number(record[key], value, key)
@@ -325,7 +330,7 @@ def validate_record(record):
             _equal_number(record["uncertainties"][key], expected_uncertainty, key)
         native = record["native_parameters"]
         for key, value in {"hmass": 125., "hwidth": .004152, "tmass": 173.2, "topmass": 173.2,
-                           "ebeam1": 20000., "ebeam2": 20000., "lhans1": 336100., "lhans2": 336100.,
+                           "ebeam1": energy / 2., "ebeam2": energy / 2., "lhans1": 336100., "lhans2": 336100.,
                            "ih1": 1., "ih2": 1., "minlo": 1., "minnlo": 1.,
                            "alphas_from_pdf": 1., "use_NNLOPS_pdfs": 1.,
                            "renscfact": 1., "facscfact": 1., "gf_gev_minus2": GF}.items():

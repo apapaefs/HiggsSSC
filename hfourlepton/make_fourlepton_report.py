@@ -43,6 +43,8 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR.parent) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR.parent))
 DEFAULT_LUMINOSITY_FB = 100.0
 DEFAULT_SIGNAL_REGION_GEV = (120.0, 130.0)
 DEFAULT_MASS_RANGE_GEV = (70.0, 200.0)
@@ -689,11 +691,16 @@ FOUR_LEPTON_BRANCH_ALIASES: dict[str, tuple[str, ...]] = {
     "n_jets": ("n_jets",),
     "n_bjets": ("n_bjets",),
     "met_pt": ("met_pt", "met"),
+    "lepton_pt": ("lepton_pt",),
+    "lepton_eta": ("lepton_eta",),
+    "z1_delta_r": ("z1_delta_r",),
+    "z2_delta_r": ("z2_delta_r",),
 }
 
 METADATA_BRANCH_ALIASES: dict[str, tuple[str, ...]] = {
     "schema_version": ("schema_version",),
     "response_profile": ("response_profile", "detector_profile", "detector_response"),
+    "selection_profile": ("selection_profile",),
     "sample": ("sample", "sample_name"),
     "category": ("category",),
     "requested_channel": ("requested_channel", "channel"),
@@ -854,6 +861,7 @@ def _read_with_pyroot(path: Path) -> RootRecords:
                     if canonical == "cut_probabilities":
                         value = [float(value[i]) for i in range(10)]
                     elif canonical in {
+                        "lepton_pt", "lepton_eta",
                         "optional_weights",
                         "optional_selected_event_weights",
                     }:
@@ -878,6 +886,7 @@ def _read_with_pyroot(path: Path) -> RootRecords:
                             if canonical
                             in {
                                 "response_profile",
+                                "selection_profile",
                                 "sample",
                                 "category",
                                 "requested_channel",
@@ -1299,6 +1308,43 @@ def _normalization(
     sample: ManifestSample, generated: WeightStats, selected: WeightStats, audit: Audit
 ) -> dict[str, Any]:
     manifest_normalization = nested_mapping(sample.raw, "normalization")
+    if sample.raw.get("order") == "ho":
+        try:
+            from hgammagamma import ho_shower_completion as completion
+            saved = sample.raw["shower_completion"]
+            completion.validate_completion(saved, {"sample": sample.name,
+                "nevents_requested": sample.raw["nevents_requested"],
+                "lhe_file": sample.raw["input_lhe"], "lhe": {"events": saved["lhe_events"]}},
+                directory=Path(saved["herwig_dir"]).parent)
+            if generated.entries != saved["saved_events"]:
+                raise ValueError("SourceEvents count differs from the completed shower")
+            for observed, key in ((generated.sumw, "sum_weight"), (generated.sumw2, "sum_weight_squared"),
+                                  (generated.sumabsw, "sum_abs_weight")):
+                if not math.isclose(observed, saved["root_summary"][key], rel_tol=1e-7, abs_tol=1e-10):
+                    raise ValueError("SourceEvents weights differ from the completed shower")
+            if not math.isclose(sample.denominator_sumw, saved["source_weights"]["sum_weight"], rel_tol=1e-10):
+                raise ValueError("normalization omits or changes consumed signed source weights")
+        except (ValueError, KeyError, TypeError) as error:
+            audit.errors.append(f"matched shower normalization: {error}")
+    if (sample.raw.get("production_mode") == "ggf" and sample.raw.get("matching") == "POWHEG"
+            and manifest_normalization.get("normalization_kind") != "ihixs_n3lo"):
+        audit.errors.append("HJMiNNLO ggF is missing its ihixs normalization")
+    if manifest_normalization.get("normalization_kind") == "ihixs_n3lo":
+        try:
+            from hgammagamma import ho_signal_normalization as norm
+            record = norm.validate_record(manifest_normalization["ihixs"])
+            if sample.raw.get("production_mode") != "ggf" or sample.raw.get("matching") != "POWHEG":
+                raise ValueError("ihixs normalization requires HJMiNNLO ggF")
+            if record["fingerprint"] != manifest_normalization.get("ihixs_record_sha256"):
+                raise ValueError("ihixs fingerprint mismatch")
+            if (record["sqrt_s_gev"] != sample.raw.get("sqrt_s_gev")
+                    or record["higgs_mass_gev"] != sample.raw.get("higgs_mass_gev")):
+                raise ValueError("ihixs collider energy or Higgs mass differs from the sample")
+            target = record["cross_section_pb"] * manifest_normalization["target_branching_fraction"]
+            if not math.isclose(target, sample.target_cross_section_pb, rel_tol=1e-10):
+                raise ValueError("ihixs rate or branching fraction differs from the analysis")
+        except (ValueError, KeyError, TypeError) as error:
+            audit.errors.append(f"signal normalization: {error}")
     denominator_kind = first_present(
         manifest_normalization, "denominator_kind", "normalization_denominator_kind"
     )
@@ -1616,6 +1662,7 @@ def _expected_runtime_metadata(sample: ManifestSample) -> dict[str, Any]:
     expected: dict[str, Any] = {
         "schema_version": 1,
         "response_profile": sample.detector_profile,
+        "selection_profile": sample.raw.get("selection_profile"),
         "sample": sample.name,
         "category": sample.category,
         "requested_channel": sample.channel,
@@ -2977,7 +3024,7 @@ summary {{ cursor:pointer; font-weight:650; }}
 </head>
 <body><main>
 <h1>{title}</h1>
-<p class="subtitle">LO simulation at {_format_number(metadata.get('sqrt_s_tev'))} TeV;
+<p class="subtitle">Simulation at {_format_number(metadata.get('sqrt_s_tev'))} TeV;
 signed event weights; luminosity {_format_number(metadata['luminosity_fb'])} fb<sup>&minus;1</sup>.
 Signal region: {low:g} &lt; m<sub>4l</sub> &lt; {high:g} GeV.</p>
 
@@ -3082,7 +3129,7 @@ def generate_report(
     signal_region_gev: tuple[float, float] = DEFAULT_SIGNAL_REGION_GEV,
     mass_range_gev: tuple[float, float] = DEFAULT_MASS_RANGE_GEV,
     mass_bin_width_gev: float = DEFAULT_MASS_BIN_WIDTH_GEV,
-    title: str = "LO H -> ZZ* -> 4l analysis",
+    title: str = "H -> ZZ* -> 4l analysis",
     closure_tolerance: float = 1.0e-9,
     record_loader: Callable[[Path], RootRecords] = load_root_records,
     allow_unvalidated_bias: bool = False,
@@ -3281,7 +3328,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-density", dest="plot_mode", action="store_const", const="counts",
         help="Show only physical event counts; alias for --plot-mode counts.",
     )
-    parser.add_argument("--title", default="LO H -> ZZ* -> 4l analysis")
+    parser.add_argument("--title", default="H -> ZZ* -> 4l analysis")
     parser.add_argument("--closure-tolerance", type=positive_float, default=1.0e-9)
     parser.add_argument(
         "--strict",

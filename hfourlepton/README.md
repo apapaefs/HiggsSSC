@@ -1,12 +1,16 @@
 # Higgs to four leptons at the 40 TeV SSC
 
-This directory contains the LO campaign for
+This directory contains LO and higher-order workflows for
 
 ```text
 pp -> H -> ZZ* -> 4e, 4mu, 2e2mu
 ```
 
-and its neutral-current and heavy-flavour backgrounds. The `perfect` and
+and its neutral-current and heavy-flavour backgrounds. The new
+[HO workflow](HIGHER_ORDER.md) includes ggF, VBF, VH and ttH, 13 TeV CMS-like
+validation, 40 TeV SSC production, cuts and XGBoost. Its numerical validation
+must be run by the user. The sections below document the original LO workflow.
+The `perfect` and
 `ssc` profiles reuse generated LHE events but have separate showers/analyses.
 
 ## Run and inspect
@@ -41,7 +45,7 @@ retains `--sample-nevents NAME=N`, `--run-samples NAME1,NAME2` and group aliases
 Use its `--help` and a new run tag for changed configurations. Direct report
 calls accept both response manifests; `--strict` enables the same audit guard.
 
-## External LHE and future NLO input
+## Legacy external-LHE interface
 
 Use the external backend with one `KEY=PATH` assignment per sample or shared
 production group:

@@ -13,6 +13,13 @@ log-pT interpolation; deterministic electron and muon smearing; nearest-photon
 dressing and isolation exclusions; OSSF pairing and channel assignment; and
 exclusive response-subset probability closure.
 
+`--selection-profile cms` selects the 13 TeV particle comparison cuts and
+requires the `perfect` response. `--selection-profile ssc` uses the LHC-like
+pairing topology with GEM acceptance and isolation; pair it with
+`--response-profile ssc` for detector smearing. The default `gem` profile
+preserves the original LO cuts. See the
+[HO run guide](../../HIGHER_ORDER.md) for the cut definitions and validation scope.
+
 The mandatory input is a `Data` tree containing `numparticles/I`,
 `objects[8][10000]/D`, and `evweight/D`. The analyzer also consumes
 `numJets` with `theJets[5][100]`, `numbJets` with `thebJets[5][100]`,

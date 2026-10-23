@@ -84,7 +84,7 @@ class StudentPipelineTests(unittest.TestCase):
 
     def test_explicit_tags_and_workflow_supported_options(self):
         for options in (["run", "--workflow", "gammagamma-lo"],
-                        ["cuts", "--workflow", "fourlepton-lo", "--run-tag", "pilot"],
+                        ["validate", "--workflow", "fourlepton-lo", "--run-tag", "pilot"],
                         ["run", "--workflow", "gammagamma-lo", "--run-tag", "pilot", "--signal-lhe", "events.lhe"]):
             with self.subTest(options=options), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 cli.parse_args(options)

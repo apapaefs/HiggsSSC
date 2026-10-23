@@ -28,6 +28,8 @@ from typing import Iterable, Mapping, Sequence
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 DEFAULT_MG5_DIR = REPO_ROOT / "MG5_aMC_v3_5_15"
 DEFAULT_HERWIG_PREFIX = Path.home() / "Projects/Herwig/Herwig-REAL-stable-gcc-full"
 DEFAULT_LINUX_HERWIG_MODULE = "herwig/stable"
@@ -89,6 +91,30 @@ CUT_STAGES = [
 ]
 
 
+def generation_cuts(cfg):
+    if cfg.order == "ho":
+        from hfourlepton.higher_order import GENERATION_CUTS as loose_cuts
+        return dict(loose_cuts)
+    return dict(GENERATION_CUTS)
+
+
+def cut_stages(cfg):
+    stages = list(CUT_STAGES)
+    if cfg.selection_profile != "gem":
+        stages[5] = ("topology", "OS masses >4 GeV, leading pT >20/10 GeV, pair separation >0.02", 5)
+        stages[6] = ("z1_window", "40 < mZ1 < 120 GeV", 6)
+        stages[7] = ("z2_window", "12 < mZ2 < 120 GeV", 7)
+        if cfg.selection_profile == "cms":
+            stages[2] = ("electron_crack", "No electron crack cut at particle level", 2)
+    return stages
+
+
+def cut_mask_definition(cfg):
+    if cfg.selection_profile == "gem":
+        return CUT_MASK_DEFINITION
+    return CUT_MASK_DEFINITION.replace("all_ossf_masses_gt_4", "os_mass_pt_dr").replace("z1_70_100", "z1_40_120").replace("z2_10_100", "z2_12_120")
+
+
 @dataclass(frozen=True)
 class SampleSpec:
     """Declarative hard-process and normalization description."""
@@ -109,6 +135,10 @@ class SampleSpec:
     prompt_decay_profile: str = ""
     heavy_flavour_candidate: bool = False
     bias_of: str | None = None
+    production_mode: str = ""
+    matching: str = "LO"
+    pdf_name: str = LO_PDF_NAME
+    lhaid: int = LO_PDF_LHAID
 
     @property
     def is_signal(self) -> bool:
@@ -312,6 +342,11 @@ class Config:
     collier_library: Path | None
     muon_resolution_scale: float
     pileup_noise: bool
+    order: str = "lo"
+    selection_profile: str = "gem"
+    signal_modes: str = "ggf"
+    signal_lhe: Path | None = None
+    signal_normalization: Path | None = None
 
     @property
     def template_in(self) -> Path:
@@ -483,6 +518,11 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="NAME=N",
         help="per-sample event override; repeat as needed",
     )
+    parser.add_argument("--order", choices=("lo", "ho"), default="lo")
+    parser.add_argument("--selection-profile", choices=("gem", "ssc", "cms"), default="gem")
+    parser.add_argument("--signal-modes", default="ggf", help="comma-separated ggf,vbf,wh,zh,tth (HO), or all")
+    parser.add_argument("--signal-lhe", type=Path, help="HO stable-H HJMiNNLO LHE")
+    parser.add_argument("--signal-normalization", type=Path, help="validated ihixs N3LO ggF record")
     parser.add_argument("--sample-set", choices=SAMPLE_SETS, default=env_text("SAMPLE_SET", "irreducible"))
     parser.add_argument("--run-samples", default=env_text("RUN_SAMPLES", "all"))
     parser.add_argument(
@@ -609,6 +649,9 @@ def parse_config(argv: Sequence[str]) -> Config:
     known_names = set(SAMPLES_BY_NAME) | {
         f"{sample.name}_hfbiased" for sample in SAMPLES if sample.heavy_flavour_candidate
     }
+    if args.order == "ho":
+        from hfourlepton.higher_order import all_samples
+        known_names.update(s.name for s in all_samples())
     unknown_overrides = sorted(set(sample_nevents) - known_names)
     if unknown_overrides:
         parser.error("unknown --sample-nevents sample(s): " + ",".join(unknown_overrides))
@@ -621,7 +664,15 @@ def parse_config(argv: Sequence[str]) -> Config:
         parser.error("--external-cross-section values must be finite and positive")
     if args.bias_control_events <= 0:
         parser.error("--bias-control-events must be positive")
-    if not math.isclose(args.higgs_mass, HIGGS_MASS_GEV, abs_tol=1e-9):
+    if args.order == "ho" and not any(x.startswith("--higgs-mass") for x in argv) and "HIGGS_MASS" not in os.environ:
+        args.higgs_mass = 125.0
+    if args.selection_profile == "cms" and args.detector_response != "perfect":
+        parser.error("cms comparison requires --detector-response perfect")
+    if args.order == "ho" and args.higgs_mass != 125.0:
+        parser.error("HO uses mH=125 GeV, matching HJMiNNLO and ihixs")
+    if args.order == "ho" and external_cross_section_raw:
+        parser.error("HO rates require ihixs for ggF and native LHE cross sections for other samples")
+    if args.order == "lo" and not math.isclose(args.higgs_mass, HIGGS_MASS_GEV, abs_tol=1e-9):
         parser.error(f"this campaign fixes --higgs-mass to {HIGGS_MASS_GEV}")
     if args.ebeam <= 0 or args.luminosity_fb <= 0:
         parser.error("beam energy and luminosity must be positive")
@@ -697,6 +748,9 @@ def parse_config(argv: Sequence[str]) -> Config:
         collier_library=collier.expanduser() if collier else None,
         muon_resolution_scale=args.muon_resolution_scale,
         pileup_noise=not args.no_pileup_noise,
+        order=args.order, selection_profile=args.selection_profile, signal_modes=args.signal_modes,
+        signal_lhe=args.signal_lhe.resolve() if args.signal_lhe else None,
+        signal_normalization=args.signal_normalization.resolve() if args.signal_normalization else None,
     )
 
 
@@ -1132,6 +1186,9 @@ def biased_variant(sample: SampleSpec) -> SampleSpec:
 
 
 def selected_samples(cfg: Config) -> list[SampleSpec]:
+    if cfg.order == "ho":
+        from hfourlepton.higher_order import selected_samples as higher_order_samples
+        return higher_order_samples(cfg)
     requested = requested_sample_names(cfg)
     nominal = [
         sample
@@ -1190,12 +1247,17 @@ def group_event_count(
     ]
     if not counts:
         raise ValueError(f"empty production group: {production_group_id}")
-    return max(counts)
+    return sum(counts) if cfg.order == "ho" else max(counts)
 
 
 def require_inputs(cfg: Config, samples: Sequence[SampleSpec]) -> None:
     if cfg.dry_run:
         return
+    if cfg.order == "ho" and any(s.production_mode == "ggf" for s in samples):
+        from hfourlepton.higher_order import load_signal_record
+        load_signal_record(cfg)
+        if cfg.signal_lhe is None or not cfg.signal_lhe.is_file():
+            die("HO ggF requires a completed --signal-lhe")
     if not cfg.template_in.exists():
         die(f"missing Herwig template: {cfg.template_in}")
     needs_mg5 = cfg.source_backend == "mg5" or any(sample.is_signal for sample in samples)
@@ -1218,6 +1280,8 @@ def require_inputs(cfg: Config, samples: Sequence[SampleSpec]) -> None:
         )
     if cfg.source_backend == "external-lhe":
         for sample in samples:
+            if cfg.order == "ho" and sample.production_mode == "ggf":
+                continue
             path = resolve_external_lhe(sample, cfg)
             if not cfg.dry_run and not path.exists():
                 die(f"external LHE does not exist: {path}")
@@ -1306,7 +1370,7 @@ def patch_run_card(
         "pdlabel": "lhapdf",
         "pdlabel1": "lhapdf",
         "pdlabel2": "lhapdf",
-        "lhaid": str(LO_PDF_LHAID),
+        "lhaid": str(sample.lhaid),
     }
     has_me_leptons = any(
         token in sample.process for token in ("e+", "e-", "mu+", "mu-")
@@ -1314,10 +1378,10 @@ def patch_run_card(
     if has_me_leptons:
         updates.update(
             {
-                "ptl": str(GENERATION_CUTS["ptl_min_gev"]),
-                "etal": str(GENERATION_CUTS["etal_max"]),
-                "mmll": str(GENERATION_CUTS["mmll_min_gev"]),
-                "drll": str(GENERATION_CUTS["drll_min"]),
+                "ptl": str(generation_cuts(cfg)["ptl_min_gev"]),
+                "etal": str(generation_cuts(cfg)["etal_max"]),
+                "mmll": str(generation_cuts(cfg)["mmll_min_gev"]),
+                "drll": str(generation_cuts(cfg)["drll_min"]),
             }
         )
     if cfg.dry_run:
@@ -1372,12 +1436,12 @@ def patch_param_card_higgs_mass(card: Path, cfg: Config) -> float | None:
     )
 
 
-def rewrite_run_card_include(text: str) -> str:
+def rewrite_run_card_include(text: str, lhaid: int = LO_PDF_LHAID) -> str:
     updates = {
         "PDLABEL": "'lhapdf'",
         "PDSUBLABEL(1)": "'lhapdf'",
         "PDSUBLABEL(2)": "'lhapdf'",
-        "LHAID": str(LO_PDF_LHAID),
+        "LHAID": str(lhaid),
     }
     output: list[str] = []
     for line in text.splitlines(keepends=True):
@@ -1405,7 +1469,7 @@ def generate_and_patch_run_card_include(process_dir: Path, cfg: Config) -> None:
     run_runtime_command(["make", "-C", source_dir, "run_card.inc"], cfg)
     if not include.exists():
         die(f"MG5 did not generate {include}")
-    include.write_text(rewrite_run_card_include(include.read_text()))
+    include.write_text(rewrite_run_card_include(include.read_text(), 335900 if cfg.order == "ho" else LO_PDF_LHAID))
     setrun = source_dir / "setrun.o"
     if setrun.exists():
         setrun.unlink()
@@ -1431,7 +1495,7 @@ def patch_mg5_hidden_pdf_defaults(process_dir: Path, cfg: Config) -> None:
             'self.add_param("pdlabel2", "lhapdf", hidden=True, allowed=valid_pdf, fortran_name="pdsublabel(2)")'
         ),
         'self.add_param("lhaid", 230000, hidden=True)': (
-            f'self.add_param("lhaid", {LO_PDF_LHAID}, hidden=True)'
+            f'self.add_param("lhaid", {335900 if cfg.order == "ho" else LO_PDF_LHAID}, hidden=True)'
         ),
     }
     text = banner.read_text()
@@ -1486,7 +1550,7 @@ def patch_mg5_pdf_label_sync(process_dir: Path, cfg: Config) -> None:
             "                elif upper_line.startswith('PDSUBLABEL(2)'):\n"
             "                    run_card_line = \"      PDSUBLABEL(2) = 'lhapdf'\\n\"\n"
             "                elif upper_line.startswith('LHAID'):\n"
-            f"                    run_card_line = \"      LHAID = {LO_PDF_LHAID}\\n\"\n"
+            f"                    run_card_line = \"      LHAID = {335900 if cfg.order == 'ho' else LO_PDF_LHAID}\\n\"\n"
             "                patched_run_card_lines.append(run_card_line)\n"
             "            with open(run_card_inc, 'w') as run_card_stream:\n"
             "                run_card_stream.writelines(patched_run_card_lines)\n"
@@ -2261,6 +2325,9 @@ def normalization_from_lhe(
     *,
     stable_signal_lhe: Path | None = None,
 ) -> dict[str, object]:
+    if cfg.order == "ho":
+        from hfourlepton.higher_order import normalization
+        return normalization(sample, native_lhe, cfg, stable_signal_lhe)
     native_override, native_override_key = (
         external_cross_section_override(sample, cfg)
         if cfg.source_backend == "external-lhe"
@@ -2638,6 +2705,9 @@ def write_herwig_input(
     *,
     reweighter_library: Path | None = None,
 ) -> dict[str, object]:
+    if cfg.order == "ho":
+        from hfourlepton.higher_order import write_herwig_input as matched_input
+        return matched_input(sample, lhe_file, seed, nevents, output, cfg)
     block, metadata = decay_selection_block(
         sample,
         cfg,
@@ -2715,6 +2785,7 @@ def analysis_command(
         root_input,
         "--response-profile",
         cfg.detector_response,
+        "--selection-profile", cfg.selection_profile,
         "--seed",
         seed,
         "--weight-scale",
@@ -2945,21 +3016,30 @@ def sample_manifest_entry(sample: SampleSpec, cfg: Config) -> dict[str, object]:
         "name": sample.name,
         "label": sample.label,
         "category": sample.category,
+        "order": cfg.order,
         "channel": sample.channel,
         "perturbative_order": (
             cfg.external_perturbative_order
-            if cfg.source_backend == "external-lhe"
+            if cfg.source_backend == "external-lhe" and cfg.order == "lo"
             else sample.perturbative_order
         ),
-        "source_kind": cfg.source_backend,
+        "source_kind": "powheg" if sample.matching == "POWHEG" else cfg.source_backend,
         "declared_source_kind": sample.source_kind,
         "model": sample.model,
+        "hard_model": "pure_heft" if sample.matching == "POWHEG" else "SM",
         "process": sample.process,
         "decay_strategy": sample.decay_strategy,
         "normalization_rule": sample.normalization_rule,
         "response_mode": sample.response_mode,
-        "cut_mask_definition": CUT_MASK_DEFINITION,
+        "cut_mask_definition": cut_mask_definition(cfg),
+        "selection_profile": cfg.selection_profile,
+        "production_mode": sample.production_mode,
+        "matching": sample.matching,
+        "pdf_name": sample.pdf_name,
+        "pdf_lhaid": sample.lhaid,
         "production_group_id": sample.production_group_id,
+        "analysis_source_group": sample.name if cfg.order == "ho" else sample.production_group_id,
+        "sqrt_s_gev": 2 * cfg.ebeam,
         "nevents_requested": cfg.events_for(sample),
         "seed": seed_for(f"{sample.name}:analysis", cfg),
         "seeds": {
@@ -2974,7 +3054,7 @@ def sample_manifest_entry(sample: SampleSpec, cfg: Config) -> dict[str, object]:
         },
         "status": "planned",
         "matrix_element_generation_cuts": (
-            dict(GENERATION_CUTS)
+            generation_cuts(cfg)
             if me_lepton_cuts
             else {
                 "ptl_min_gev": None,
@@ -3063,7 +3143,7 @@ def sample_manifest_entry(sample: SampleSpec, cfg: Config) -> dict[str, object]:
             "handlers": decay_reweighter_handlers(sample),
         },
         "external_lhe": (
-            str(resolve_external_lhe(sample, cfg))
+            str(cfg.signal_lhe if cfg.order == "ho" and sample.production_mode == "ggf" else resolve_external_lhe(sample, cfg))
             if cfg.source_backend == "external-lhe"
             else None
         ),
@@ -3106,6 +3186,12 @@ def campaign_tracked_inputs(cfg: Config) -> dict[str, dict[str, object]]:
     }
     if cfg.herwig_b_decays is not None:
         paths["herwig_b_decays"] = cfg.herwig_b_decays
+    if cfg.order == "ho":
+        paths["higher_order_adapter"] = SCRIPT_DIR / "higher_order.py"
+        paths["matched_template"] = REPO_ROOT / "hgammagamma/HOAnalysis/HW-LHE.in"
+        paths["mcatnlo_settings"] = REPO_ROOT / "hgammagamma/HOAnalysis/MCatNLO.in"
+        if cfg.signal_normalization:
+            paths["signal_normalization"] = cfg.signal_normalization
     return {
         name: file_record(path, dry_run=False)
         for name, path in sorted(paths.items())
@@ -3136,6 +3222,11 @@ def configuration_fingerprint(
     if software_versions is None:
         software_versions = campaign_software_versions(cfg)
     payload = {
+        "order": cfg.order,
+        "selection_profile": cfg.selection_profile,
+        "signal_modes": cfg.signal_modes,
+        "signal_lhe": str(cfg.signal_lhe) if cfg.signal_lhe else None,
+        "signal_lhe_sha256": sha256_file(cfg.signal_lhe) if cfg.signal_lhe and cfg.signal_lhe.is_file() and not cfg.dry_run else None,
         "sample_set": cfg.sample_set,
         "samples": [
             {
@@ -3172,7 +3263,7 @@ def configuration_fingerprint(
         "signal_channel_fractions": cfg.signal_channel_fractions,
         "signal_channel_fraction_source": cfg.signal_channel_fraction_source,
         "signal_channel_fraction_input": cfg.signal_channel_fraction_input,
-        "pdf_lhaid": LO_PDF_LHAID,
+        "pdf_lhaid": "per_sample" if cfg.order == "ho" else LO_PDF_LHAID,
         "seed_base": cfg.seed_base,
         "heavy_flavour_bias": cfg.heavy_flavour_bias,
         "analysis_target": cfg.analysis_target,
@@ -3216,13 +3307,13 @@ def build_manifest(
         ),
         "pdf": {
             "name": (
-                None if cfg.source_backend == "external-lhe" else LO_PDF_NAME
+                "per_sample" if cfg.order == "ho" else None if cfg.source_backend == "external-lhe" else LO_PDF_NAME
             ),
             "lhaid": (
-                None if cfg.source_backend == "external-lhe" else LO_PDF_LHAID
+                None if cfg.order == "ho" or cfg.source_backend == "external-lhe" else LO_PDF_LHAID
             ),
             "perturbative_order": (
-                cfg.external_perturbative_order
+                "per_sample" if cfg.order == "ho" else cfg.external_perturbative_order
                 if cfg.source_backend == "external-lhe"
                 else "LO"
             ),
@@ -3231,7 +3322,7 @@ def build_manifest(
                 if cfg.source_backend == "external-lhe"
                 else "campaign_MG5_run_card"
             ),
-            "herwig_shower_pdf_name": cfg.herwig_pdf,
+            "herwig_shower_pdf_name": "per_sample" if cfg.order == "ho" else cfg.herwig_pdf,
         },
         "higgs": {
             "mass_gev": cfg.higgs_mass,
@@ -3257,7 +3348,9 @@ def build_manifest(
                 "ATLAS-CONF-2017-046.pdf"
             ),
         },
-        "generation_cuts": dict(GENERATION_CUTS),
+        "generation_cuts": generation_cuts(cfg),
+        "selection_profile": cfg.selection_profile,
+        "order": cfg.order,
         "cut_stages": [
             {
                 "name": name,
@@ -3265,7 +3358,7 @@ def build_manifest(
                 "bit": bit,
                 "required_mask": (1 << (bit + 1)) - 1,
             }
-            for name, label, bit in CUT_STAGES
+            for name, label, bit in cut_stages(cfg)
         ],
         "detector": {
             "profile": cfg.detector_response,
@@ -3464,8 +3557,8 @@ def production_stage_identity(
         "seed": seed_for(sample.production_group_id, cfg),
         "beam_energy_gev": cfg.ebeam,
         "higgs_mass_gev": cfg.higgs_mass,
-        "pdf_lhaid": LO_PDF_LHAID,
-        "generator_cuts": dict(GENERATION_CUTS),
+        "pdf_lhaid": sample.lhaid,
+        "generator_cuts": generation_cuts(cfg),
         "mg5_version": mg5_version(cfg.mg5_dir),
         "runner_sha256": sha256_file(Path(__file__).resolve()),
         "collier_library_sha256": (
@@ -3559,6 +3652,9 @@ def obtain_production_lhe(
     selected: Sequence[SampleSpec],
     cfg: Config,
 ) -> Path:
+    if cfg.order == "ho":
+        from hfourlepton.higher_order import obtain_production
+        return obtain_production(sample, selected, cfg)
     if cfg.source_backend == "external-lhe":
         return resolve_external_lhe(sample, cfg).resolve()
     return obtain_mg5_lhe(sample, selected, cfg)
@@ -4110,6 +4206,9 @@ def run_herwig(
     lhe_file: Path,
     cfg: Config,
 ) -> tuple[Path, dict[str, object]]:
+    if cfg.order == "ho":
+        from hfourlepton.higher_order import run_shower
+        return run_shower(sample, lhe_file, cfg)
     work_dir = sample_work_dir(sample, cfg)
     herwig_dir = work_dir / "herwig"
     events_dir = herwig_dir / "events"
@@ -4276,7 +4375,8 @@ def run_sample(
             resumed_summary = read_analysis_summary(summary_path)
         except ValueError as error:
             die(str(error))
-        if int(resumed_summary.get("events_read", -1)) != cfg.events_for(sample):
+        expected_events = entry.get("shower_completion", {}).get("saved_events", cfg.events_for(sample))
+        if int(resumed_summary.get("events_read", -1)) != expected_events:
             die(
                 f"completed sample {sample.name} has an unexpected event count; "
                 "rerun with --force"
@@ -4322,6 +4422,8 @@ def run_sample(
     write_manifest(manifest, cfg)
 
     stable_or_final_lhe = obtain_production_lhe(sample, selected, cfg)
+    if cfg.order == "ho" and sample.is_signal and not cfg.dry_run:
+        entry["hard_event_slice"] = json.loads(stable_or_final_lhe.with_suffix(".slice.json").read_text())
     source_lhe_metadata: dict[str, object] | None = None
     if not cfg.dry_run:
         try:
@@ -4450,6 +4552,11 @@ def run_sample(
     )
 
     root_input, decay_metadata = run_herwig(sample, analysis_lhe, cfg)
+    shower_completion = decay_metadata.get("shower_completion")
+    if shower_completion is not None:
+        entry["shower_completion"] = shower_completion
+        entry["normalization"].update(predecay_lhe_weight_summary(
+            analysis_lhe, shower_completion["attempted_events"]))
     output_dir = output_root.parent
     ensure_dir(output_dir, cfg)
     command = analysis_command(
@@ -4487,7 +4594,8 @@ def run_sample(
             analysis_summary = read_analysis_summary(summary_path)
         except ValueError as error:
             die(str(error))
-        if int(analysis_summary.get("events_read", -1)) != cfg.events_for(sample):
+        expected_events = shower_completion["saved_events"] if shower_completion else cfg.events_for(sample)
+        if int(analysis_summary.get("events_read", -1)) != expected_events:
             die(
                 f"analyzer read {analysis_summary.get('events_read')} events for "
                 f"{sample.name}, expected {cfg.events_for(sample)}"

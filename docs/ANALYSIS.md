@@ -1,5 +1,10 @@
 # Cuts and classifiers
 
+For four leptons, use the [HO analysis and run guide](../hfourlepton/HIGHER_ORDER.md).
+Both `fourlepton-lo` and `fourlepton-ho` support `cuts` and `xgboost`; HO also
+provides the energy-specific `validate` action. The sections below describe
+the diphoton interfaces.
+
 Start with a completed diphoton campaign and inspect its ordinary report.
 The default cards require all four samples and SSC detector-response metadata;
 missing backgrounds must not silently improve a significance estimate.

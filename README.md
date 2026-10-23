@@ -98,6 +98,13 @@ Each mass spectrum pairs a unit-area shape with physical event counts,
 separately for each response profile, channel and process category.
 See [four-lepton physics and advanced samples](hfourlepton/README.md).
 
+The new `fourlepton-ho` workflow prepares 13 TeV LHC validation and 40 TeV SSC
+campaigns, including ggF, VBF, VH and ttH, matched higher-order backgrounds,
+ihixs normalization, cut analysis and XGBoost. Start with `prepare`, which
+writes inputs without running generators. Follow the
+[four-lepton HO run guide](hfourlepton/HIGHER_ORDER.md) for both energy-specific
+pilots and the subsequent validation. Numerical LHC validation awaits those runs.
+
 ## Next steps and references
 
 - [Additional cuts and optional XGBoost](docs/ANALYSIS.md).

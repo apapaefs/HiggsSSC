@@ -196,6 +196,9 @@ struct Config {
   std::string requested_channel;
   std::string optional_weight_names_file;
   std::string response_profile_name = "perfect";
+  // Selection and detector response are independent. cms is a particle-level
+  // comparison proxy; ssc uses LHC-like pair cuts with GEM object acceptance.
+  std::string selection_profile = "gem";
   ResponseProfile response_profile = ResponseProfile::Perfect;
   std::uint64_t seed = 14101983ULL;
   double weight_scale = 1.0;
@@ -313,7 +316,14 @@ struct FourLeptonRecord {
   int lepton_dressed_photon_count[kLeptonsPerQuadruplet] = {};
 };
 
-std::string cut_mask_definition() {
+std::string cut_mask_definition(const Config& config = Config{}) {
+  if (config.selection_profile != "gem") {
+    return "bit0:at_least_four_reconstructed;bit1:pt_eta_acceptance;"
+           "bit2:electron_crack_acceptance;bit3:isolation;"
+           "bit4:disjoint_ossf_pairing;bit5:os_mass_pt_dr;"
+           "bit6:z1_40_120;bit7:z2_12_120;"
+           "bit8:trigger_weight_applied;bit9:selected";
+  }
   return "bit0:at_least_four_reconstructed;"
          "bit1:pt_eta_acceptance;"
          "bit2:electron_crack_acceptance;"
@@ -340,6 +350,7 @@ void print_usage(std::ostream& output) {
       << "Options:\n"
       << "  --response-profile perfect|ssc   Detector response (default: perfect)\n"
       << "  --detector-response perfect|ssc  Alias for --response-profile\n"
+      << "  --selection-profile gem|ssc|cms  Legacy GEM, LHC-like SSC, or CMS-like particle selection\n"
       << "  --seed INTEGER                   Deterministic response seed\n"
       << "  --weight-scale FLOAT             Sample normalization factor (default: 1)\n"
       << "  --muon-resolution-scale FLOAT    Multiplier for sigma(pT)/pT (default: 1)\n"
@@ -422,6 +433,8 @@ Config parse_config(int argc, char* argv[]) {
       config.input_name = require_option_value(index, argc, argv, argument);
     } else if (argument == "--response-profile" || argument == "--detector-response") {
       config.response_profile_name = require_option_value(index, argc, argv, argument);
+    } else if (argument == "--selection-profile") {
+      config.selection_profile = require_option_value(index, argc, argv, argument);
     } else if (argument == "--seed") {
       config.seed = parse_uint64(require_option_value(index, argc, argv, argument), argument);
     } else if (argument == "--weight-scale" || argument == "-w") {
@@ -479,6 +492,13 @@ Config parse_config(int argc, char* argv[]) {
     throw std::runtime_error("no input ROOT file or input list was specified");
   }
   config.response_profile = parse_response_profile(config.response_profile_name);
+  if (config.selection_profile != "gem" && config.selection_profile != "ssc" &&
+      config.selection_profile != "cms") {
+    throw std::runtime_error("--selection-profile must be gem, ssc or cms");
+  }
+  if (config.selection_profile == "cms" && config.response_profile != ResponseProfile::Perfect) {
+    throw std::runtime_error("cms comparison requires perfect response, not GEM smearing");
+  }
   if (config.muon_resolution_scale < 0.0) {
     throw std::runtime_error("--muon-resolution-scale must be non-negative");
   }
@@ -881,11 +901,14 @@ std::vector<Lepton> build_dressed_leptons(const std::vector<Particle>& particles
   return leptons;
 }
 
-double isolation_et(const Lepton& candidate, const std::vector<Particle>& particles) {
+double isolation_et(const Lepton& candidate, const std::vector<Particle>& particles,
+                    const Config& config = Config{}) {
   double scalar_et = 0.0;
   for (const Particle& particle : particles) {
     if (particle.source_index == candidate.source_index || is_neutrino(particle.pdg_id) ||
-        particle.p4.transverse_energy() <= kIsolationConstituentEtMinGeV) {
+        (config.selection_profile == "cms"
+             ? (std::abs(particle.pdg_id) == 11 || std::abs(particle.pdg_id) == 13)
+             : particle.p4.transverse_energy() <= kIsolationConstituentEtMinGeV)) {
       continue;
     }
     if (std::find(candidate.dressed_photon_indices.begin(),
@@ -893,39 +916,55 @@ double isolation_et(const Lepton& candidate, const std::vector<Particle>& partic
                   particle.source_index) != candidate.dressed_photon_indices.end()) {
       continue;
     }
-    if (delta_r(candidate.reconstructed, particle.p4) < kIsolationDeltaR) {
-      scalar_et += particle.p4.transverse_energy();
+    if (delta_r(candidate.reconstructed, particle.p4) <
+        (config.selection_profile == "cms" ? 0.3 : kIsolationDeltaR)) {
+      scalar_et += config.selection_profile == "cms" ? particle.p4.pt() : particle.p4.transverse_energy();
     }
   }
   return scalar_et;
 }
 
-bool passes_kinematic_acceptance(const Lepton& lepton) {
-  return lepton.reconstructed.pt() > kLeptonPtMinGeV &&
-         std::fabs(lepton.reconstructed.eta()) < kLeptonEtaMax;
+bool passes_kinematic_acceptance(const Lepton& lepton, const Config& config = Config{}) {
+  const bool cms = config.selection_profile == "cms";
+  return lepton.reconstructed.pt() > (cms ? (lepton.flavour == 11 ? 7.0 : 5.0) : kLeptonPtMinGeV) &&
+         std::fabs(lepton.reconstructed.eta()) < (cms && lepton.flavour == 13 ? 2.4 : kLeptonEtaMax);
 }
 
-bool passes_electron_crack_acceptance(const Lepton& lepton) {
+bool passes_electron_crack_acceptance(const Lepton& lepton, const Config& config = Config{}) {
+  if (config.selection_profile == "cms") return true;
   const double abs_eta = std::fabs(lepton.reconstructed.eta());
   return lepton.flavour != 11 ||
          !(abs_eta > kElectronCrackEtaMin &&
            abs_eta < kElectronCrackEtaMax);
 }
 
-bool passes_isolation(const Lepton& lepton) {
-  return lepton.isolation_et < kIsolationEtMaxGeV;
+bool passes_isolation(const Lepton& lepton, const Config& config = Config{}) {
+  return lepton.isolation_et < (config.selection_profile == "cms"
+      ? 0.35 * lepton.reconstructed.pt() : kIsolationEtMaxGeV);
 }
 
-bool passes_baseline(const Lepton& lepton) {
-  return passes_kinematic_acceptance(lepton) &&
-         passes_electron_crack_acceptance(lepton) &&
-         passes_isolation(lepton);
+bool passes_baseline(const Lepton& lepton, const Config& config = Config{}) {
+  return passes_kinematic_acceptance(lepton, config) &&
+         passes_electron_crack_acceptance(lepton, config) &&
+         passes_isolation(lepton, config);
 }
 
 std::vector<Lepton> response_leptons(const std::vector<Particle>& particles,
                                      const Config& config, Long64_t event_index,
                                      Diagnostics& diagnostics) {
   std::vector<Lepton> leptons = build_dressed_leptons(particles);
+  std::vector<Particle> isolation_particles = particles;
+  if (config.selection_profile == "cms") {
+    // Do not count a photon already assigned to any lepton as ambient activity.
+    isolation_particles.erase(std::remove_if(isolation_particles.begin(), isolation_particles.end(),
+        [&](const Particle& particle) {
+          for (const auto& dressed : leptons) {
+            if (std::find(dressed.dressed_photon_indices.begin(), dressed.dressed_photon_indices.end(),
+                          particle.source_index) != dressed.dressed_photon_indices.end()) return true;
+          }
+          return false;
+        }), isolation_particles.end());
+  }
   for (Lepton& lepton : leptons) {
     if (config.response_profile == ResponseProfile::Ssc) {
       if (lepton.flavour == 11) {
@@ -951,7 +990,7 @@ std::vector<Lepton> response_leptons(const std::vector<Particle>& particles,
       lepton.efficiency = 1.0;
     }
 
-    lepton.isolation_et = isolation_et(lepton, particles);
+    lepton.isolation_et = isolation_et(lepton, isolation_particles, config);
   }
   std::sort(leptons.begin(), leptons.end(), [](const Lepton& left, const Lepton& right) {
     return left.source_index < right.source_index;
@@ -990,9 +1029,28 @@ bool pairing_is_better(const PairingChoice& candidate, const PairingChoice& best
   return candidate.pairing_source_indices < best.pairing_source_indices;
 }
 
+bool lhc_topology_pass(const std::array<int, 4>& indices,
+                       const std::vector<Lepton>& leptons) {
+  std::array<double, 4> pts;
+  for (int i = 0; i < 4; ++i) {
+    pts[i] = leptons[indices[i]].reconstructed.pt();
+    for (int j = i + 1; j < 4; ++j) {
+      const auto& a = leptons[indices[i]];
+      const auto& b = leptons[indices[j]];
+      if (delta_r(a.reconstructed, b.reconstructed) <= 0.02) return false;
+      // CMS applies this veto also to opposite-sign different-flavour pairs.
+      if (a.charge != b.charge && (a.reconstructed + b.reconstructed).mass() <= 4.0) return false;
+    }
+  }
+  std::sort(pts.begin(), pts.end(), std::greater<double>());
+  return pts[0] > 20.0 && pts[1] > 10.0;
+}
+
 PairingChoice best_pairing(const std::vector<Lepton>& leptons,
-                           const std::vector<int>& subset) {
+                           const std::vector<int>& subset,
+                           const Config& config = Config{}) {
   PairingChoice best;
+  PairingChoice best_eligible;
   const int subset_size = static_cast<int>(subset.size());
   for (int a = 0; a < subset_size; ++a) {
     for (int b = a + 1; b < subset_size; ++b) {
@@ -1056,12 +1114,19 @@ PairingChoice best_pairing(const std::vector<Lepton>& leptons,
             if (pairing_is_better(candidate, best)) {
               best = candidate;
             }
+            if (config.selection_profile != "gem" &&
+                lhc_topology_pass(candidate.lepton_indices, leptons) &&
+                z_one.mass() > 40.0 && z_one.mass() < 120.0 &&
+                z_two.mass() > 12.0 && z_two.mass() < 120.0 &&
+                pairing_is_better(candidate, best_eligible)) {
+              best_eligible = candidate;
+            }
           }
         }
       }
     }
   }
-  return best;
+  return best_eligible.has_pairing ? best_eligible : best;
 }
 
 bool all_ossf_masses_pass(const std::array<int, 4>& indices,
@@ -1099,7 +1164,8 @@ int classify_channel(const std::array<int, 4>& indices,
 }
 
 SubsetResult analyze_subset(const std::vector<Lepton>& leptons,
-                            const std::vector<int>& subset) {
+                            const std::vector<int>& subset,
+                            const Config& config = Config{}) {
   SubsetResult result;
   if (subset.size() < 4) {
     return result;
@@ -1129,7 +1195,7 @@ SubsetResult analyze_subset(const std::vector<Lepton>& leptons,
   std::vector<int> kinematic;
   std::copy_if(subset.begin(), subset.end(), std::back_inserter(kinematic),
                [&](int index) {
-                 return passes_kinematic_acceptance(leptons[index]);
+                 return passes_kinematic_acceptance(leptons[index], config);
                });
   if (kinematic.size() < 4) {
     fill_leading_quadruplet(subset);
@@ -1138,7 +1204,7 @@ SubsetResult analyze_subset(const std::vector<Lepton>& leptons,
     std::vector<int> crack_accepted;
     std::copy_if(kinematic.begin(), kinematic.end(),
                  std::back_inserter(crack_accepted), [&](int index) {
-                   return passes_electron_crack_acceptance(leptons[index]);
+                   return passes_electron_crack_acceptance(leptons[index], config);
                  });
     if (crack_accepted.size() < 4) {
       fill_leading_quadruplet(kinematic);
@@ -1147,13 +1213,13 @@ SubsetResult analyze_subset(const std::vector<Lepton>& leptons,
       std::vector<int> isolated;
       std::copy_if(crack_accepted.begin(), crack_accepted.end(),
                    std::back_inserter(isolated), [&](int index) {
-                     return passes_isolation(leptons[index]);
+                     return passes_isolation(leptons[index], config);
                    });
       if (isolated.size() < 4) {
         fill_leading_quadruplet(crack_accepted);
       } else {
         result.cut_mask |= kIsolation;
-        const PairingChoice pairing = best_pairing(leptons, isolated);
+        const PairingChoice pairing = best_pairing(leptons, isolated, config);
         if (!pairing.has_pairing) {
           fill_leading_quadruplet(isolated);
         } else {
@@ -1170,13 +1236,15 @@ SubsetResult analyze_subset(const std::vector<Lepton>& leptons,
               delta_r(leptons[result.output_indices[2]].reconstructed,
                       leptons[result.output_indices[3]].reconstructed);
 
-          if (all_ossf_masses_pass(result.output_indices, leptons)) {
+          const bool legacy = config.selection_profile == "gem";
+          if (legacy ? all_ossf_masses_pass(result.output_indices, leptons)
+                     : lhc_topology_pass(result.output_indices, leptons)) {
             result.cut_mask |= kAllOssfMasses;
-            if (result.z1.mass() > kZ1MassMinGeV &&
-                result.z1.mass() < kZ1MassMaxGeV) {
+            if (result.z1.mass() > (legacy ? kZ1MassMinGeV : 40.0) &&
+                result.z1.mass() < (legacy ? kZ1MassMaxGeV : 120.0)) {
               result.cut_mask |= kZ1Window;
-              if (result.z2.mass() > kZ2MassMinGeV &&
-                  result.z2.mass() < kZ2MassMaxGeV) {
+              if (result.z2.mass() > (legacy ? kZ2MassMinGeV : 12.0) &&
+                  result.z2.mass() < (legacy ? kZ2MassMaxGeV : 120.0)) {
                 result.cut_mask |= kZ2Window;
                 result.cut_mask |= kTrigger | kSelected;
               }
@@ -1450,6 +1518,7 @@ void write_summary(const std::filesystem::path& path, const Config& config,
          << "  \"category\": \"" << json_escape(config.category) << "\",\n"
          << "  \"requested_channel\": \"" << json_escape(config.requested_channel)
          << "\",\n"
+         << "  \"selection_profile\": \"" << config.selection_profile << "\",\n"
          << "  \"events_read\": " << events_read << ",\n"
          << "  \"four_lepton_rows\": " << tree_rows << ",\n"
          << "  \"selected_rows\": " << selected_rows << ",\n"
@@ -1459,7 +1528,7 @@ void write_summary(const std::filesystem::path& path, const Config& config,
          << "  \"weights_are_cross_sections\": false,\n"
          << "  \"event_weight_formula\": "
             "\"generator_weight * sample_weight * response_weight\",\n"
-         << "  \"cut_mask_definition\": \"" << cut_mask_definition() << "\",\n"
+         << "  \"cut_mask_definition\": \"" << cut_mask_definition(config) << "\",\n"
          << "  \"cut_bit_zero_semantics\": \""
          << json_escape(cut_bit_zero_semantics()) << "\",\n"
          << "  \"channel_definition\": \"1:4e;2:4mu;3:2e2mu;0:unclassified\",\n"
@@ -1622,10 +1691,11 @@ int main(int argc, char* argv[]) {
 
     int metadata_schema_version = 1;
     std::string metadata_response_profile = config.response_profile_name;
+    std::string metadata_selection_profile = config.selection_profile;
     std::string metadata_sample = config.sample;
     std::string metadata_category = config.category;
     std::string metadata_requested_channel = config.requested_channel;
-    std::string metadata_cut_mask = cut_mask_definition();
+    std::string metadata_cut_mask = cut_mask_definition(config);
     std::string metadata_cut_bit_zero_semantics = cut_bit_zero_semantics();
     std::string metadata_channel_definition =
         "1:4e;2:4mu;3:2e2mu;0:unclassified";
@@ -1655,6 +1725,7 @@ int main(int argc, char* argv[]) {
     metadata_tree.Branch("schema_version", &metadata_schema_version,
                          "schema_version/I");
     metadata_tree.Branch("response_profile", &metadata_response_profile);
+    metadata_tree.Branch("selection_profile", &metadata_selection_profile);
     metadata_tree.Branch("sample", &metadata_sample);
     metadata_tree.Branch("category", &metadata_category);
     metadata_tree.Branch("requested_channel", &metadata_requested_channel);
@@ -1741,8 +1812,8 @@ int main(int argc, char* argv[]) {
           response_leptons(particles, config, event_index, diagnostics);
       const int accepted_lepton_count = static_cast<int>(
           std::count_if(leptons.begin(), leptons.end(),
-                        [](const Lepton& lepton) {
-                          return passes_baseline(lepton);
+                        [&](const Lepton& lepton) {
+                          return passes_baseline(lepton, config);
                         }));
       if (accepted_lepton_count > kMaxEnumeratedLeptons) {
         ++diagnostics.lepton_overflow_events;
@@ -1760,9 +1831,9 @@ int main(int argc, char* argv[]) {
         // remain analyzable without exceeding the exact 2^10 enumeration.
         std::stable_sort(
             leptons.begin(), leptons.end(),
-            [](const Lepton& left, const Lepton& right) {
-              const bool left_baseline = passes_baseline(left);
-              const bool right_baseline = passes_baseline(right);
+            [&](const Lepton& left, const Lepton& right) {
+              const bool left_baseline = passes_baseline(left, config);
+              const bool right_baseline = passes_baseline(right, config);
               if (left_baseline != right_baseline) {
                 return left_baseline;
               }
@@ -1899,7 +1970,7 @@ int main(int argc, char* argv[]) {
               subset.push_back(static_cast<int>(index));
             }
           }
-          const SubsetResult result = analyze_subset(leptons, subset);
+          const SubsetResult result = analyze_subset(leptons, subset, config);
           const bool selected = (result.cut_mask & kSelectedMask) == kSelectedMask;
           const double trigger =
               selected ? trigger_efficiency(result.channel, config) : 1.0;

@@ -116,6 +116,15 @@ Preserving valid weights does not establish a complete uncertainty ensemble.
 
 ## Repeatable checks
 
+The [new four-lepton HO workflow](hfourlepton/HIGHER_ORDER.md) has synthetic
+checks for its 27-sample inventory, energy-specific ihixs records, branching
+normalization, disjoint hard-event slices, signed yields and insufficient
+validation statistics. The C++ core checks CMS-like boundaries and GEM response
+widths. These are implementation checks only. The prepared 13 TeV/40 TeV
+campaigns, XGBoost training and numerical LHC comparison have not been run.
+The CMS acceptance test is approximate; it does not validate an ATLAS detector
+analysis or the SSC detector parametrization against LHC data.
+
 With the configured Python/ROOT runtime:
 
 ```bash

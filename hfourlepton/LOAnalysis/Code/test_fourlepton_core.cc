@@ -495,6 +495,65 @@ void test_inclusive_jet_context() {
                 "leading inclusive jet can be a tagged b jet");
 }
 
+void test_cms_and_ssc_selection() {
+  Config cms;
+  cms.selection_profile = "cms";
+  Config ssc;
+  ssc.selection_profile = "ssc";
+  require(passes_baseline(test_lepton(11, 8., 1.08, 0., 0), cms),
+          "CMS electrons have a 7 GeV threshold and no GEM crack");
+  require(!passes_baseline(test_lepton(11, 8., 0., 0., 0), ssc),
+          "SSC uses the GEM 10 GeV threshold");
+  require(!passes_baseline(test_lepton(13, 15., 2.45, 0., 0), cms),
+          "CMS muon eta acceptance is 2.4");
+  require(passes_baseline(test_lepton(13, 15., 2.45, 0., 0), ssc),
+          "SSC muon eta acceptance is 2.5");
+  Lepton isolated = test_lepton(13, 20., 0., 0., 0);
+  isolated.isolation_et = 6.;
+  require(passes_isolation(isolated, cms) && !passes_isolation(isolated, ssc),
+          "CMS relative and GEM absolute isolation differ");
+  auto leptons = mixed_flavour_quadruplet(65., 25.);
+  const std::vector<int> subset{0, 1, 2, 3};
+  require((analyze_subset(leptons, subset, cms).cut_mask & kSelectedMask) == kSelectedMask,
+          "CMS accepts a Z1 below the legacy 70 GeV threshold");
+  require((analyze_subset(leptons, subset, Config{}).cut_mask & kSelectedMask) != kSelectedMask,
+          "legacy GEM selection is unchanged");
+  // A low-mass e- mu+ pair must fail even when both SFOS pairs pass.
+  leptons[3] = test_lepton(-13, 20., 0., 0.03, 3);
+  require(all_ossf_masses_pass({{0, 1, 2, 3}}, leptons),
+          "different-flavour veto fixture passes the old SFOS check");
+  require(!lhc_topology_pass({{0, 1, 2, 3}}, leptons),
+          "all opposite-sign pairs enter the CMS low-mass veto");
+  leptons = mixed_flavour_quadruplet(65., 25.);
+  leptons[2] = test_lepton(13, 20., 0., 0.01, 2);
+  require(!lhc_topology_pass({{0, 1, 2, 3}}, leptons),
+          "same-sign pairs also enter the angular separation cut");
+}
+
+void test_resolution_widths() {
+  const FourVector electron = with_pt_eta_phi_mass(50., 0., 0., 0.);
+  const FourVector muon = with_pt_eta_phi_mass(500., 0., 0., kMuonMassGeV);
+  double sum_e = 0., sum_e2 = 0., sum_k = 0., sum_k2 = 0.;
+  Diagnostics diagnostics;
+  constexpr int draws = 6000;
+  for (int i = 1; i <= draws; ++i) {
+    const auto e = smear_electron(electron, true, static_cast<unsigned int>(i));
+    const auto m = smear_muon(muon, 1, 1., static_cast<unsigned int>(10000 + i), diagnostics);
+    const double de = e.e / electron.e - 1.;
+    const double dk = muon.pt() / m.pt() - 1.;
+    sum_e += de; sum_e2 += de * de;
+    sum_k += dk; sum_k2 += dk * dk;
+  }
+  const double electron_sigma = std::sqrt(.060 * .060 / 50. + .004 * .004 +
+      std::pow(std::hypot(.100, .120) / 50., 2));
+  const double width_e = std::sqrt(sum_e2 / draws - std::pow(sum_e / draws, 2));
+  const double width_k = std::sqrt(sum_k2 / draws - std::pow(sum_k / draws, 2));
+  require_close(width_e, electron_sigma, .05 * electron_sigma,
+                "electron draws reproduce the GEM sampling/constant/noise width");
+  require_close(width_k, .05, .0025,
+                "muon curvature draws reproduce the GEM 500 GeV central width");
+}
+
 }  // namespace
 
 int main() {
@@ -507,6 +566,8 @@ int main() {
     test_identical_flavour_pairing_and_extra_leptons();
     test_subset_probability_closure();
     test_inclusive_jet_context();
+    test_cms_and_ssc_selection();
+    test_resolution_widths();
     std::cout << "four-lepton core self-test passed (" << checks
               << " checks)" << std::endl;
     return EXIT_SUCCESS;

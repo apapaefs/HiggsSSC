@@ -112,6 +112,20 @@ class FourLeptonAnalyzerIntegrationTest(unittest.TestCase):
         )
         return self.work / f"{sample}_{profile}.root"
 
+    def test_cms_profile_and_analysis_array_reader(self) -> None:
+        from hfourlepton import make_fourlepton_report as report
+        output = self.run_analyzer(self.full_input, profile="perfect", sample="cms_fixture",
+                                   extra_args=("--selection-profile", "cms"))
+        records = report.load_root_records(output)
+        self.assertFalse(records.audit.errors, records.audit.errors)
+        self.assertEqual(records.metadata["selection_profile"], "cms")
+        self.assertTrue(records.four_lepton)
+        for row in records.four_lepton:
+            self.assertEqual(len(row["lepton_pt"]), 4)
+            self.assertTrue(all(math.isfinite(pt) for pt in row["lepton_pt"]))
+        summary = json.loads(output.with_suffix(".summary.json").read_text())
+        self.assertEqual(summary["selection_profile"], "cms")
+
     def test_perfect_cut_masks_named_schema_and_signed_weights(self) -> None:
         output = self.run_analyzer(
             self.full_input,

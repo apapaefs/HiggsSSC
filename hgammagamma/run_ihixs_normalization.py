@@ -205,8 +205,11 @@ def command(args, argv, *, cwd=None, log=None):
 
 def load_settings(path):
     settings = json.loads(Path(path).read_text())
-    fixed = {"profile": norm.PROFILE, "ihixs_commit": norm.IHIXS_COMMIT,
-             "sqrt_s_gev": 40000., "higgs_mass_gev": 125., "top_mass_gev": 173.2,
+    profile = settings.get("profile")
+    if profile not in norm.PROFILE_ENERGIES:
+        raise ValueError("unknown ihixs energy profile")
+    fixed = {"profile": profile, "ihixs_commit": norm.IHIXS_COMMIT,
+             "sqrt_s_gev": norm.PROFILE_ENERGIES[profile], "higgs_mass_gev": 125., "top_mass_gev": 173.2,
              "top_scheme": "on-shell", "gf_gev_minus2": norm.GF,
              "gev_minus2_to_pb": 389379660., "ihixs_prefactor_pb": 35.0309,
              "mur_gev": 62.5, "muf_gev": 62.5, "pdf_set": norm.PDF_SET,
@@ -237,7 +240,7 @@ def load_settings(path):
     return settings
 
 
-def native_parameters(path):
+def native_parameters(path, sqrt_s_gev=40000.):
     """Freeze supplied card and source defaults, including the native HOPPET choice."""
     text = Path(path).read_text()
     values = {}
@@ -251,7 +254,7 @@ def native_parameters(path):
     values["topmass"] = values.get("topmass", -1.) if values.get("topmass", -1.) > 0 else 173.2
     defaults = {"topmass": 173.2, "bmass": 0., "cmass": 0.,
                 "renscfact": 1., "facscfact": 1., "lhapdf_in_hoppet": 0.}
-    required = {"hmass": 125., "hwidth": .004152, "ebeam1": 20000., "ebeam2": 20000.,
+    required = {"hmass": 125., "hwidth": .004152, "ebeam1": sqrt_s_gev / 2., "ebeam2": sqrt_s_gev / 2.,
                 "ih1": 1., "ih2": 1., "lhans1": 336100., "lhans2": 336100.,
                 "alphas_from_pdf": 1., "use_NNLOPS_pdfs": 1., "minlo": 1., "minnlo": 1.,
                 "renscfact": 1., "facscfact": 1., "topmass": 173.2}
@@ -328,7 +331,7 @@ def parse_output(text, order="N3LO"):
 
 
 def prepare(args, settings):
-    parameters = native_parameters(args.powheg_input)
+    parameters = native_parameters(args.powheg_input, settings["sqrt_s_gev"])
     points = calculation_points(settings)
     if args.dry_run:
         print(json.dumps({"stage": args.stage, "work_dir": str(args.work_dir), "record": str(args.record),
@@ -755,7 +758,7 @@ def calculate(args, settings):
                                "runs/benchmark/ihixs.out", "runs/benchmark/ihixs.log", "runs/benchmark/complete.json"))
         artifact_paths.extend(args.work_dir / repaired_central["run_directory"] / name
                               for name in ("input.card", "ihixs.out", "ihixs.log", "complete.json"))
-    payload = {"schema_version": 1, "profile": norm.PROFILE, "normalization_kind": "ihixs_n3lo",
+    payload = {"schema_version": 1, "profile": settings["profile"], "normalization_kind": "ihixs_n3lo",
                "process": "ggF", "created_utc": datetime.now(timezone.utc).isoformat(),
                **{key: settings[key] for key in ("sqrt_s_gev", "higgs_mass_gev", "top_mass_gev", "top_scheme",
                   "gf_gev_minus2", "mur_gev", "muf_gev", "pdf_set", "pdf_member", "alpha_s_mz",
@@ -766,7 +769,7 @@ def calculate(args, settings):
                "prefactor_correction": {"multiplier": multiplier, "upstream_prefactor_pb": 35.0309,
                                         "gev_minus2_to_pb": settings["gev_minus2_to_pb"],
                                         "formula": "[GF*pi/(sqrt(2)*288)*GeV^-2_to_pb]/35.0309"},
-               "native_parameters": native_parameters(args.powheg_input),
+               "native_parameters": native_parameters(args.powheg_input, settings["sqrt_s_gev"]),
                "uncertainties": {"scale_up_pb": max(scale_rates) - central["cross_section_pb"],
                                  "scale_down_pb": central["cross_section_pb"] - min(scale_rates),
                                  "pdf_stddev_pb": statistics.stdev(replicas),

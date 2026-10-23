@@ -19,8 +19,8 @@ import subprocess
 from hgammagamma import run_gammagamma_ho_pipeline as shared
 
 REPO = Path(__file__).resolve().parent
-WORKFLOWS = ("gammagamma-lo", "gammagamma-ho", "fourlepton-lo")
-ACTIONS = ("setup", "check", "run", "status", "report", "cuts", "xgboost")
+WORKFLOWS = ("gammagamma-lo", "gammagamma-ho", "fourlepton-lo", "fourlepton-ho")
+ACTIONS = ("setup", "check", "prepare", "run", "status", "report", "cuts", "xgboost", "validate")
 
 
 def now():
@@ -36,6 +36,8 @@ def parse_args(argv=None):
     p.add_argument("--nevents", type=int, default=30)
     p.add_argument("--jobs", type=int, default=4)
     p.add_argument("--luminosity-fb", type=float, default=100.)
+    p.add_argument("--energy-tev", type=int, choices=(13, 40), default=40,
+                   help="fourlepton-ho: 13 for the CMS-like validation, 40 for the SSC")
     p.add_argument("--herwig-module", default=None)
     p.add_argument("--herwig-env", type=Path)
     p.add_argument("--cc", default=None)
@@ -56,10 +58,14 @@ def parse_args(argv=None):
         p.error("nevents, jobs and luminosity must be positive and finite")
     if args.herwig_env and args.herwig_module:
         p.error("select either --herwig-env or --herwig-module")
-    if args.workflow != "gammagamma-ho" and (args.signal_lhe or args.signal_normalization):
-        p.error("signal input overrides apply only to gammagamma-ho")
-    if args.workflow == "fourlepton-lo" and args.action in ("cuts", "xgboost"):
-        p.error("cuts and xgboost currently support the diphoton workflows")
+    if not args.workflow.endswith("-ho") and (args.signal_lhe or args.signal_normalization):
+        p.error("signal input overrides apply only to HO workflows")
+    if args.energy_tev != 40 and args.workflow != "fourlepton-ho":
+        p.error("--energy-tev 13 applies only to fourlepton-ho")
+    if args.action in ("prepare", "validate") and args.workflow != "fourlepton-ho":
+        p.error("prepare and validate apply to fourlepton-ho")
+    if args.action == "validate" and args.energy_tev != 13:
+        p.error("LHC validation requires --energy-tev 13")
     if args.config and args.action not in ("cuts", "xgboost"):
         p.error("--config applies to cuts/xgboost")
     for key in ("work_dir", "herwig_env", "ninja_dir", "signal_lhe", "signal_normalization", "config"):
@@ -73,7 +79,7 @@ def parse_args(argv=None):
 
 
 def locations(args):
-    if args.workflow == "fourlepton-lo":
+    if args.workflow.startswith("fourlepton-"):
         directory = REPO / "hfourlepton/runs" / args.run_tag
         return directory, directory / "report"
     order = "HOAnalysis" if args.workflow == "gammagamma-ho" else "LOAnalysis"
@@ -103,6 +109,8 @@ def preflight_inputs(args):
 def identity(args, config):
     result = {"workflow": args.workflow, "run_tag": args.run_tag, "environment": config,
               "nevents": args.nevents, "jobs": args.jobs}
+    if args.workflow == "fourlepton-ho":
+        result["energy_tev"] = args.energy_tev
     for key in ("signal_lhe", "signal_normalization"):
         path = getattr(args, key)
         result[key] = {"path": str(path), "sha256": shared.digest(path)} if path else None
@@ -207,12 +215,17 @@ def physics_artifacts(args):
             raise ValueError(f"conflicting completed analysis provenance: {path}")
         expected_hashes[key] = value
 
-    if args.workflow == "fourlepton-lo":
-        for profile in ("perfect", "ssc"):
+    if args.workflow.startswith("fourlepton-"):
+        from hfourlepton import workflow as four_ho
+        profiles = four_ho.profiles(args) if args.workflow == "fourlepton-ho" else ("perfect", "ssc")
+        required_count = 27 if args.workflow == "fourlepton-ho" else 9
+        for profile in profiles:
             path = directory / f"manifest_{profile}.json"
             manifest = json.loads(path.read_text())
-            if len(manifest["samples"]) != 9 or any(s["status"] != "complete" for s in manifest["samples"]):
+            if len(manifest["samples"]) != required_count or any(s["status"] != "complete" for s in manifest["samples"]):
                 raise ValueError(f"incomplete four-lepton {profile} campaign")
+            if args.workflow == "fourlepton-ho" and manifest["collider"]["sqrt_s_tev"] != args.energy_tev:
+                raise ValueError("four-lepton campaign energy differs from --energy-tev")
             paths.append(path)
             for sample in manifest["samples"]:
                 paths.extend(Path(sample[key]) for key in ("root_file", "analysis_summary"))
@@ -272,7 +285,8 @@ def physics_artifacts(args):
 
 
 def pilot_path(args):
-    return args.work_dir / "pilots" / (args.workflow + ".json")
+    suffix = f"-{args.energy_tev}tev" if args.workflow == "fourlepton-ho" else ""
+    return args.work_dir / "pilots" / (args.workflow + suffix + ".json")
 
 
 def verify_pilot(args, config):
@@ -298,9 +312,11 @@ def report(pipeline):
         if str(output / "index.html") in candidate.get("artifacts", {}):
             shared.verify_pilot(args.work_dir)
             legacy_pilot = candidate
-    if args.workflow == "fourlepton-lo":
+    if args.workflow.startswith("fourlepton-"):
+        from hfourlepton import workflow as four_ho
+        profiles = four_ho.profiles(args) if args.workflow == "fourlepton-ho" else ("perfect", "ssc")
         command = [pipeline.python, REPO / "hfourlepton/make_fourlepton_report.py",
-                   directory / "manifest_perfect.json", directory / "manifest_ssc.json",
+                   *[directory / f"manifest_{profile}.json" for profile in profiles],
                    "--output-dir", output, "--luminosity-fb", args.luminosity_fb, "--strict"]
     else:
         command = [pipeline.python, REPO / "hgammagamma/make_gammagamma_report.py",
@@ -318,6 +334,20 @@ def report(pipeline):
 def downstream_analysis(pipeline):
     args = pipeline.args
     physics_artifacts(args)
+    if args.workflow.startswith("fourlepton-"):
+        directory, _ = locations(args)
+        tag = "lhc13" if args.workflow == "fourlepton-ho" and args.energy_tev == 13 else "ssc40" if args.workflow == "fourlepton-ho" else "lo"
+        profile = "perfect" if tag == "lhc13" else "ssc"
+        if args.action == "validate":
+            command = [pipeline.python, REPO / "hfourlepton/validate_lhc.py",
+                       "--manifest", directory / "manifest_perfect.json", "--output-dir", directory / "lhc_validation"]
+        else:
+            card = args.config or REPO / f"hfourlepton/analysis_cards/{tag}_{args.action}.json"
+            command = [pipeline.python, REPO / "hfourlepton/analyze_fourlepton.py", args.action,
+                       "--manifest", directory / f"manifest_{profile}.json", "--config", card,
+                       "--output-dir", directory / args.action, "--luminosity-fb", args.luminosity_fb]
+        pipeline.call(args.run_tag + "-" + args.action, command)
+        return
     if args.action == "xgboost":
         try:
             pipeline.call("check-python-ml", [pipeline.python, "-c", "import xgboost,sklearn,tqdm"])
@@ -360,6 +390,11 @@ def run(pipeline, *, saved_artifacts_checked=False):
         validate_saved_run_artifacts(args)
     if args.workflow == "gammagamma-ho":
         pipeline.run()
+    elif args.workflow == "fourlepton-ho":
+        from hfourlepton.workflow import run as run_four_ho
+        run_four_ho(pipeline)
+        progress(args, stage="report", analysis_artifacts=physics_artifacts(args))
+        report(pipeline)
     else:
         pipeline.check()
         if args.workflow == "fourlepton-lo":
@@ -409,11 +444,16 @@ def main(argv=None):
     if args.dry_run:
         stages = {"gammagamma-lo": ["MG5 signal and three backgrounds", "Herwig showers", "SSC analysis", "report"],
                   "gammagamma-ho": ["ihixs build/benchmark/109-point calculation", "POWHEG integration and signal", "MG5 backgrounds", "Herwig showers", "SSC analysis", "report"],
-                  "fourlepton-lo": ["seven hard-process integrations / nine samples", "MadSpin signal decays", "perfect and SSC showers/analysis", "strict comparison report"]}
+                  "fourlepton-lo": ["seven hard-process integrations / nine samples", "MadSpin signal decays", "perfect and SSC showers/analysis", "strict comparison report"],
+                  "fourlepton-ho": ["energy-specific ihixs and HJMiNNLO", "27 samples / 13 production groups including VBF, VH, ttH", "matched showers and four-body decays", "CMS-like or SSC selection and report"]}
         print(json.dumps({"action": args.action, "workflow": args.workflow, "work_dir": str(args.work_dir),
                           "run_tag": args.run_tag, "nevents": args.nevents, "jobs": args.jobs,
                           "stages": stages[args.workflow] if args.action == "run" else [args.action],
                           "note": "Small samples still require generator integration; HO includes full normalization."}, indent=2))
+        return 0
+    if args.action == "prepare":
+        from hfourlepton.workflow import prepare
+        prepare(args)
         return 0
     if args.action == "status":
         return status(args)
@@ -430,7 +470,7 @@ def main(argv=None):
                 verify_pilot(args, config)
             prepare_run(args, config)
             validate_saved_run_artifacts(args)
-        elif args.action in ("report", "cuts", "xgboost"):
+        elif args.action in ("report", "cuts", "xgboost", "validate"):
             saved = read_state(args)
             if saved["identity"]["environment"] != config:
                 raise ValueError("campaign belongs to a different environment")

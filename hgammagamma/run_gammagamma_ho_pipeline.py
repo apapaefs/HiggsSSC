@@ -47,7 +47,7 @@ PDF_SOURCE = "https://lhapdfsets.web.cern.ch/current/"
 PDF_SETS = ("NNPDF40_nlo_as_01180_qed", "NNPDF40_nnlo_as_01180_qed",
             "NNPDF40_an3lo_as_01180_qed_mhou", "PDF4LHC15_nnlo_100")
 LO_PDF_SETS = ("NNPDF40_lo_as_01180",)
-WORKFLOWS = ("gammagamma-lo", "gammagamma-ho", "fourlepton-lo")
+WORKFLOWS = ("gammagamma-lo", "gammagamma-ho", "fourlepton-lo", "fourlepton-ho")
 CORE_PACKAGES = ("numpy", "matplotlib", "PyYAML", "six")
 SAMPLES = ("signal_gg_h_aa", "bkg_prompt_aa", "bkg_gamma_j", "bkg_dy_ee")
 NUMPY_TYPING_PROBE = """
@@ -297,7 +297,7 @@ class Pipeline:
 
     @property
     def pdf_sets(self):
-        return PDF_SETS if self.workflow == "gammagamma-ho" else LO_PDF_SETS
+        return PDF_SETS if self.workflow.endswith("-ho") else LO_PDF_SETS
 
     @property
     def with_ml(self):
@@ -465,7 +465,7 @@ class Pipeline:
                 shutil.copy2(cfg, backup)
             cfg.write_text(text)
 
-        if self.workflow == "gammagamma-ho":
+        if self.workflow.endswith("-ho"):
             # MG5 sometimes exits zero even when exporting a process failed. Test
             # that boundary before investing in integrations. Each attempt is kept.
             probe_marker = self.work / "mg5-export-checked.json"
@@ -515,7 +515,7 @@ class Pipeline:
                                          "executable_sha256": digest(process / "pwhg_main")})
 
     def setup_analysis(self):
-        if self.workflow == "fourlepton-lo":
+        if self.workflow.startswith("fourlepton-"):
             directory = REPO / "hfourlepton/LOAnalysis/Code"
             executable = "HwSimPostAnalysis_fourlepton"
             command = ["make", "-C", directory, executable, f"CXX={self.config['cxx']}"]
@@ -541,7 +541,7 @@ class Pipeline:
             self.record_component("pdf:" + name, {"members": 101,
                                   "info_sha256": digest(self.pdf_dir / name / (name + ".info"))})
         self.setup_mg5()
-        if self.workflow == "gammagamma-ho":
+        if self.workflow.endswith("-ho"):
             self.setup_cuba()
             self.setup_powheg()
             if not (REPO / "external/ihixs/CMakeLists.txt").is_file():
@@ -574,10 +574,10 @@ class Pipeline:
     def check(self):
         self.runtime_check()
         required = [self.python, self.mg5 / "bin/mg5_aMC", self.pdf_dir / "pdfsets.index"]
-        if self.workflow == "gammagamma-ho":
+        if self.workflow.endswith("-ho"):
             required.extend([self.cuba / "include/cuba.h", self.cuba / "lib/libcuba.a",
                              self.powheg / "HJ/HJMiNNLO/pwhg_main", REPO / "external/ihixs/CMakeLists.txt"])
-        if self.workflow == "fourlepton-lo":
+        if self.workflow.startswith("fourlepton-"):
             required.append(REPO / "hfourlepton/LOAnalysis/Code/HwSimPostAnalysis_fourlepton")
         else:
             required.append(REPO / "hgammagamma/LOAnalysis/Code/HwSimPostAnalysis_gammagamma_SSC")
