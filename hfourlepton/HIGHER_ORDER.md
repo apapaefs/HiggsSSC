@@ -142,6 +142,12 @@ It checks the nominal decay factor, source event order and production momenta,
 and corrects only compact values verified to equal their original source values.
 Already scaled values are not scaled twice. Original LHE files remain unchanged;
 the preparation record includes input/output hashes and conversion counts.
+The explicit entries use spaces around each numeric value because ThePEG 2.3
+parses whitespace-separated tokens. XML-valid entries without these spaces
+can silently lose their variations. With `thepeg-config` on `PATH`,
+`python3 -m unittest discover -s tests -p test_fourlepton_weights.py` also checks
+the converted file with the installed reader, without generating or showering
+events.
 
 The continuum generation cuts, pT(ℓ)>2 GeV, |η(ℓ)|<5 and dilepton mass>2 GeV,
 are below the analysis cuts. Their stability must be checked with looser

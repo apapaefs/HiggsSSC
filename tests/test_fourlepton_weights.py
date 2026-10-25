@@ -1,6 +1,10 @@
 """Synthetic LHE encoding/decay-boundary checks; no generators or showers."""
 import gzip
+import os
 import re
+import shlex
+import shutil
+import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
@@ -10,9 +14,9 @@ from hfourlepton import run_four_lepton_campaign as four
 
 
 def fixture(*, decayed=False, scaled=False):
-    header = ('<LesHouchesEvents version="3.0">\n<header><initrwgt>\n'
-              '<weightgroup name="scale"><weight id="20">zeta</weight>\n'
-              '<weight id="3">alpha</weight></weightgroup>\n</initrwgt></header>\n'
+    header = ('<LesHouchesEvents version="3.0">\n<header>\n<initrwgt>\n'
+              '<weightgroup name="scale">\n<weight id="20"> zeta </weight>\n'
+              '<weight id="3"> alpha </weight>\n</weightgroup>\n</initrwgt>\n</header>\n'
               '<init>\n2212 2212 6500 6500 0 0 336100 336100 -4 1\n'
               f'{1 if decayed else 10} 0 1 1\n</init>\n')
     events = []
@@ -142,6 +146,67 @@ class FourLeptonWeightTests(unittest.TestCase):
                     four.prepare_shower_lhe_weights(decayed, source,
                         SimpleNamespace(name='signal'), SimpleNamespace(run_dir=root / 'run'))
                 self.assertFalse((root / 'run/weight_inputs/signal/events.lhe.gz').exists())
+
+
+class ThePEGWeightReaderTests(unittest.TestCase):
+    """Exercise the installed reader itself; never initialize a generator."""
+
+    @classmethod
+    def setUpClass(cls):
+        config = os.environ.get('THEPEG_CONFIG') or shutil.which('thepeg-config')
+        if not config:
+            raise unittest.SkipTest('thepeg-config is unavailable')
+        cls.temporary = TemporaryDirectory()
+        cls.addClassCleanup(cls.temporary.cleanup)
+        cls.root = Path(cls.temporary.name)
+        cls.probe = cls.root / 'thepeg_lhe_weight_probe'
+
+        def setting(flag):
+            result = subprocess.run([config, flag], capture_output=True, text=True)
+            # ThePEG 2.3's script returns its final option-test status, often 1,
+            # even after successfully printing a requested setting.
+            if result.returncode not in (0, 1):
+                result.check_returncode()
+            return result.stdout.strip()
+
+        libraries = Path(setting('--libdir'))
+        cls.plugin = libraries / 'LesHouches.so'
+        command = [*shlex.split(os.environ.get('THEPEG_CXX', 'c++')), '-std=c++14',
+                   *shlex.split(setting('--cppflags')),
+                   str(Path(__file__).with_name('thepeg_lhe_weight_probe.cc')),
+                   '-o', str(cls.probe), f'-L{libraries}', f'-Wl,-rpath,{libraries}',
+                   '-lThePEG',
+                   *shlex.split(setting('--ldflags')), *shlex.split(setting('--ldlibs'))]
+        result = subprocess.run(command, capture_output=True, text=True)
+        if result.returncode:
+            raise RuntimeError('ThePEG reader probe build failed:\n' + result.stderr)
+
+    def weights(self, path):
+        lines = subprocess.check_output([str(self.probe), str(self.plugin), str(path)], text=True).splitlines()
+        events = []
+        for line in lines:
+            fields = line.split('\t')
+            if fields[0] == 'event':
+                self.assertEqual(int(fields[1]), len(events))
+                events.append({})
+            else:
+                self.assertEqual(fields[0], 'weight')
+                events[-1][fields[1]] = float(fields[2])
+        return events
+
+    def test_reader_gets_signed_and_zero_variations_after_conversion(self):
+        source, decayed = write_pair(self.root)
+        output, _ = four.prepare_shower_lhe_weights(decayed, source,
+            SimpleNamespace(name='signal'), SimpleNamespace(run_dir=self.root / 'run'))
+        expected = [{'alpha': -1., 'zeta': 2.}, {'alpha': .2, 'zeta': -.4},
+                    {'alpha': 0., 'zeta': 0.}]
+        self.assertEqual(self.weights(output), expected)
+        # Reproduce the old XML-valid spelling that this reader silently drops.
+        with gzip.open(output, 'rt') as stream:
+            broken = re.sub(r'(<wgt\b[^>]*>)\s*(.*?)\s*(</wgt>)', r'\1\2\3', stream.read())
+        bad = self.root / 'no-token-separators.lhe'
+        bad.write_text(broken)
+        self.assertEqual(self.weights(bad), [{}, {}, {}])
 
 
 if __name__ == '__main__':

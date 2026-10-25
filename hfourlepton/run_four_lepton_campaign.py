@@ -2093,8 +2093,10 @@ def prepare_shower_lhe_weights(path, source, sample, cfg):
                         rescaled += sum(value != expected[key] for key, value in weights.items())
                         weights = expected
                 if compact:
+                    # ThePEG 2.3 reads whitespace-separated tokens, not XML:
+                    # keep the ID, numeric value and closing tag separate.
                     explicit = "<rwgt>\n" + "".join(
-                        f"<wgt id={quoteattr(item['id'])}>{weights[item['id']]:.16e}</wgt>\n" for item in definitions) + "</rwgt>"
+                        f"<wgt id={quoteattr(item['id'])}> {weights[item['id']]:.16e} </wgt>\n" for item in definitions) + "</rwgt>"
                     payload = re.sub(r"<weights\b[^>]*>.*?</weights\s*>", lambda _: explicit, payload, flags=re.DOTALL)
                 output.write(payload)
         if source_events is not None and next(source_events, None) is not None:
