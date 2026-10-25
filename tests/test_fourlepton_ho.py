@@ -31,7 +31,95 @@ def cfg(*args):
     return config("--order", "ho", "--signal-modes", "all", *args)
 
 
+def powheg_signal_lhe(masses=(125.0011342, 124.85, 125.2)):
+    events = "".join(
+        f"<event>\n1 1 {weight} 100 .007 .118\n"
+        f"25 1 1 2 0 0 0 0 0 {mass} {mass} 0 9\n</event>\n"
+        for mass, weight in zip(masses, (10., -2., 8.))
+    )
+    return ('<LesHouchesEvents version="3.0">\n<!--\n'
+            'hmass 125\nhwidth 0.004152d0\nbwcutoff 1000\nhiggsfixedwidth 1\n'
+            'minnlo 1\nlhans1 336100\nlhans2 336100\n-->\n<header>\n</header>\n'
+            '<init>\n2212 2212 6500 6500 -1 -1 -1 -1 -4 1\n'
+            '-1 .1 10 1\n</init>\n' + events + '</LesHouchesEvents>\n')
+
+
+def powheg_fixture(root):
+    record = synthetic_record()
+    record.update(profile="lhc13-ho-pure-heft-v1", sqrt_s_gev=13000.)
+    record["native_parameters"].update(ebeam1=6500., ebeam2=6500.)
+    record_path = root / "normalization.json"
+    record_path.write_text(json.dumps(norm.seal_record(record)))
+    source = root / "signal.lhe"
+    source.write_text(powheg_signal_lhe())
+    settings = replace(cfg("--nevents", "1", "--ebeam", "6500",
+        "--signal-lhe", str(source), "--signal-normalization", str(record_path)), dry_run=False)
+    return source, settings
+
+
 class FourLeptonHOTests(unittest.TestCase):
+    def test_powheg_width_before_and_after_independent_decay_slices(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(four, "SCRIPT_DIR", Path(tmp)):
+            source, settings = powheg_fixture(Path(tmp))
+            original = source.read_bytes(), source.stat().st_mtime_ns
+            samples = ho.all_samples()[:3]
+            info = ho.inspect_production(source, samples[0], settings)
+            self.assertEqual(info["events"], 3)
+            self.assertEqual(info["negative_events"], 1)
+            for sample in samples:
+                sliced = ho.obtain_production(sample, samples, settings)
+                mass, width = four.validate_stable_higgs_lhe(sliced, settings, 1, sample=sample)
+                self.assertEqual(mass, 125.)
+                self.assertEqual(width, .004152)
+                self.assertEqual(gzip.open(sliced, "rt").read().count("<event>"), 1)
+            self.assertEqual((source.read_bytes(), source.stat().st_mtime_ns), original)
+
+    def test_powheg_width_requires_explicit_compatible_header(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source, settings = powheg_fixture(Path(tmp))
+            text = source.read_text()
+            mutations = [("hmass 125", "hmass 125.09"),
+                         ("hwidth 0.004152d0", "hwidth 0.005"),
+                         ("hmass 125\n", ""), ("hwidth 0.004152d0\n", ""),
+                         ("bwcutoff 1000\n", ""), ("minnlo 1", "minnlo 0"),
+                         ("bwcutoff 1000", "bwcutoff nan"),
+                         ("bwcutoff 1000", "bwcutoff inf"),
+                         ("bwcutoff 1000", "bwcutoff -1"),
+                         ("bwcutoff 1000", "bwcutoff 0"),
+                         ("bwcutoff 1000", "bwcutoff 1000\nbwcutoff 1")]
+            for old, new in mutations:
+                with self.subTest(replacement=new):
+                    source.write_text(text.replace(old, new))
+                    with self.assertRaises(ValueError):
+                        four.validate_stable_higgs_lhe(source, settings, 1, sample=ho.all_samples()[0])
+
+    def test_powheg_event_masses_must_stay_inside_recorded_window(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source, settings = powheg_fixture(Path(tmp))
+            sample = ho.all_samples()[0]
+            for mass in (120.848, 129.152):
+                source.write_text(powheg_signal_lhe((mass,)))
+                self.assertEqual(four.validate_stable_higgs_lhe(source, settings, 1, sample=sample), (125., .004152))
+            for mass in (120.847, 129.153, 0., float("nan"), float("inf")):
+                with self.subTest(mass=mass):
+                    source.write_text(powheg_signal_lhe((mass,)))
+                    with self.assertRaisesRegex(ValueError, "Higgs mass|Higgs.*mass"):
+                        four.validate_stable_higgs_lhe(source, settings, 1, sample=sample)
+            source.write_text(powheg_signal_lhe().replace("25 1 1 2", "25 2 1 2"))
+            with self.assertRaisesRegex(ValueError, "exactly one undecayed Higgs"):
+                four.validate_stable_higgs_lhe(source, settings, 1, sample=sample)
+            source.write_text(powheg_signal_lhe((125.0011342,)))
+            with self.assertRaisesRegex(ValueError, "only 1 complete stable-H"):
+                four.validate_stable_higgs_lhe(source, settings, 2, sample=sample)
+
+    def test_finite_width_exception_does_not_relax_other_signal_inputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source, settings = powheg_fixture(Path(tmp))
+            for sample in (None, ho.all_samples()[3], four.SAMPLES[0]):
+                with self.subTest(sample=sample.name if sample else None):
+                    with self.assertRaisesRegex(ValueError, "expected 125.0"):
+                        four.validate_stable_higgs_lhe(source, settings, 1, sample=sample)
+
     def test_inventory_orders_and_independent_decay_statistics(self):
         settings = cfg()
         samples = four.selected_samples(settings)

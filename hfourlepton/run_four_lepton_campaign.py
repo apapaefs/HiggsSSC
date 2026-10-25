@@ -2217,8 +2217,15 @@ def validate_stable_higgs_lhe(
     path: Path,
     cfg: Config,
     event_limit: int,
+    *,
+    sample: SampleSpec | None = None,
 ) -> tuple[float, float | None]:
-    """Require exactly one undecayed, on-mass-shell Higgs in each used event."""
+    """Require one undecayed Higgs with the source's allowed mass per event.
+
+    Stable MG5 inputs must be on shell. HO POWHEG ggF inputs may instead
+    follow their explicitly recorded Breit-Wigner mass window, provided
+    their pole mass and width agree with the ihixs normalization record.
+    """
 
     if event_limit <= 0:
         raise ValueError("event_limit must be positive")
@@ -2229,6 +2236,12 @@ def validate_stable_higgs_lhe(
         rel_tol=0.0,
         abs_tol=1.0e-4,
     )
+    powheg_bounds = None
+    if (cfg.order == "ho" and sample is not None
+            and sample.production_mode == "ggf" and sample.source_kind == "powheg"):
+        from hfourlepton.higher_order import powheg_higgs_mass_bounds
+        low, high, width = powheg_higgs_mass_bounds(path, cfg)
+        powheg_bounds = (low, high)
 
     events_checked = 0
     awaiting_header = False
@@ -2284,7 +2297,16 @@ def validate_stable_higgs_lhe(
                     "exactly one undecayed Higgs is required"
                 )
             event_mass = stable_higgs_masses[0]
-            if not math.isclose(
+            if powheg_bounds is not None:
+                low, high = powheg_bounds
+                # Allow only LHE decimal serialization at the endpoints.
+                if event_mass <= 0 or not low - 1.e-6 <= event_mass <= high + 1.e-6:
+                    raise ValueError(
+                        f"{path} event {events_checked} has status-1 Higgs mass "
+                        f"{event_mass} GeV outside the recorded POWHEG window "
+                        f"[{low}, {high}] GeV"
+                    )
+            elif not math.isclose(
                 event_mass,
                 cfg.higgs_mass,
                 rel_tol=0.0,
@@ -2305,6 +2327,8 @@ def validate_stable_higgs_lhe(
             f"{event_limit} were requested"
         )
     assert first_mass is not None
+    if powheg_bounds is not None:
+        return cfg.higgs_mass, width
     # The event record is authoritative for a stable-H production LHE.  A
     # missing or stale banner MASS entry is repaired in the private MadSpin
     # staging copy; it must not make an otherwise valid external event file
@@ -4442,6 +4466,7 @@ def run_sample(
                     stable_or_final_lhe,
                     cfg,
                     cfg.events_for(sample),
+                    sample=sample,
                 )
             except ValueError as error:
                 die(str(error))

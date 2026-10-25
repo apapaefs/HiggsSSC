@@ -51,6 +51,14 @@ Use `status` with the same workflow, energy and tag to inspect progress. Repeat
 the original `run` command to resume completed stages. Existing mismatched or
 partial outputs cause an error rather than automatic replacement.
 
+An older runner can stop at the first ggF event with a `status-1 Higgs mass`
+error because it applies an on-shell check to POWHEG's finite-width sample.
+After updating the code, preserve the failed four-lepton manifest as a backup
+only after confirming that no four-lepton production, decay, shower or analysis
+outputs exist. The next invocation can then create that stage's manifest with
+the corrected code hashes. Keep the completed POWHEG directory, ihixs record,
+managed campaign state and failure log, and repeat the original run command.
+
 After successful pilots, choose fresh tags and sufficient statistics:
 
 ```bash
@@ -89,7 +97,13 @@ NLO PDFs. No common correction factor is assigned to gg→4ℓ or non-ggF signal
 Electroweak and finite-quark-mass corrections to the ihixs rate are disabled,
 as in the existing pure-HEFT diphoton calculation.
 
-All HO Higgs samples use mH=125 GeV. MadSpin uses a direct scalar 1→4 decay
+All HO Higgs samples use the pole mass mH=125 GeV. HJMiNNLO samples the
+event mass within its recorded Breit-Wigner window: the default hwidth is
+0.004152 GeV and bwcutoff is 1000, giving 120.848–129.152 GeV. The
+`higgsfixedwidth` switch fixes the width prescription, not the event mass.
+Validation checks the pole inputs against ihixs and each generated Higgs mass
+against those bounds; MG5 stable-H inputs still require an on-shell Higgs.
+MadSpin uses a direct scalar 1→4 decay
 matrix element. Associated W/Z/top particles decay inclusively in Herwig.
 The target branching fraction is applied once through
 

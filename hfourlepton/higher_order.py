@@ -7,6 +7,7 @@ and showering happen only when the user runs the campaign.
 from dataclasses import replace
 import gzip
 import json
+import math
 import re
 from pathlib import Path
 import subprocess
@@ -83,6 +84,34 @@ def load_signal_record(cfg):
     return record
 
 
+def powheg_higgs_mass_bounds(path, cfg):
+    """Read the HJ Breit-Wigner bounds, after checking its pole inputs.
+
+    HJ/Born_phsp.f samples mH between max(0, hmass-bwcutoff*hwidth)
+    and min(sqrt(s), hmass+bwcutoff*hwidth). higgsfixedwidth changes
+    the width prescription; it does not put each Higgs on its pole mass.
+    """
+    record = load_signal_record(cfg)
+    prefix = four.read_lhe_prefix(path)
+    values = {}
+    for key in ("hmass", "hwidth", "bwcutoff", "minnlo"):
+        matches = re.findall(rf"(?mi)^\s*{key}\s+(\S+)", prefix)
+        if len(matches) != 1:
+            raise ValueError(f"finite-width Higgs validation requires one explicit POWHEG {key}")
+        value = ho.number(matches[0])
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError(f"invalid POWHEG {key} for finite-width Higgs validation")
+        values[key] = value
+    ho.validate_signal_hard_inputs(prefix, SimpleNamespace(
+        expected_higgs_mass=cfg.higgs_mass,
+        expected_native_parameters=record["native_parameters"]), non_nominal_higgs_mass=True)
+    offset = values["bwcutoff"] * values["hwidth"]
+    if not math.isfinite(offset):
+        raise ValueError("non-finite POWHEG Higgs mass window")
+    return (max(0., values["hmass"] - offset),
+            min(2 * cfg.ebeam, values["hmass"] + offset), values["hwidth"])
+
+
 def inspect_production(path, sample, cfg):
     args = SimpleNamespace(ebeam=cfg.ebeam, expected_higgs_mass=cfg.higgs_mass,
                            nevents=cfg.events_for(sample))
@@ -97,7 +126,7 @@ def inspect_production(path, sample, cfg):
             raise ValueError("loop-induced LHE has incompatible PDF IDs")
         info = {"cross_section_pb": four.parse_lhe_init_cross_section_pb(path)}
     if sample.is_signal:
-        four.validate_stable_higgs_lhe(path, cfg, cfg.events_for(sample))
+        four.validate_stable_higgs_lhe(path, cfg, cfg.events_for(sample), sample=sample)
     return info
 
 
