@@ -184,6 +184,58 @@ class FourLeptonHOTests(unittest.TestCase):
             self.assertIn(token, shower)
         self.assertIn("InitialStateReconOption Rapidity", shower)
 
+    def test_vbf_orders_and_preview_cards_use_the_same_mixed_loop_policy(self):
+        for energy in (13, 40):
+            with self.subTest(energy=energy), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                args = run_pipeline.parse_args(["prepare", "--workflow", "fourlepton-ho",
+                    "--run-tag", "vbf_orders", "--energy-tev", str(energy), "--nevents", "30"])
+                settings = cfg("--run-tag", args.run_tag, "--ebeam", str(500 * energy),
+                               "--nevents", "30", "--nb-core", str(args.jobs))
+                with patch.object(workflow, "REPO", root), patch.object(workflow, "configuration", return_value={}):
+                    plan_dir = workflow.prepare(args)
+                inventory = json.loads((plan_dir / "plan.json").read_text())
+                samples = ho.selected_samples(settings)
+                for sample in samples:
+                    if sample.matching != "MC@NLO":
+                        continue
+                    process_dir = root / "hfourlepton/runs" / args.run_tag / "production" / sample.production_group_id / "mg5_process"
+                    process, launch = ho.nlo_cards(sample, settings, process_dir,
+                        four.group_event_count(sample.production_group_id, samples, settings))
+                    self.assertEqual((plan_dir / sample.production_group_id / "process.mg5").read_text(), process)
+                    self.assertEqual((plan_dir / sample.production_group_id / "launch.mg5").read_text(), launch)
+                    if sample.production_mode == "vbf":
+                        declaration = next(x for x in process.splitlines() if x.startswith("generate "))
+                        self.assertIn("QCD^2=0 QED^2=6 [QCD]", declaration)
+                        self.assertNotIn("QCD=0", declaration)
+                        self.assertIn("$$ w+ w- z", declaration)
+                        self.assertIn("set nlo_mixed_expansion True\n", process)
+                        self.assertEqual(next(x['process'] for x in inventory['samples'] if x['name'] == sample.name), sample.process)
+                    else:
+                        self.assertNotIn("set nlo_mixed_expansion", process)
+                    self.assertNotIn("IRPoleCheckThreshold", process + launch)
+
+    def test_missing_nlo_output_reports_pole_failures_and_debug_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for name, content in (("P0_bad", " FAILED 1e-5\n" * 20),
+                                  ("P0_good", " PASSED 1e-5\n" * 20),
+                                  ("P0_within_tolerance", " FAILED 1e-5\n" + " PASSED 1e-5\n" * 19)):
+                folder = root / "SubProcesses" / name
+                folder.mkdir(parents=True)
+                (folder / "check_poles.log").write_text(content)
+            debug = root / "pilot_tag_1_debug.log"
+            debug.write_text("Poles do not cancel, run cannot continue\n")
+            message = ho.nlo_failure_message(root, "pilot", root / "Events/pilot/events.lhe.gz")
+            self.assertIn("NLO sample is invalid", message)
+            self.assertIn("P0_bad/check_poles.log (20/20 points failed)", message)
+            self.assertIn(str(debug), message)
+            self.assertNotIn("P0_good", message)
+            self.assertNotIn("P0_within_tolerance", message)
+            empty = root / "missing"
+            self.assertEqual(ho.nlo_failure_message(empty, "pilot", empty / "events.lhe.gz"),
+                             f"MG5 did not produce {empty / 'events.lhe.gz'}")
+
     def test_real_nlo_inspector_contract_with_synthetic_events(self):
         sample = next(s for s in ho.all_samples() if s.name == "bkg_qq_4e")
         with tempfile.TemporaryDirectory() as tmp:

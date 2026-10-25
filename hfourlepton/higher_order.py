@@ -25,7 +25,9 @@ GENERATION_CUTS = {"ptl_min_gev": 2., "etal_max": 5., "mmll_min_gev": 2., "drll_
 # The VBF definition excludes s-channel VH. WH charges and ggZH are disjoint.
 PRODUCTIONS = {
     "gg_h": ("ggf", "HJMiNNLO", "NNLO+PS", "POWHEG"),
-    "vbf_h": ("vbf", "p p > h j j $$ w+ w- z QCD=0 [QCD]", "NLO+PS", "MC@NLO"),
+    # Squared orders allow the mixed loops needed for quark-line interference.
+    # Diagram-level QCD=0 instead restricts MG5's loop-particle filter to QCD.
+    "vbf_h": ("vbf", "p p > h j j $$ w+ w- z QCD^2=0 QED^2=6 [QCD]", "NLO+PS", "MC@NLO"),
     "wp_h": ("wh", "p p > h w+ [QCD]", "NLO+PS", "MC@NLO"),
     "wm_h": ("wh", "p p > h w- [QCD]", "NLO+PS", "MC@NLO"),
     "z_h": ("zh", "p p > h z [QCD]", "NLO+PS", "MC@NLO"),
@@ -153,7 +155,10 @@ def normalization(sample, native_lhe, cfg, stable_lhe=None):
 
 
 def nlo_cards(sample, cfg, process_dir, count):
-    process = "set automatic_html_opening False\nset output_dependencies internal\n" + four.process_card_text(sample, process_dir)
+    options = "set automatic_html_opening False\nset output_dependencies internal\n"
+    if sample.production_mode == "vbf":
+        options += "set nlo_mixed_expansion True\n"
+    process = options + four.process_card_text(sample, process_dir)
     settings = dict(nevents=count, iseed=four.seed_for(sample.production_group_id, cfg),
         ebeam1=cfg.ebeam, ebeam2=cfg.ebeam, lpp1=1, lpp2=1, pdlabel="lhapdf", lhaid=sample.lhaid,
         parton_shower="HERWIGPP", event_norm="average", ickkw=0,
@@ -202,11 +207,29 @@ def obtain_production(sample, selected, cfg):
             four.run_runtime_command(four.mg5_command(cfg, group / "cards/launch.mg5"), cfg)
             if not cfg.dry_run:
                 if not path.is_file():
-                    raise ValueError(f"MG5 did not produce {path}")
+                    raise ValueError(nlo_failure_message(process_dir, cfg.run_tag, path))
                 four.write_artifact_stage_marker(marker, identity, path)
     if not cfg.dry_run:
         inspect_production(path, sample, cfg)
     return independent_decay_input(path, sample, selected, cfg) if sample.is_signal else path
+
+
+def nlo_failure_message(process_dir, run_tag, path):
+    """Expose MG5 failures even when its command shell exits successfully."""
+    failed = []
+    for log in sorted((process_dir / "SubProcesses").glob("P*/check_poles.log")):
+        text = log.read_text(errors="replace")
+        passed = len(re.findall(r"(?m)^\s*PASSED\s", text))
+        failures = len(re.findall(r"(?m)^\s*FAILED\s", text))
+        if failures > .1 * (passed + failures):
+            failed.append(f"{log} ({failures}/{passed + failures} points failed)")
+    debug = sorted(process_dir.glob(f"{run_tag}*_debug.log"))
+    message = f"MG5 did not produce {path}"
+    if failed:
+        message += "\nMG5 pole-cancellation checks failed; the NLO sample is invalid:\n" + "\n".join(failed)
+    if debug:
+        message += "\nMG5 debug log(s): " + ", ".join(str(log) for log in debug)
+    return message
 
 
 def slice_bounds(sample, selected, cfg):

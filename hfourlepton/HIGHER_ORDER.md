@@ -88,6 +88,16 @@ generated for `4e`, `4mu` and `2e2mu` Higgs decays or continuum final states.
 | qq→4ℓ | Full neutral-current matrix elements, Higgs excluded; MC@NLO | Native NLO |
 | gg→4ℓ | Continuum loops, Higgs excluded; Herwig | Native loop-induced LO |
 
+The VBF process uses `p p > h j j $$ w+ w- z QCD^2=0 QED^2=6 [QCD]`
+with `nlo_mixed_expansion True`. These squared-order constraints select the
+electroweak Born contribution and its NLO QCD correction while allowing mixed
+loop topologies needed for quark-line interference. Diagram-level `QCD=0`
+can remove those virtual contributions and spoil cancellation of the single
+infrared pole. This follows the
+[MG5 coupling-order guidance](https://amcatnlo.web.cern.ch/amcatnlo/co.htm).
+MG5's pole checks and their default tolerances remain active. The corrected
+VBF export still needs to pass those numerical checks when the user runs it.
+
 The ggF calculation follows the diphoton convention, including the full ihixs
 scale/PDF scan and its numerical checks. Its hard PDF is NNPDF4.0 NNLO with QED;
 the target rate uses the diphoton N3LO PDF convention. Other samples use
