@@ -24,6 +24,7 @@ from collections import defaultdict
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
+from xml.sax.saxutils import quoteattr
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -1892,6 +1893,61 @@ def parse_lhe_optional_weight_definitions(
     return definitions
 
 
+def lhe_blocks(path: Path):
+    """Yield unchanged text outside events and complete event payloads."""
+    event_lines = None
+    events = 0
+    with open_maybe_gzip(path) as stream:
+        for line in stream:
+            if re.search(r"<event\b", line):
+                if event_lines is not None:
+                    raise ValueError(f"nested LHE event in {path}")
+                event_lines = []
+            if event_lines is None:
+                yield False, line
+                continue
+            event_lines.append(line)
+            if "</event>" in line:
+                events += 1
+                yield True, "".join(event_lines)
+                event_lines = None
+    if event_lines is not None or not events:
+        raise ValueError(f"incomplete or missing LHE events in {path}")
+
+
+def event_optional_weights(payload, definitions, context):
+    """Decode compact values in declaration order, or explicit weight IDs."""
+    declared = {item["id"] for item in definitions}
+    if len(declared) != len(definitions):
+        raise ValueError(f"duplicate optional-weight declarations in {context}")
+    compact = re.findall(r"<weights\b[^>]*>(.*?)</weights\s*>", payload, re.DOTALL)
+    if re.search(r"<weights\b", payload):
+        if len(compact) != 1 or len(re.findall(r"<weights\b", payload)) != 1:
+            raise ValueError(f"malformed compact optional weights in {context}")
+        if re.search(r"<(?:rwgt|wgt)\b", payload):
+            raise ValueError(f"mixed compact and explicit optional weights in {context}")
+        values = compact[0].split()
+        if not definitions or len(values) != len(definitions):
+            raise ValueError(f"compact optional-weight count differs from declarations in {context}")
+        pairs = [(item["id"], value) for item, value in zip(definitions, values)]
+    else:
+        pairs = []
+        for match in re.finditer(r"<wgt\b([^>]*)>(.*?)</wgt>", payload, re.DOTALL):
+            identifier = re.search(r"\bid\s*=\s*(['\"])(.*?)\1", match.group(1))
+            pairs.append((identifier.group(2).strip() if identifier else "", match.group(2)))
+        if len(re.findall(r"<wgt\b", payload)) != len(pairs):
+            raise ValueError(f"malformed optional weights in {context}")
+    weights = {}
+    for weight_id, value in pairs:
+        if weight_id not in declared or weight_id in weights:
+            raise ValueError(f"undeclared or duplicate optional-weight ID {weight_id!r} in {context}")
+        try:
+            weights[weight_id] = float(value.replace("D", "E").replace("d", "e"))
+        except ValueError as error:
+            raise ValueError(f"invalid optional weight {weight_id} in {context}") from error
+    return weights, bool(compact)
+
+
 def lhe_optional_weight_mapping(
     path: Path, definitions: list[dict[str, str]], *, allow_nonfinite: bool = False
 ) -> dict[str, object]:
@@ -1902,58 +1958,29 @@ def lhe_optional_weight_mapping(
     optional-weight vector. ThePEG strips surrounding description whitespace
     and HwSim writes its std::map in lexical description order.
     """
-    declared = {definition["id"]: definition for definition in definitions}
     present_ids: set[str] | None = None
-    event_lines: list[str] | None = None
     events = 0
+    compact_events = 0
     finite_counts: dict[str, int] = defaultdict(int)
     nonfinite_counts: dict[str, int] = defaultdict(int)
-    with open_maybe_gzip(path) as stream:
-        for line in stream:
-            if re.search(r"<event\b", line):
-                if event_lines is not None:
-                    raise ValueError(f"nested LHE event in {path}")
-                event_lines = []
-            if event_lines is None:
-                continue
-            event_lines.append(line)
-            if "</event>" not in line:
-                continue
-            payload = "".join(event_lines)
-            event_lines = None
-            events += 1
-            if re.search(r"<weights\b", payload):
-                raise ValueError(f"compact LHE optional weights are unsupported in {path}")
-            ids: set[str] = set()
-            for match in re.finditer(
-                r"<wgt\b([^>]*)>(.*?)</wgt>", payload, flags=re.DOTALL
-            ):
-                identifier = re.search(r"\bid\s*=\s*(['\"])(.*?)\1", match.group(1))
-                weight_id = identifier.group(2).strip() if identifier else ""
-                if weight_id not in declared or weight_id in ids:
-                    raise ValueError(
-                        f"undeclared or duplicate optional-weight ID {weight_id!r} "
-                        f"in {path} event {events}"
-                    )
-                try:
-                    value = float(match.group(2).replace("D", "E").replace("d", "e"))
-                except ValueError as error:
-                    raise ValueError(f"invalid optional weight {weight_id} in {path}") from error
-                if math.isfinite(value):
-                    finite_counts[weight_id] += 1
-                else:
-                    nonfinite_counts[weight_id] += 1
-                    if not allow_nonfinite:
-                        raise ValueError(f"non-finite optional weight {weight_id} in {path}")
-                ids.add(weight_id)
-            if len(re.findall(r"<wgt\b", payload)) != len(ids):
-                raise ValueError(f"malformed optional weights in {path} event {events}")
-            if present_ids is None:
-                present_ids = ids
-            elif ids != present_ids:
-                raise ValueError(f"optional-weight IDs change in {path} event {events}")
-    if event_lines is not None or not events:
-        raise ValueError(f"incomplete or missing LHE events in {path}")
+    for is_event, payload in lhe_blocks(path):
+        if not is_event:
+            continue
+        events += 1
+        weights, compact = event_optional_weights(payload, definitions, f"{path} event {events}")
+        compact_events += compact
+        for weight_id, value in weights.items():
+            if math.isfinite(value):
+                finite_counts[weight_id] += 1
+            else:
+                nonfinite_counts[weight_id] += 1
+                if not allow_nonfinite:
+                    raise ValueError(f"non-finite optional weight {weight_id} in {path}")
+        ids = set(weights)
+        if present_ids is None:
+            present_ids = ids
+        elif ids != present_ids:
+            raise ValueError(f"optional-weight IDs change in {path} event {events}")
     populated = [definition for definition in definitions if definition["id"] in present_ids]
     names = [definition.get("source_name", definition["description"]) for definition in populated]
     if any("\t" in name or "\r" in name for name in names) or any(
@@ -1968,10 +1995,124 @@ def lhe_optional_weight_mapping(
         "absent_declared_ids": [definition["id"] for definition in definitions
                                 if definition["id"] not in present_ids],
         "validated_events": events,
+        "compact_events": compact_events,
         "finite_event_counts": dict(finite_counts),
         "nonfinite_event_counts": dict(nonfinite_counts),
         "source_order": "ThePEG description-keyed std::map lexical order",
     }
+
+
+def lhe_event_record(payload):
+    body = re.sub(r"^\s*<event\b[^>]*>", "", payload)
+    lines = [line.split() for line in body.splitlines()
+             if line.strip() and not line.lstrip().startswith("#")]
+    if not lines or len(lines[0]) < 6:
+        raise ValueError("incomplete LHE event header at optional-weight boundary")
+    header = lines[0]
+    count = int(header[0])
+    particles = lines[1:1 + count]
+    if count <= 0 or len(particles) != count or any(len(row) < 13 for row in particles):
+        raise ValueError("incomplete LHE particle record at optional-weight boundary")
+    return header, particles
+
+
+def validate_madspin_event_pair(source, decayed, factor):
+    """Confirm event alignment and the common decay factor before fixing weights."""
+    source_header, source_particles = lhe_event_record(source)
+    header, particles = lhe_event_record(decayed)
+    central, before = (float(h[2].replace("D", "E").replace("d", "e"))
+                       for h in (header, source_header))
+    if (not math.isfinite(before) or not math.isfinite(central)
+            or header[1] != source_header[1]
+            or not math.isclose(central, before * factor, rel_tol=1.e-6, abs_tol=0.)):
+        raise ValueError("MadSpin nominal weights do not share the recorded decay factor")
+    if len(particles) < len(source_particles):
+        raise ValueError("production particles disappeared during MadSpin")
+    for original, final in zip(source_particles, particles):
+        status = "2" if original[:2] == ["25", "1"] else original[1]
+        if final[:6] != [original[0], status, *original[2:6]]:
+            raise ValueError("MadSpin event order or production particle identity changed")
+        for a, b in zip(original[6:11], final[6:11]):
+            a, b = (float(x.replace("D", "E").replace("d", "e")) for x in (a, b))
+            if not math.isfinite(a) or not math.isfinite(b) or not math.isclose(a, b, rel_tol=1.e-8, abs_tol=1.e-7):
+                raise ValueError("MadSpin production momenta changed at optional-weight boundary")
+
+
+def prepare_shower_lhe_weights(path, source, sample, cfg):
+    """Expand compact weights in a separate copy and repair the MG5 bridge omission.
+
+    MG5 3.5.15 scales <rwgt> during MadSpin, but copies <weights> unchanged.
+    Only an unchanged compact source vector or an already correctly scaled
+    vector is accepted. Nominal weights, particles and init data are untouched.
+    """
+    definitions = parse_lhe_optional_weight_definitions(path)
+    mapping = lhe_optional_weight_mapping(path, definitions)
+    if not mapping["compact_events"]:
+        return path, None
+    source_definitions = parse_lhe_optional_weight_definitions(source) if source else definitions
+    factor = parse_lhe_init_cross_section_pb(path) / parse_lhe_init_cross_section_pb(source) if source else 1.
+    if not math.isfinite(factor) or factor <= 0:
+        raise ValueError("invalid MadSpin decay factor for compact optional weights")
+    if source:
+        validate_optional_weight_decay_boundary(source, mapping)
+    directory = cfg.run_dir / "weight_inputs" / sample.name
+    destination = directory / "events.lhe.gz"
+    marker = directory / "preparation.json"
+    identity = {"schema_version": 1, "input": artifact_stage_record(path),
+                "source": artifact_stage_record(source) if source else None,
+                "decay_factor": factor, "runner_sha256": sha256_file(Path(__file__).resolve())}
+    if destination.exists() or marker.exists():
+        if not destination.is_file() or not artifact_stage_matches(marker, identity, destination):
+            raise ValueError("prepared optional weights differ from saved inputs; use a new run tag")
+        return destination, {"marker": file_record(marker), **json.loads(marker.read_text())}
+    directory.mkdir(parents=True, exist_ok=True)
+    temporary = directory / f"events.tmp.{os.getpid()}.lhe.gz"
+    source_events = (payload for is_event, payload in lhe_blocks(source) if is_event) if source else None
+    rescaled = events = 0
+    try:
+        with gzip.open(temporary, "wt") as output:
+            for is_event, payload in lhe_blocks(path):
+                if not is_event:
+                    output.write(payload)
+                    continue
+                events += 1
+                weights, compact = event_optional_weights(payload, definitions, f"{path} event {events}")
+                if source_events is not None:
+                    before = next(source_events, None)
+                    if before is None:
+                        raise ValueError("MadSpin/source event counts differ")
+                    validate_madspin_event_pair(before, payload, factor)
+                    original, source_compact = event_optional_weights(before, source_definitions, f"{source} event {events}")
+                    expected = {key: original[key] * factor for key in weights}
+                    if not all(math.isclose(value, expected[key], rel_tol=1.e-6, abs_tol=0.)
+                               for key, value in weights.items()):
+                        if not (compact and source_compact
+                                and all(value == original[key] for key, value in weights.items())
+                                and all(math.isfinite(value) for value in expected.values())):
+                            raise ValueError(f"unexplained MadSpin optional-weight vector in event {events}")
+                        rescaled += sum(value != expected[key] for key, value in weights.items())
+                        weights = expected
+                if compact:
+                    explicit = "<rwgt>\n" + "".join(
+                        f"<wgt id={quoteattr(item['id'])}>{weights[item['id']]:.16e}</wgt>\n" for item in definitions) + "</rwgt>"
+                    payload = re.sub(r"<weights\b[^>]*>.*?</weights\s*>", lambda _: explicit, payload, flags=re.DOTALL)
+                output.write(payload)
+        if source_events is not None and next(source_events, None) is not None:
+            raise ValueError("MadSpin/source event counts differ")
+        lhe_optional_weight_mapping(temporary, definitions)
+        temporary.replace(destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+        if source_events is not None:
+            source_events.close()
+    preparation = {"identity": identity, "artifact": artifact_stage_record(destination),
+                   "events": events, "compact_events": mapping["compact_events"],
+                   "rescaled_optional_values": rescaled,
+                   "nominal_weights_and_particle_records": "unchanged"}
+    marker_temporary = marker.with_suffix(".tmp")
+    marker_temporary.write_text(json.dumps(preparation, indent=2, sort_keys=True) + "\n")
+    marker_temporary.replace(marker)
+    return destination, {"marker": file_record(marker), **preparation}
 
 
 def validate_optional_weight_decay_boundary(
@@ -4482,6 +4623,13 @@ def run_sample(
         )
     else:
         analysis_lhe = stable_or_final_lhe
+    if not cfg.dry_run:
+        try:
+            analysis_lhe, entry["optional_weight_preparation"] = prepare_shower_lhe_weights(
+                analysis_lhe, stable_or_final_lhe if sample.is_signal else None, sample, cfg
+            )
+        except ValueError as error:
+            die(str(error))
     input_lhe_metadata: dict[str, object] | None = None
     if not cfg.dry_run:
         try:

@@ -134,6 +134,15 @@ This prevents a loss of events from increasing the quoted efficiency. Large
 losses still require investigation; accounting for them does not validate the
 shower. All finite optional weights must survive the decay boundary.
 
+Compact LHE `<weights>` values are matched to IDs in `<initrwgt>` declaration
+order. MG5 3.5.15 MadSpin rescales explicit `<rwgt>` weights but can copy a
+compact vector without the decay factor. The runner prepares a separate,
+profile-independent file under `weight_inputs/SAMPLE/` with explicit IDs.
+It checks the nominal decay factor, source event order and production momenta,
+and corrects only compact values verified to equal their original source values.
+Already scaled values are not scaled twice. Original LHE files remain unchanged;
+the preparation record includes input/output hashes and conversion counts.
+
 The continuum generation cuts, pT(ℓ)>2 GeV, |η(ℓ)|<5 and dilepton mass>2 GeV,
 are below the analysis cuts. Their stability must be checked with looser
 generation in a future systematic study. Zbb, ttZ and ttbar remain separate
