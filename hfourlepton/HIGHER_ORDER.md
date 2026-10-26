@@ -98,6 +98,19 @@ infrared pole. This follows the
 MG5's pole checks and their default tolerances remain active. The corrected
 VBF export still needs to pass those numerical checks when the user runs it.
 
+The VBF launch card sets `MLReductionLib` to `6|7|1|3`, adding IREGI after
+Ninja, COLLIER and CutTools. MG5 skips unavailable reducers. The mixed VBF
+code includes rank-six boxes, beyond the rank limits of CutTools and Ninja;
+IREGI supports these integrals and is linked into MG5's NLO export. Its omission
+from the default `6|7|1` list caused `STOP No dp loop library can deal with this
+integral` on Timur. The library IDs and fallback order follow
+[MG5's MadLoop card](https://raw.githubusercontent.com/mg5amcnlo/mg5amcnlo/3.x/Template/loop_material/StandAlone/Cards/MadLoopParams.dat).
+This setting does not change the selected diagrams or pole-check tolerances.
+MG5 3.5.15 only warns when a pole check completes zero points; the four-lepton
+wrapper rejects missing or aborted checks, including zero-point logs, before
+certifying or reusing an internally generated NLO LHE. Missing-output errors
+also report integration `STOP` messages and the relevant log paths.
+
 The exported VBF virtual-subprocess makefiles compile `polynomial.f` with
 `POLYNOMIAL_OPTIMIZATION = -O1`. MG5's dedicated rule otherwise forces `-O3`
 regardless of ordinary `FFLAGS`. With gfortran 11.5 on Timur, four such files

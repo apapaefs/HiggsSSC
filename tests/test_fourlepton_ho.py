@@ -210,9 +210,11 @@ class FourLeptonHOTests(unittest.TestCase):
                         self.assertNotIn("QCD=0", declaration)
                         self.assertIn("$$ w+ w- z", declaration)
                         self.assertIn("set nlo_mixed_expansion True\n", process)
+                        self.assertIn("set MLReductionLib 6|7|1|3\n", launch)
                         self.assertEqual(next(x['process'] for x in inventory['samples'] if x['name'] == sample.name), sample.process)
                     else:
                         self.assertNotIn("set nlo_mixed_expansion", process)
+                        self.assertNotIn("MLReductionLib", launch)
                     self.assertNotIn("IRPoleCheckThreshold", process + launch)
 
     def test_missing_nlo_output_reports_pole_failures_and_debug_path(self):
@@ -235,6 +237,80 @@ class FourLeptonHOTests(unittest.TestCase):
             empty = root / "missing"
             self.assertEqual(ho.nlo_failure_message(empty, "pilot", empty / "events.lhe.gz"),
                              f"MG5 did not produce {empty / 'events.lhe.gz'}")
+
+    def test_nlo_pole_checks_reject_missing_empty_and_aborted_tests(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with self.assertRaisesRegex(ValueError, "no pole-check logs found"):
+                ho.validate_nlo_pole_checks(root)
+            virtual = root / "SubProcesses/P0_uu_huu/V0_uu_huu"
+            virtual.mkdir(parents=True)
+            with self.assertRaisesRegex(ValueError, "missing pole-check log"):
+                ho.validate_nlo_pole_checks(root)
+            log = virtual.parent / "check_poles.log"
+            for content, error in (("", "zero completed"),
+                    ("STOP No dp loop library can deal with this integral\n", "zero completed.*STOP No dp"),
+                    ("PASSED 1e-5\nSTOP No dp loop library can deal with this integral\n", "aborted pole check"),
+                    ("FAILED 1e-5\n" * 3 + "PASSED 1e-5\n" * 17, "3/20 points failed")):
+                with self.subTest(content=content):
+                    log.write_text(content)
+                    with self.assertRaisesRegex(ValueError, error):
+                        ho.validate_nlo_pole_checks(root)
+            # Preserve MG5's 10% failure-fraction limit and its LO-only exception.
+            log.write_text("FAILED 1e-5\n" * 2 + "PASSED 1e-5\n" * 18)
+            real_only = root / "SubProcesses/P1_real"
+            real_only.mkdir()
+            (real_only / "parton_lum_0.f").touch()
+            (real_only / "check_poles.log").touch()
+            ho.validate_nlo_pole_checks(root)
+
+    def test_integration_stop_diagnostic_is_aggregated_and_pole_logs_are_bounded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for index in range(12):
+                directory = root / "SubProcesses" / f"P{index}_uu_huu"
+                (directory / "GF2.0").mkdir(parents=True)
+                (directory / "check_poles.log").write_text("STOP No dp loop library can deal with this integral\n")
+                (directory / "GF2.0/log.txt").write_text("STOP No dp loop library can deal with this integral\n")
+            message = ho.nlo_failure_message(root, "pilot", root / "Events/pilot/events.lhe.gz")
+            self.assertEqual(message.count("zero completed pole-check points"), 5)
+            self.assertIn("and 7 more subprocesses", message)
+            self.assertIn("MG5 integration STOP No dp loop library can deal with this integral (12 log(s); example:", message)
+            self.assertIn("/GF2.0/log.txt", message)
+
+    def test_nlo_output_with_zero_pole_points_cannot_be_certified_or_reused(self):
+        sample = next(s for s in ho.all_samples() if s.name == "bkg_qq_4e")
+        settings = replace(cfg("--run-tag", "pilot"), dry_run=False)
+        for cached in (False, True):
+            with self.subTest(cached=cached), tempfile.TemporaryDirectory() as tmp:
+                group = Path(tmp)
+                process = group / "mg5_process"
+
+                def fake_export(*args):
+                    (process / "SubProcesses/P0_qq/V0_qq").mkdir(parents=True)
+
+                def fake_launch(*args):
+                    output = process / "Events/pilot/events.lhe.gz"
+                    output.parent.mkdir(parents=True)
+                    output.write_bytes(b"synthetic LHE placeholder")
+                    (process / "SubProcesses/P0_qq/check_poles.log").write_text(
+                        "STOP No dp loop library can deal with this integral\n")
+
+                commands = iter((fake_export, fake_launch))
+                if cached:
+                    fake_export()
+                    fake_launch()
+                with patch.object(four, "production_dir", return_value=group), \
+                     patch.object(four, "artifact_stage_matches", return_value=True), \
+                     patch.object(four, "run_runtime_command", side_effect=lambda *a: next(commands)(*a)) as run, \
+                     patch.object(ho.ho, "patch_mg5_fortran"), \
+                     patch.object(four, "write_artifact_stage_marker") as stamp, \
+                     patch.object(ho, "inspect_production") as inspect:
+                    with self.assertRaisesRegex(ValueError, "zero completed pole-check points"):
+                        ho.obtain_production(sample, [sample], settings)
+                    stamp.assert_not_called()
+                    inspect.assert_not_called()
+                    self.assertEqual(run.call_count, 0 if cached else 2)
 
     def test_vbf_polynomial_build_setting_is_scoped_and_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:

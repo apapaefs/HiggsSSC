@@ -166,6 +166,10 @@ def nlo_cards(sample, cfg, process_dir, count):
         mur_over_ref=1., muf_over_ref=1., reweight_scale=True, reweight_PDF=False,
         jetalgo=-1, jetradius=0.4, maxjetflavor=5, ptj=0., etaj=-1.,
         ptl=2., etal=5., mll=2., mll_sf=2., drll=0., drll_sf=0.)
+    if sample.production_mode == "vbf":
+        # Mixed VBF loops include rank-six boxes: CutTools and Ninja cannot
+        # reduce them. IREGI is linked by MG5 but absent from its default list.
+        settings["MLReductionLib"] = "6|7|1|3"
     launch = (f"set nb_core {cfg.nb_core}\nlaunch {process_dir} aMC@NLO --parton --name={cfg.run_tag}\n" +
               "".join(f"set {k} {v}\n" for k, v in settings.items()) +
               f"set mass 25 {cfg.higgs_mass}\ndone\n")
@@ -224,6 +228,7 @@ def obtain_production(sample, selected, cfg):
         if not cfg.dry_run and path.exists():
             if not four.artifact_stage_matches(marker, identity, path):
                 raise ValueError(f"existing production differs from cards: {path}; use a new tag")
+            validate_nlo_pole_checks(process_dir)
         else:
             if not cfg.dry_run and process_dir.exists():
                 raise ValueError(f"incomplete NLO export: {process_dir}; inspect it before using a new tag")
@@ -238,25 +243,66 @@ def obtain_production(sample, selected, cfg):
             if not cfg.dry_run:
                 if not path.is_file():
                     raise ValueError(nlo_failure_message(process_dir, cfg.run_tag, path))
+                validate_nlo_pole_checks(process_dir)
                 four.write_artifact_stage_marker(marker, identity, path)
     if not cfg.dry_run:
         inspect_production(path, sample, cfg)
     return independent_decay_input(path, sample, selected, cfg) if sample.is_signal else path
 
 
-def nlo_failure_message(process_dir, run_tag, path):
-    """Expose MG5 failures even when its command shell exits successfully."""
+def validate_nlo_pole_checks(process_dir):
+    """Reject missing/aborted checks; MG5 3.5.15 accepts zero tested points."""
+    subprocesses = process_dir / "SubProcesses"
+    directories = {p.parent for p in subprocesses.glob("P*/check_poles.log")}
+    directories.update(p.parent for p in subprocesses.glob("P*/V*") if p.is_dir())
     failed = []
-    for log in sorted((process_dir / "SubProcesses").glob("P*/check_poles.log")):
+    if not directories:
+        failed.append(f"{subprocesses}: no pole-check logs found")
+    for directory in sorted(directories):
+        # MG5 does not run pole checks in real-emission-only subprocesses.
+        if (directory / "parton_lum_0.f").is_file():
+            continue
+        log = directory / "check_poles.log"
+        if not log.is_file():
+            failed.append(f"{log}: missing pole-check log")
+            continue
         text = log.read_text(errors="replace")
         passed = len(re.findall(r"(?m)^\s*PASSED\s", text))
         failures = len(re.findall(r"(?m)^\s*FAILED\s", text))
-        if failures > .1 * (passed + failures):
+        stops = re.findall(r"(?m)^[ \t]*STOP[ \t]+(.+)$", text)
+        stops = [message.strip() for message in stops if message.strip() != "0"]
+        if not passed + failures:
+            reason = "; STOP " + stops[0] if stops else ""
+            failed.append(f"{log}: zero completed pole-check points{reason}")
+        elif stops:
+            failed.append(f"{log}: aborted pole check; STOP {stops[0]}")
+        elif failures > .1 * (passed + failures):
             failed.append(f"{log} ({failures}/{passed + failures} points failed)")
+    if failed:
+        detail = "\n".join(failed[:5])
+        if len(failed) > 5:
+            detail += f"\n... and {len(failed) - 5} more subprocesses"
+        raise ValueError("MG5 pole-cancellation checks failed or did not complete; "
+                         "the NLO sample is invalid:\n" + detail)
+
+
+def nlo_failure_message(process_dir, run_tag, path):
+    """Expose MG5 failures even when its command shell exits successfully."""
     debug = sorted(process_dir.glob(f"{run_tag}*_debug.log"))
     message = f"MG5 did not produce {path}"
-    if failed:
-        message += "\nMG5 pole-cancellation checks failed; the NLO sample is invalid:\n" + "\n".join(failed)
+    if process_dir.is_dir():
+        try:
+            validate_nlo_pole_checks(process_dir)
+        except ValueError as error:
+            message += "\n" + str(error)
+    stops = {}
+    for log in sorted((process_dir / "SubProcesses").glob("P*/G*/log.txt")):
+        for reason in set(re.findall(r"(?m)^[ \t]*STOP[ \t]+(.+)$", log.read_text(errors="replace"))):
+            reason = reason.strip()
+            if reason != "0":
+                stops.setdefault(reason, []).append(log)
+    for reason, logs in sorted(stops.items()):
+        message += f"\nMG5 integration STOP {reason} ({len(logs)} log(s); example: {logs[0]})"
     if debug:
         message += "\nMG5 debug log(s): " + ", ".join(str(log) for log in debug)
     return message
