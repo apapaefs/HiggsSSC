@@ -236,6 +236,55 @@ class FourLeptonHOTests(unittest.TestCase):
             self.assertEqual(ho.nlo_failure_message(empty, "pilot", empty / "events.lhe.gz"),
                              f"MG5 did not produce {empty / 'events.lhe.gz'}")
 
+    def test_vbf_polynomial_build_setting_is_scoped_and_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            virtual = root / "SubProcesses/P0_uu_huu/V0_uu_huu"
+            virtual.mkdir(parents=True)
+            makefile = virtual / "makefile"
+            original = ("FFLAGS = -O\nPOLYNOMIAL_OPTIMIZATION = -O3\n"
+                        "POLYNOMIAL_BOUNDS_CHECK =\n"
+                        "%olynomial.o : %olynomial.f\n"
+                        "\t$(FC) $(filter-out -O%,$(FFLAGS)) $(POLYNOMIAL_OPTIMIZATION) -c $< -o $@\n")
+            makefile.write_text(original)
+            other_file = root / "Source/make_opts"
+            other_file.parent.mkdir()
+            other_file.write_text("FFLAGS = -O\n")
+            vbf = next(s for s in ho.all_samples() if s.production_mode == "vbf")
+            qq = next(s for s in ho.all_samples() if s.name == "bkg_qq_4e")
+            ho.configure_nlo_polynomial_build(qq, root)
+            self.assertEqual(makefile.read_text(), original)
+            ho.configure_nlo_polynomial_build(vbf, root)
+            self.assertEqual(makefile.read_text(), original.replace("= -O3", "= -O1"))
+            self.assertEqual(other_file.read_text(), "FFLAGS = -O\n")
+            changed_time = makefile.stat().st_mtime_ns
+            ho.configure_nlo_polynomial_build(vbf, root)
+            self.assertEqual(makefile.stat().st_mtime_ns, changed_time)
+
+    def test_vbf_build_rejects_unknown_settings_and_external_makefiles_before_writing(self):
+        vbf = next(s for s in ho.all_samples() if s.production_mode == "vbf")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "export"
+            good = root / "SubProcesses/P0_a/V0_a/makefile"
+            bad = root / "SubProcesses/P0_b/V0_b/makefile"
+            good.parent.mkdir(parents=True)
+            bad.parent.mkdir(parents=True)
+            good.write_text("POLYNOMIAL_OPTIMIZATION = -O3\n")
+            bad.write_text("POLYNOMIAL_OPTIMIZATION = -Ofast\n")
+            with self.assertRaisesRegex(ValueError, "unrecognized"):
+                ho.configure_nlo_polynomial_build(vbf, root)
+            self.assertEqual(good.read_text(), "POLYNOMIAL_OPTIMIZATION = -O3\n")
+            external = Path(tmp) / "shared_makefile"
+            external.write_text("POLYNOMIAL_OPTIMIZATION = -O3\n")
+            bad.unlink()
+            bad.symlink_to(external)
+            with self.assertRaisesRegex(ValueError, "outside the VBF export"):
+                ho.configure_nlo_polynomial_build(vbf, root)
+            self.assertEqual(external.read_text(), "POLYNOMIAL_OPTIMIZATION = -O3\n")
+            self.assertEqual(good.read_text(), "POLYNOMIAL_OPTIMIZATION = -O3\n")
+            with self.assertRaisesRegex(ValueError, "no virtual-subprocess makefiles"):
+                ho.configure_nlo_polynomial_build(vbf, Path(tmp) / "empty")
+
     def test_real_nlo_inspector_contract_with_synthetic_events(self):
         sample = next(s for s in ho.all_samples() if s.name == "bkg_qq_4e")
         with tempfile.TemporaryDirectory() as tmp:

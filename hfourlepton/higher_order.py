@@ -172,6 +172,35 @@ def nlo_cards(sample, cfg, process_dir, count):
     return process, launch
 
 
+def configure_nlo_polynomial_build(sample, process_dir):
+    """Avoid GCC 11's excessive -O3 compile time for VBF loop polynomials.
+
+    MG5 overrides ordinary FFLAGS for polynomial.f. Change only its dedicated
+    setting in the exported VBF makefiles, leaving all physics checks active.
+    """
+    if sample.production_mode != "vbf":
+        return
+    makefiles = sorted((process_dir / "SubProcesses").glob("P*/V*/makefile"))
+    if not makefiles:
+        raise ValueError(f"VBF export has no virtual-subprocess makefiles: {process_dir}")
+    setting = re.compile(r"(?m)^([ \t]*POLYNOMIAL_OPTIMIZATION[ \t]*=[ \t]*)(-O[13])([ \t]*)$")
+    updates = {}
+    for path in makefiles:
+        target = path.resolve()
+        if not target.is_relative_to(process_dir.resolve()):
+            raise ValueError(f"refusing to modify a makefile outside the VBF export: {path}")
+        original = target.read_text()
+        if len(setting.findall(original)) != 1:
+            raise ValueError(f"unrecognized VBF polynomial optimization setting: {path}")
+        updated = setting.sub(lambda match: match[1] + "-O1" + match[3], original)
+        if updated != original:
+            updates[target] = updated
+    # Validate every makefile before changing any of them.
+    for path, content in updates.items():
+        path.write_text(content)
+    four.log(f"VBF polynomial.f compilation: -O1 in {len(makefiles)} virtual subprocesses")
+
+
 def obtain_production(sample, selected, cfg):
     if sample.production_mode == "ggf":
         if cfg.signal_lhe is None:
@@ -204,6 +233,7 @@ def obtain_production(sample, selected, cfg):
             four.run_runtime_command(four.mg5_command(cfg, group / "cards/process_card.dat"), cfg)
             if not cfg.dry_run:
                 ho.patch_mg5_fortran(process_dir)
+                configure_nlo_polynomial_build(sample, process_dir)
             four.run_runtime_command(four.mg5_command(cfg, group / "cards/launch.mg5"), cfg)
             if not cfg.dry_run:
                 if not path.is_file():

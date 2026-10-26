@@ -98,6 +98,15 @@ infrared pole. This follows the
 MG5's pole checks and their default tolerances remain active. The corrected
 VBF export still needs to pass those numerical checks when the user runs it.
 
+The exported VBF virtual-subprocess makefiles compile `polynomial.f` with
+`POLYNOMIAL_OPTIMIZATION = -O1`. MG5's dedicated rule otherwise forces `-O3`
+regardless of ordinary `FFLAGS`. With gfortran 11.5 on Timur, four such files
+were still compiling after more than 25 hours each; isolated copies compiled
+successfully with `-O1` in about 5.7 seconds each. This setting changes compiler
+optimization only. It may reduce matrix-element evaluation speed, and the
+numerical pole checks are still required. Other processes and source files
+use their existing build settings; the shared MG5 installation is unchanged.
+
 The ggF calculation follows the diphoton convention, including the full ihixs
 scale/PDF scan and its numerical checks. Its hard PDF is NNPDF4.0 NNLO with QED;
 the target rate uses the diphoton N3LO PDF convention. Other samples use
