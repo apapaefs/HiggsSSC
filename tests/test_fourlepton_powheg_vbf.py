@@ -3,6 +3,7 @@ from dataclasses import replace
 import gzip
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -36,6 +37,64 @@ def fixture(ebeam=6500., masses=(125.0011342, 124.98, 125.05)):
 
 
 class VBFTests(unittest.TestCase):
+    def test_setup_initializes_a_real_gitlink_in_an_existing_sparse_checkout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source, core = root / 'source', root / 'POWHEG-BOX-V2'
+            source.mkdir()
+            core.mkdir()
+
+            def git(where, *args):
+                return subprocess.check_output(['git', '-c', 'protocol.file.allow=always',
+                    '-c', 'user.name=HiggsSSC Test', '-c', 'user.email=test@example.invalid',
+                    '-C', str(where), *args], text=True, stderr=subprocess.PIPE).strip()
+
+            for directory in (source, core):
+                git(directory, 'init', '-q')
+            (source / 'Born.f').write_text('synthetic process source\n')
+            git(source, 'add', 'Born.f')
+            git(source, 'commit', '-qm', 'synthetic VBF process')
+            revision = git(source, 'rev-parse', 'HEAD')
+            for name in ('include', 'HJ'):
+                (core / name).mkdir()
+                (core / name / 'input').write_text('existing input\n')
+            (core / '.gitmodules').write_text(
+                '[submodule "VBF_H"]\n\tpath = VBF_H\n\turl = ' + str(source) + '\n')
+            git(core, 'add', '.')
+            git(core, 'update-index', '--add', '--cacheinfo', '160000,' + revision + ',VBF_H')
+            git(core, 'commit', '-qm', 'synthetic core with gitlink')
+            git(core, 'sparse-checkout', 'init', '--cone')
+            git(core, 'sparse-checkout', 'set', 'include', 'HJ')
+            grid = core / 'HJ/existing-grid.dat'
+            grid.write_bytes(b'preserve generated grid')
+            original = grid.read_bytes()
+            # Reproduce the real failure; a plain directory mock misses it.
+            with self.assertRaises(subprocess.CalledProcessError):
+                git(core, 'sparse-checkout', 'add', 'VBF_H')
+            obj = vbf.shared.Pipeline.__new__(vbf.shared.Pipeline)
+            obj.work, obj.powheg = root, core
+            obj.config = {'cc': 'gcc', 'cxx': 'g++', 'fc': 'gfortran'}
+            calls = []
+
+            def call(label, command, cwd=None):
+                calls.append(label)
+                if label == 'powheg-vbf-build':
+                    (core / 'VBF_H/pwhg_main').write_bytes(b'synthetic binary')
+                else:
+                    subprocess.run(['git', '-c', 'protocol.file.allow=always', *map(str, command[1:])],
+                        check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+            obj.call = call
+            obj.capture = lambda command: subprocess.check_output(list(map(str, command)), text=True).strip()
+            with patch.object(vbf, 'COMMIT', revision), \
+                 patch.object(vbf, 'source_identity', return_value={'source': 'synthetic'}):
+                obj.setup_powheg_vbf()
+                obj.setup_powheg_vbf()
+            self.assertEqual(calls, ['powheg-vbf-sparse', 'powheg-vbf-source', 'powheg-vbf-build'])
+            self.assertEqual(git(core / 'VBF_H', 'rev-parse', 'HEAD'), revision)
+            self.assertEqual(set(git(core, 'sparse-checkout', 'list').splitlines()), {'include', 'HJ', 'VBF_H'})
+            self.assertEqual(grid.read_bytes(), original)
+
     def test_both_energies_native_rate_disjoint_decays_and_finite_width(self):
         for energy in (13, 40):
             with self.subTest(energy=energy), tempfile.TemporaryDirectory() as tmp, patch.object(four, 'SCRIPT_DIR', Path(tmp)):

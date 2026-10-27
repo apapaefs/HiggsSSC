@@ -55,7 +55,13 @@ The managed installation pins:
 | MG5 | `1d7559658bdc2b7eba476d4897aa594994fa82af` (3.5.15) |
 
 `setup --workflow fourlepton-ho` initializes the VBF_H submodule in the managed
-POWHEG checkout. Its old makefile uses `F77`; setup supplies the configured
+POWHEG checkout. Git's cone-mode sparse checkout classifies submodules as
+gitlinks rather than ordinary directories. Setup uses `sparse-checkout add
+--skip-checks VBF_H` for this pinned path before initializing it. An older
+setup command can fail with `'VBF_H' is not a directory`; update the checkout
+and repeat setup. No campaign files or integration grids need to be removed.
+
+The old VBF_H makefile uses `F77`; setup supplies the configured
 Fortran compiler and `-fallow-argument-mismatch` for the legacy interfaces.
 The supported default analysis linkage supplies the histogram routines and
 FastJet wrappers. A generated `svn.version` include embeds the exact Git
@@ -70,6 +76,14 @@ Build evidence is under `hfourlepton/diagnostics/vbf-h-build-20261026/`.
 This build was not used to generate a VBF event sample. Binary hashes can
 differ across build locations and toolchains; each installation records its
 own hash.
+
+The corrected sparse-checkout setup was also tested from a fresh checkout on
+Timur, through submodule initialization, compilation and a second setup call.
+Both calls passed without event generation. Logs are under
+`hfourlepton/diagnostics/vbf-h-sparse-setup-20261026/`. A regression test uses
+real temporary Git repositories and a submodule entry to reproduce the
+directory-check failure, then verifies successful setup and preservation of an
+existing generated file.
 
 The VBF runner uses the diphoton POWHEG integration/seed driver with separate
 cards, seeds and grids. It checks the source pins, executable, input card,

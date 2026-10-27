@@ -522,7 +522,10 @@ class Pipeline:
         process = self.powheg / 'VBF_H'
         if not (process / '.git').exists():
             if (self.powheg / '.git/info/sparse-checkout').is_file():
-                self.call('powheg-vbf-sparse', ['git', '-C', self.powheg, 'sparse-checkout', 'add', 'VBF_H'])
+                # A gitlink is not a tree directory. Cone-mode validation rejects
+                # it even though this pinned submodule is an intentional entry.
+                self.call('powheg-vbf-sparse', ['git', '-C', self.powheg, 'sparse-checkout',
+                                               'add', '--skip-checks', 'VBF_H'])
             self.call('powheg-vbf-source', ['git', '-C', self.powheg, 'submodule', 'update', '--init', 'VBF_H'])
         if self.capture(['git', '-C', process, 'rev-parse', 'HEAD']) != vbf.COMMIT:
             raise ValueError('VBF_H submodule differs from the pinned version; preserve this installation')
