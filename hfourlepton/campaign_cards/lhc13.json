@@ -59,5 +59,13 @@
     "electroweak ZZjj and triboson backgrounds",
     "signal-continuum interference"
   ],
-  "higher_order_policy": "ggF: HJMiNNLO shapes + pure-HEFT ihixs N3LO rate; VBF/WH/qqZH/ttH and qq4l: native NLO+PS; ggZH and gg4l: loop-induced LO"
+  "higher_order_policy": "ggF: HJMiNNLO shapes + pure-HEFT ihixs N3LO rate; VBF: POWHEG VBF_H NLO+PS; WH/qqZH/ttH and qq4l: MC@NLO; ggZH and gg4l: loop-induced LO",
+  "vbf_definition": {
+    "generator": "POWHEG VBF_H",
+    "approximation": "t-channel VBF; no s-channel VH or identical-fermion interference",
+    "normalization": "native NLO times Higgs decay BR",
+    "muR_muF_gev": 80.398,
+    "scale_variations": "seven-point factors 0.5, 1, 2",
+    "higgs_mass_window_widths": 30
+  }
 }

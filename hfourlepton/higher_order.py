@@ -1,7 +1,7 @@
 """Four-lepton production and matched-shower adapters using the diphoton machinery.
 
 No inclusive K factor is applied to non-ggF samples. NLO rates are the native
-MC@NLO integrals; loop-induced components are explicitly LO. Event generation
+POWHEG or MC@NLO integrals; loop-induced components are explicitly LO. Event generation
 and showering happen only when the user runs the campaign.
 """
 from dataclasses import replace
@@ -11,6 +11,8 @@ import math
 import re
 from pathlib import Path
 import subprocess
+import sys
+import time
 from string import Template
 from types import SimpleNamespace
 
@@ -25,9 +27,7 @@ GENERATION_CUTS = {"ptl_min_gev": 2., "etal_max": 5., "mmll_min_gev": 2., "drll_
 # The VBF definition excludes s-channel VH. WH charges and ggZH are disjoint.
 PRODUCTIONS = {
     "gg_h": ("ggf", "HJMiNNLO", "NNLO+PS", "POWHEG"),
-    # Squared orders allow the mixed loops needed for quark-line interference.
-    # Diagram-level QCD=0 instead restricts MG5's loop-particle filter to QCD.
-    "vbf_h": ("vbf", "p p > h j j $$ w+ w- z QCD^2=0 QED^2=6 [QCD]", "NLO+PS", "MC@NLO"),
+    "vbf_h": ("vbf", "VBF_H", "NLO+PS", "POWHEG"),
     "wp_h": ("wh", "p p > h w+ [QCD]", "NLO+PS", "MC@NLO"),
     "wm_h": ("wh", "p p > h w- [QCD]", "NLO+PS", "MC@NLO"),
     "z_h": ("zh", "p p > h z [QCD]", "NLO+PS", "MC@NLO"),
@@ -42,8 +42,10 @@ def all_samples():
         for original in four.SAMPLES[:3]:
             result.append(replace(original, name=f"signal_{prefix}_{original.channel}",
                 label=f"{prefix}, H->{original.channel}", process=process,
-                model="loop_sm-no_b_mass", perturbative_order=order, matching=matching,
-                source_kind="powheg" if mode == "ggf" else "mg5",
+                model=("HEFT (POWHEG HJMiNNLO)" if mode == "ggf" else
+                       "SM (POWHEG VBF_H)" if mode == "vbf" else "loop_sm-no_b_mass"),
+                perturbative_order=order, matching=matching,
+                source_kind="powheg" if matching == "POWHEG" else "mg5",
                 production_mode=mode, production_group_id=f"signal_{prefix}_stable",
                 normalization_rule="ihixs_n3lo_times_h4l_br" if mode == "ggf" else "native_production_times_h4l_br",
                 pdf_name=norm.NATIVE_PDF_SET if mode == "ggf" else NLO_PDF,
@@ -115,6 +117,9 @@ def powheg_higgs_mass_bounds(path, cfg):
 
 
 def inspect_production(path, sample, cfg):
+    if sample.production_mode == "vbf":
+        from hfourlepton import run_powheg_vbf as vbf
+        return vbf.inspect_lhe(path, cfg, cfg.events_for(sample))
     args = SimpleNamespace(ebeam=cfg.ebeam, expected_higgs_mass=cfg.higgs_mass,
                            nevents=cfg.events_for(sample))
     if sample.production_mode == "ggf":
@@ -155,9 +160,9 @@ def normalization(sample, native_lhe, cfg, stable_lhe=None):
 
 
 def nlo_cards(sample, cfg, process_dir, count):
+    if sample.matching != "MC@NLO":
+        raise ValueError('MG5 NLO cards require an MC@NLO sample; VBF uses POWHEG VBF_H')
     options = "set automatic_html_opening False\nset output_dependencies internal\n"
-    if sample.production_mode == "vbf":
-        options += "set nlo_mixed_expansion True\n"
     process = options + four.process_card_text(sample, process_dir)
     settings = dict(nevents=count, iseed=four.seed_for(sample.production_group_id, cfg),
         ebeam1=cfg.ebeam, ebeam2=cfg.ebeam, lpp1=1, lpp2=1, pdlabel="lhapdf", lhaid=sample.lhaid,
@@ -166,88 +171,93 @@ def nlo_cards(sample, cfg, process_dir, count):
         mur_over_ref=1., muf_over_ref=1., reweight_scale=True, reweight_PDF=False,
         jetalgo=-1, jetradius=0.4, maxjetflavor=5, ptj=0., etaj=-1.,
         ptl=2., etal=5., mll=2., mll_sf=2., drll=0., drll_sf=0.)
-    if sample.production_mode == "vbf":
-        # Mixed VBF loops include rank-six boxes: CutTools and Ninja cannot
-        # reduce them. IREGI is linked by MG5 but absent from its default list.
-        settings["MLReductionLib"] = "6|7|1|3"
-    launch = (f"set nb_core {cfg.nb_core}\nlaunch {process_dir} aMC@NLO --parton --name={cfg.run_tag}\n" +
+    launch = (f"set nb_core {cfg.nb_core}\nlaunch {process_dir} aMC@NLO --parton --nocompile --name={cfg.run_tag}\n" +
               "".join(f"set {k} {v}\n" for k, v in settings.items()) +
               f"set mass 25 {cfg.higgs_mass}\ndone\n")
     return process, launch
 
 
-def configure_nlo_polynomial_build(sample, process_dir):
-    """Avoid GCC 11's excessive -O3 compile time for VBF loop polynomials.
+def nlo_compile_card(launch):
+    """Configure and test with the exported aMCatNLO CLI, without integration."""
+    lines = launch.splitlines()
+    if len(lines) < 3 or not lines[1].startswith('launch '):
+        raise ValueError('unrecognized NLO launch card')
+    lines[1] = 'compile MC'
+    return '\n'.join(lines) + '\nquit\n'
 
-    MG5 overrides ordinary FFLAGS for polynomial.f. Change only its dedicated
-    setting in the exported VBF makefiles, leaving all physics checks active.
-    """
-    if sample.production_mode != "vbf":
-        return
-    makefiles = sorted((process_dir / "SubProcesses").glob("P*/V*/makefile"))
-    if not makefiles:
-        raise ValueError(f"VBF export has no virtual-subprocess makefiles: {process_dir}")
-    setting = re.compile(r"(?m)^([ \t]*POLYNOMIAL_OPTIMIZATION[ \t]*=[ \t]*)(-O[13])([ \t]*)$")
-    updates = {}
-    for path in makefiles:
-        target = path.resolve()
-        if not target.is_relative_to(process_dir.resolve()):
-            raise ValueError(f"refusing to modify a makefile outside the VBF export: {path}")
-        original = target.read_text()
-        if len(setting.findall(original)) != 1:
-            raise ValueError(f"unrecognized VBF polynomial optimization setting: {path}")
-        updated = setting.sub(lambda match: match[1] + "-O1" + match[3], original)
-        if updated != original:
-            updates[target] = updated
-    # Validate every makefile before changing any of them.
-    for path, content in updates.items():
-        path.write_text(content)
-    four.log(f"VBF polynomial.f compilation: -O1 in {len(makefiles)} virtual subprocesses")
+
+def run_nlo_command(command, cfg, group, stage, *, deadline=None):
+    guard = Path(__file__).with_name('mg5_guard.py')
+    args = [cfg.mg5_python or sys.executable, guard, '--stage', stage,
+            '--log', group / 'logs' / (stage + '.log'), '--state', group / 'nlo_runtime.json']
+    if deadline is not None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ValueError('NLO diagnostic time limit reached')
+        args.extend(['--timeout', remaining])
+    four.run_runtime_command([*args, '--', *command], cfg)
 
 
 def obtain_production(sample, selected, cfg):
-    if sample.production_mode == "ggf":
-        if cfg.signal_lhe is None:
-            raise ValueError("generate HJMiNNLO first and pass --signal-lhe")
+    if sample.matching == "POWHEG":
+        source = cfg.signal_lhe if sample.production_mode == "ggf" else cfg.vbf_lhe
+        if source is None:
+            option = '--signal-lhe' if sample.production_mode == 'ggf' else '--vbf-lhe'
+            raise ValueError(f'generate {sample.process} first and pass {option}')
         if cfg.dry_run:
-            return cfg.signal_lhe
-        info = inspect_production(cfg.signal_lhe, sample, cfg)
-        path = prepare_powheg_for_madspin(cfg.signal_lhe, info, sample, cfg)
+            return source
+        info = inspect_production(source, sample, cfg)
+        path = prepare_powheg_for_madspin(source, info, sample, cfg)
         return independent_decay_input(path, sample, selected, cfg)
     if cfg.source_backend == "external-lhe":
         path = four.resolve_external_lhe(sample, cfg).resolve()
     elif sample.matching == "LO":
         path = four.obtain_mg5_lhe(sample, selected, cfg)
     else:
-        group = four.production_dir(sample, cfg)
-        process_dir = group / "mg5_process"
-        cards = nlo_cards(sample, cfg, process_dir, four.group_event_count(sample.production_group_id, selected, cfg))
-        marker = group / "fourlepton_production_stage.json"
-        identity = {"process_card": cards[0], "launch_card": cards[1], "adapter_sha256": four.sha256_file(Path(__file__))}
-        path = process_dir / "Events" / cfg.run_tag / "events.lhe.gz"
-        if not cfg.dry_run and path.exists():
-            if not four.artifact_stage_matches(marker, identity, path):
-                raise ValueError(f"existing production differs from cards: {path}; use a new tag")
-            validate_nlo_pole_checks(process_dir)
-        else:
-            if not cfg.dry_run and process_dir.exists():
-                raise ValueError(f"incomplete NLO export: {process_dir}; inspect it before using a new tag")
-            four.ensure_dir(group / "cards", cfg)
-            for name, content in zip(("process_card.dat", "launch.mg5"), cards):
-                four.write_text(group / "cards" / name, content, cfg, name)
-            four.run_runtime_command(four.mg5_command(cfg, group / "cards/process_card.dat"), cfg)
-            if not cfg.dry_run:
-                ho.patch_mg5_fortran(process_dir)
-                configure_nlo_polynomial_build(sample, process_dir)
-            four.run_runtime_command(four.mg5_command(cfg, group / "cards/launch.mg5"), cfg)
-            if not cfg.dry_run:
-                if not path.is_file():
-                    raise ValueError(nlo_failure_message(process_dir, cfg.run_tag, path))
-                validate_nlo_pole_checks(process_dir)
-                four.write_artifact_stage_marker(marker, identity, path)
+        path = generate_nlo(sample, cfg, four.production_dir(sample, cfg),
+                            four.group_event_count(sample.production_group_id, selected, cfg))
     if not cfg.dry_run:
         inspect_production(path, sample, cfg)
     return independent_decay_input(path, sample, selected, cfg) if sample.is_signal else path
+
+
+def generate_nlo(sample, cfg, group, count, *, deadline=None, tests_only=False):
+    process_dir = group / 'mg5_process'
+    process, launch = nlo_cards(sample, cfg, process_dir, count)
+    compile_card = nlo_compile_card(launch)
+    marker = group / 'fourlepton_production_stage.json'
+    identity = dict(process_card=process, compile_card=compile_card, launch_card=launch,
+                    adapter_sha256=four.sha256_file(Path(__file__)),
+                    guard_sha256=four.sha256_file(Path(__file__).with_name('mg5_guard.py')))
+    path = process_dir / 'Events' / cfg.run_tag / 'events.lhe.gz'
+    if not cfg.dry_run and path.exists():
+        if not four.artifact_stage_matches(marker, identity, path):
+            raise ValueError(f'existing production differs from cards: {path}; use a new tag')
+        validate_nlo_pole_checks(process_dir)
+        return path
+    if not cfg.dry_run and process_dir.exists():
+        raise ValueError(f'incomplete NLO export: {process_dir}; preserve it and use a new tag')
+    four.ensure_dir(group / 'cards', cfg)
+    for name, content in (('process_card.dat', process), ('compile.mg5', compile_card), ('launch.mg5', launch)):
+        four.write_text(group / 'cards' / name, content, cfg, name)
+    run_nlo_command(four.mg5_command(cfg, group / 'cards/process_card.dat'), cfg, group, 'export', deadline=deadline)
+    if not cfg.dry_run:
+        ho.patch_mg5_fortran(process_dir)
+    command = [process_dir / 'bin/aMCatNLO', group / 'cards/compile.mg5']
+    if cfg.mg5_python:
+        command.insert(0, cfg.mg5_python)
+    run_nlo_command(command, cfg, group, 'compile', deadline=deadline)
+    if not cfg.dry_run:
+        validate_nlo_pole_checks(process_dir)
+    if tests_only:
+        return process_dir
+    run_nlo_command(four.mg5_command(cfg, group / 'cards/launch.mg5'), cfg, group, 'launch', deadline=deadline)
+    if not cfg.dry_run:
+        if not path.is_file():
+            raise ValueError(nlo_failure_message(process_dir, cfg.run_tag, path))
+        validate_nlo_pole_checks(process_dir)
+        four.write_artifact_stage_marker(marker, identity, path)
+    return path
 
 
 def validate_nlo_pole_checks(process_dir):
@@ -255,6 +265,10 @@ def validate_nlo_pole_checks(process_dir):
     subprocesses = process_dir / "SubProcesses"
     directories = {p.parent for p in subprocesses.glob("P*/check_poles.log")}
     directories.update(p.parent for p in subprocesses.glob("P*/V*") if p.is_dir())
+    input_path = process_dir / 'check_poles_input.txt'
+    expected = int(input_path.read_text().split()[0]) if input_path.is_file() else 20
+    if expected <= 0:
+        raise ValueError(f'invalid requested pole-check count: {input_path}')
     failed = []
     if not directories:
         failed.append(f"{subprocesses}: no pole-check logs found")
@@ -276,6 +290,8 @@ def validate_nlo_pole_checks(process_dir):
             failed.append(f"{log}: zero completed pole-check points{reason}")
         elif stops:
             failed.append(f"{log}: aborted pole check; STOP {stops[0]}")
+        elif passed + failures != expected:
+            failed.append(f"{log}: completed {passed + failures} of {expected} pole-check points")
         elif failures > .1 * (passed + failures):
             failed.append(f"{log} ({failures}/{passed + failures} points failed)")
     if failed:
@@ -366,8 +382,9 @@ def independent_decay_input(source, sample, selected, cfg):
 def prepare_powheg_for_madspin(source, info, sample, cfg):
     """Give MadSpin a physical init integral when POWHEG writes XSECUP=-1.
 
-    Event records, including signs and SCALUP, are copied verbatim. The native
-    signed mean is diagnostic; the physical ggF rate still comes from ihixs.
+    Event records, including signs and SCALUP, are copied verbatim. The signed
+    mean supplies the native rate only for an unspecified init integral;
+    the ggF target still comes from ihixs.
     """
     group = four.production_dir(sample, cfg)
     group.mkdir(parents=True, exist_ok=True)
@@ -379,7 +396,7 @@ def prepare_powheg_for_madspin(source, info, sample, cfg):
                 "adapter_sha256": four.sha256_file(Path(__file__))}
     if destination.exists():
         if not four.artifact_stage_matches(marker, identity, destination):
-            raise ValueError("prepared HJMiNNLO input differs; use a new tag")
+            raise ValueError("prepared POWHEG input differs; use a new tag")
         return destination
     in_init = False
     row = 0
@@ -394,7 +411,7 @@ def prepare_powheg_for_madspin(source, info, sample, cfg):
                 fields = line.split()
                 if row == 0:
                     if int(fields[9]) != 1:
-                        raise ValueError("HJMiNNLO preparation requires one subprocess")
+                        raise ValueError("POWHEG preparation requires one subprocess")
                 else:
                     fields[0] = f"{info['cross_section_pb']:.16e}"
                     fields[1] = f"{info['cross_section_error_pb']:.16e}"

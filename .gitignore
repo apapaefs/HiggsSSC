@@ -25,6 +25,7 @@
 /hfourlepton/runs/
 /hfourlepton/reports/
 /hfourlepton/plans/
+/hfourlepton/diagnostics/
 
 # Local four-lepton analysis build products.
 /hfourlepton/LOAnalysis/Code/*.o

@@ -115,7 +115,7 @@ class FourLeptonHOTests(unittest.TestCase):
     def test_finite_width_exception_does_not_relax_other_signal_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:
             source, settings = powheg_fixture(Path(tmp))
-            for sample in (None, ho.all_samples()[3], four.SAMPLES[0]):
+            for sample in (None, ho.all_samples()[6], four.SAMPLES[0]):
                 with self.subTest(sample=sample.name if sample else None):
                     with self.assertRaisesRegex(ValueError, "expected 125.0"):
                         four.validate_stable_higgs_lhe(source, settings, 1, sample=sample)
@@ -126,12 +126,12 @@ class FourLeptonHOTests(unittest.TestCase):
         self.assertEqual(len(samples), 27)
         self.assertEqual(len({s.production_group_id for s in samples}), 13)
         self.assertEqual({s.production_mode for s in samples if s.is_signal}, {"ggf", "vbf", "wh", "zh", "tth"})
-        self.assertEqual(sum(s.matching == "MC@NLO" for s in samples), 18)
-        self.assertEqual(sum(s.matching == "POWHEG" for s in samples), 3)
+        self.assertEqual(sum(s.matching == "MC@NLO" for s in samples), 15)
+        self.assertEqual(sum(s.matching == "POWHEG" for s in samples), 6)
         for s in samples:
             count = four.group_event_count(s.production_group_id, samples, settings)
             self.assertEqual(count, settings.nevents * (3 if s.is_signal else 1))
-        self.assertIn("$$ w+ w- z", next(s.process for s in samples if s.production_mode == "vbf"))
+        self.assertEqual("VBF_H", next(s.process for s in samples if s.production_mode == "vbf"))
         self.assertEqual(settings.higgs_mass, 125.)
         self.assertEqual(config().higgs_mass, 125.09)
 
@@ -160,16 +160,17 @@ class FourLeptonHOTests(unittest.TestCase):
                 record = root / "record.json"
                 record.write_text("{}")
                 args = SimpleNamespace(energy_tev=energy, run_tag="synthetic", nevents=30, jobs=4,
-                    signal_normalization=record, signal_lhe=None)
+                    signal_normalization=record, signal_lhe=None, vbf_lhe=None)
                 calls = []
                 pipeline = SimpleNamespace(args=args, check=lambda: None, work=root, python=Path("/synthetic/python"),
                     powheg=root / "powheg", mg5=root / "mg5", call=lambda label, argv: calls.append((label, argv)))
                 with patch.object(workflow, "REPO", root), patch.object(workflow.shared.norm, "load_record", return_value={"sqrt_s_gev": energy*1000.}):
                     workflow.run(pipeline)
-                self.assertEqual(len(calls), 1 + profile_count)
+                self.assertEqual(len(calls), 2 + profile_count)
                 powheg_args = calls[0][1]
                 self.assertEqual(powheg_args[powheg_args.index("--nevents")+1], 90)
-                for _, command in calls[1:]:
+                self.assertEqual(calls[1][1][calls[1][1].index("--nevents")+1], 90)
+                for _, command in calls[2:]:
                     self.assertEqual(command[command.index("--nevents")+1], 30)
                     self.assertEqual(command[command.index("--signal-modes")+1], "all")
 
@@ -184,7 +185,7 @@ class FourLeptonHOTests(unittest.TestCase):
             self.assertIn(token, shower)
         self.assertIn("InitialStateReconOption Rapidity", shower)
 
-    def test_vbf_orders_and_preview_cards_use_the_same_mixed_loop_policy(self):
+    def test_preview_cards_use_the_same_production_and_compile_policy(self):
         for energy in (13, 40):
             with self.subTest(energy=energy), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
@@ -204,17 +205,13 @@ class FourLeptonHOTests(unittest.TestCase):
                         four.group_event_count(sample.production_group_id, samples, settings))
                     self.assertEqual((plan_dir / sample.production_group_id / "process.mg5").read_text(), process)
                     self.assertEqual((plan_dir / sample.production_group_id / "launch.mg5").read_text(), launch)
-                    if sample.production_mode == "vbf":
-                        declaration = next(x for x in process.splitlines() if x.startswith("generate "))
-                        self.assertIn("QCD^2=0 QED^2=6 [QCD]", declaration)
-                        self.assertNotIn("QCD=0", declaration)
-                        self.assertIn("$$ w+ w- z", declaration)
-                        self.assertIn("set nlo_mixed_expansion True\n", process)
-                        self.assertIn("set MLReductionLib 6|7|1|3\n", launch)
-                        self.assertEqual(next(x['process'] for x in inventory['samples'] if x['name'] == sample.name), sample.process)
-                    else:
-                        self.assertNotIn("set nlo_mixed_expansion", process)
-                        self.assertNotIn("MLReductionLib", launch)
+                    compile_card = (plan_dir / sample.production_group_id / "compile.mg5").read_text()
+                    self.assertIn('compile MC\n', compile_card)
+                    self.assertNotIn('launch ', compile_card)
+                    self.assertEqual(compile_card.splitlines()[2:-1], launch.splitlines()[2:])
+                    self.assertIn('--nocompile', launch)
+                    self.assertNotIn("set nlo_mixed_expansion", process)
+                    self.assertNotIn("MLReductionLib", launch)
                     self.assertNotIn("IRPoleCheckThreshold", process + launch)
 
     def test_missing_nlo_output_reports_pole_failures_and_debug_path(self):
@@ -251,6 +248,7 @@ class FourLeptonHOTests(unittest.TestCase):
             for content, error in (("", "zero completed"),
                     ("STOP No dp loop library can deal with this integral\n", "zero completed.*STOP No dp"),
                     ("PASSED 1e-5\nSTOP No dp loop library can deal with this integral\n", "aborted pole check"),
+                    ("PASSED 1e-5\n", "completed 1 of 20 pole-check points"),
                     ("FAILED 1e-5\n" * 3 + "PASSED 1e-5\n" * 17, "3/20 points failed")):
                 with self.subTest(content=content):
                     log.write_text(content)
@@ -311,55 +309,6 @@ class FourLeptonHOTests(unittest.TestCase):
                     stamp.assert_not_called()
                     inspect.assert_not_called()
                     self.assertEqual(run.call_count, 0 if cached else 2)
-
-    def test_vbf_polynomial_build_setting_is_scoped_and_idempotent(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            virtual = root / "SubProcesses/P0_uu_huu/V0_uu_huu"
-            virtual.mkdir(parents=True)
-            makefile = virtual / "makefile"
-            original = ("FFLAGS = -O\nPOLYNOMIAL_OPTIMIZATION = -O3\n"
-                        "POLYNOMIAL_BOUNDS_CHECK =\n"
-                        "%olynomial.o : %olynomial.f\n"
-                        "\t$(FC) $(filter-out -O%,$(FFLAGS)) $(POLYNOMIAL_OPTIMIZATION) -c $< -o $@\n")
-            makefile.write_text(original)
-            other_file = root / "Source/make_opts"
-            other_file.parent.mkdir()
-            other_file.write_text("FFLAGS = -O\n")
-            vbf = next(s for s in ho.all_samples() if s.production_mode == "vbf")
-            qq = next(s for s in ho.all_samples() if s.name == "bkg_qq_4e")
-            ho.configure_nlo_polynomial_build(qq, root)
-            self.assertEqual(makefile.read_text(), original)
-            ho.configure_nlo_polynomial_build(vbf, root)
-            self.assertEqual(makefile.read_text(), original.replace("= -O3", "= -O1"))
-            self.assertEqual(other_file.read_text(), "FFLAGS = -O\n")
-            changed_time = makefile.stat().st_mtime_ns
-            ho.configure_nlo_polynomial_build(vbf, root)
-            self.assertEqual(makefile.stat().st_mtime_ns, changed_time)
-
-    def test_vbf_build_rejects_unknown_settings_and_external_makefiles_before_writing(self):
-        vbf = next(s for s in ho.all_samples() if s.production_mode == "vbf")
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp) / "export"
-            good = root / "SubProcesses/P0_a/V0_a/makefile"
-            bad = root / "SubProcesses/P0_b/V0_b/makefile"
-            good.parent.mkdir(parents=True)
-            bad.parent.mkdir(parents=True)
-            good.write_text("POLYNOMIAL_OPTIMIZATION = -O3\n")
-            bad.write_text("POLYNOMIAL_OPTIMIZATION = -Ofast\n")
-            with self.assertRaisesRegex(ValueError, "unrecognized"):
-                ho.configure_nlo_polynomial_build(vbf, root)
-            self.assertEqual(good.read_text(), "POLYNOMIAL_OPTIMIZATION = -O3\n")
-            external = Path(tmp) / "shared_makefile"
-            external.write_text("POLYNOMIAL_OPTIMIZATION = -O3\n")
-            bad.unlink()
-            bad.symlink_to(external)
-            with self.assertRaisesRegex(ValueError, "outside the VBF export"):
-                ho.configure_nlo_polynomial_build(vbf, root)
-            self.assertEqual(external.read_text(), "POLYNOMIAL_OPTIMIZATION = -O3\n")
-            self.assertEqual(good.read_text(), "POLYNOMIAL_OPTIMIZATION = -O3\n")
-            with self.assertRaisesRegex(ValueError, "no virtual-subprocess makefiles"):
-                ho.configure_nlo_polynomial_build(vbf, Path(tmp) / "empty")
 
     def test_real_nlo_inspector_contract_with_synthetic_events(self):
         sample = next(s for s in ho.all_samples() if s.name == "bkg_qq_4e")

@@ -1,10 +1,10 @@
 # Four-lepton campaigns: 13 TeV validation and 40 TeV SSC
 
-The workflows are prepared for you to run. No new event generation, shower,
-ihixs calculation, classifier training or numerical LHC comparison was run
-while implementing this extension. Local synthetic checks test the code;
-they do not establish agreement with an experiment. Start with the pilots
-below before committing resources to larger samples.
+The workflows are prepared for you to run. Synthetic checks and an isolated
+VBF build test check the implementation; full production and numerical LHC
+validation remain separate steps. Start with the pilots below before choosing
+larger samples. The [VBF investigation](validation/VBF_BACKEND.md) explains the
+switch from MG5 VBF to POWHEG `VBF_H` and records what was tested.
 
 ## Prepare and launch
 
@@ -15,9 +15,9 @@ a preview card does not change that action.
 
 ```bash
 python3 run_pipeline.py prepare --workflow fourlepton-ho \
-  --energy-tev 13 --run-tag fourl_lhc13_pilot --nevents 30
+  --energy-tev 13 --run-tag fourl_lhc13_vbf_pilot --nevents 30
 python3 run_pipeline.py prepare --workflow fourlepton-ho \
-  --energy-tev 40 --run-tag fourl_ssc40_pilot --nevents 30
+  --energy-tev 40 --run-tag fourl_ssc40_vbf_pilot --nevents 30
 ```
 
 Install/check the same higher-order environment used by the diphoton channel,
@@ -34,9 +34,9 @@ Launch each pilot yourself, preferably inside a persistent screen session:
 
 ```bash
 python3 run_pipeline.py run --workflow fourlepton-ho \
-  --energy-tev 13 --run-tag fourl_lhc13_pilot --nevents 30 --jobs 4
+  --energy-tev 13 --run-tag fourl_lhc13_vbf_pilot --nevents 30 --jobs 4
 python3 run_pipeline.py run --workflow fourlepton-ho \
-  --energy-tev 40 --run-tag fourl_ssc40_pilot --nevents 30 --jobs 4
+  --energy-tev 40 --run-tag fourl_ssc40_vbf_pilot --nevents 30 --jobs 4
 ```
 
 Each energy needs its own pilot evidence. Even these small pilots include
@@ -51,13 +51,28 @@ Use `status` with the same workflow, energy and tag to inspect progress. Repeat
 the original `run` command to resume completed stages. Existing mismatched or
 partial outputs cause an error rather than automatic replacement.
 
-An older runner can stop at the first ggF event with a `status-1 Higgs mass`
-error because it applies an on-shell check to POWHEG's finite-width sample.
-After updating the code, preserve the failed four-lepton manifest as a backup
-only after confirming that no four-lepton production, decay, shower or analysis
-outputs exist. The next invocation can then create that stage's manifest with
-the corrected code hashes. Keep the completed POWHEG directory, ihixs record,
-managed campaign state and failure log, and repeat the original run command.
+For a campaign that failed with the old MG5 VBF definition, first stop its
+parent with Ctrl-C in the original terminal/screen session. Keep that directory
+and its logs. Run `setup` again to install the pinned `VBF_H` executable, then
+start a new tag. Completed ggF production and ihixs normalization can be reused:
+
+```bash
+python3 run_pipeline.py setup --workflow fourlepton-ho
+python3 run_pipeline.py prepare --workflow fourlepton-ho \
+  --energy-tev 13 --run-tag fourl_lhc13_vbf_pilot --nevents 30 --jobs 4
+python3 run_pipeline.py run --workflow fourlepton-ho \
+  --energy-tev 13 --run-tag fourl_lhc13_vbf_pilot --nevents 30 --jobs 4 \
+  --signal-lhe hfourlepton/runs/fourl_lhc13_pilot/powheg/powheg-hjminnlo-merged.lhe \
+  --signal-normalization inputs/pipeline/normalization/ggf-lhc13-n3lo.json
+```
+
+These paths refer to the previous 13 TeV pilot. The new tag rebuilds the
+four-lepton decay/shower/analysis products without repeating ggF integration or
+ihixs. Do not erase manifests or edit their fingerprints to force a resume.
+Repeat the complete command, including input overrides, to resume the new tag.
+An existing VBF LHE made by `run_powheg_vbf.py` can also be supplied using
+`--vbf-lhe PATH`; its process, PDF, pole inputs, scale weights and beam energy
+are checked. Use energy-matched inputs at 40 TeV.
 
 After successful pilots, choose fresh tags and sufficient statistics:
 
@@ -80,7 +95,7 @@ generated for `4e`, `4mu` and `2e2mu` Higgs decays or continuum final states.
 | Contribution | Hard process and shower | Inclusive normalization |
 | --- | --- | --- |
 | ggF | POWHEG HJMiNNLO, Herwig; pure HEFT | Energy-specific ihixs N3LO |
-| VBF | MG5 MC@NLO, Herwig; s-channel W/Z excluded | Native NLO |
+| VBF | POWHEG VBF_H, Herwig; conventional VBF approximation | Native NLO |
 | W+H, W−H | MG5 MC@NLO, Herwig | Native NLO, both charges |
 | qqZH | MG5 MC@NLO, Herwig | Native NLO |
 | ggZH | MG5 loop-induced LO, Herwig | Native LO, separate from qqZH |
@@ -88,44 +103,38 @@ generated for `4e`, `4mu` and `2e2mu` Higgs decays or continuum final states.
 | qq→4ℓ | Full neutral-current matrix elements, Higgs excluded; MC@NLO | Native NLO |
 | gg→4ℓ | Continuum loops, Higgs excluded; Herwig | Native loop-induced LO |
 
-The VBF process uses `p p > h j j $$ w+ w- z QCD^2=0 QED^2=6 [QCD]`
-with `nlo_mixed_expansion True`. These squared-order constraints select the
-electroweak Born contribution and its NLO QCD correction while allowing mixed
-loop topologies needed for quark-line interference. Diagram-level `QCD=0`
-can remove those virtual contributions and spoil cancellation of the single
-infrared pole. This follows the
-[MG5 coupling-order guidance](https://amcatnlo.web.cern.ch/amcatnlo/co.htm).
-MG5's pole checks and their default tolerances remain active. The corrected
-VBF export still needs to pass those numerical checks when the user runs it.
+VBF uses the dedicated [POWHEG implementation](https://arxiv.org/abs/0911.5299),
+with t-channel weak-boson exchange and without s-channel VH or identical-fermion
+interference. VH remains a separate sample. This is a VBF approximation, not
+the full electroweak H+2-jet calculation; its neglected terms are not assigned
+a numerical uncertainty here, especially without VBF jet cuts.
 
-The VBF launch card sets `MLReductionLib` to `6|7|1|3`, adding IREGI after
-Ninja, COLLIER and CutTools. MG5 skips unavailable reducers. The mixed VBF
-code includes rank-six boxes, beyond the rank limits of CutTools and Ninja;
-IREGI supports these integrals and is linked into MG5's NLO export. Its omission
-from the default `6|7|1` list caused `STOP No dp loop library can deal with this
-integral` on Timur. The library IDs and fallback order follow
-[MG5's MadLoop card](https://raw.githubusercontent.com/mg5amcnlo/mg5amcnlo/3.x/Template/loop_material/StandAlone/Cards/MadLoopParams.dat).
-This setting does not change the selected diagrams or pole-check tolerances.
-MG5 3.5.15 only warns when a pole check completes zero points; the four-lepton
-wrapper rejects missing or aborted checks, including zero-point logs, before
-certifying or reusing an internally generated NLO LHE. Missing-output errors
-also report integration `STOP` messages and the relevant log paths.
+The pinned `VBF_H` source uses five light flavours and fixed
+μR=μF=mW=80.398 GeV. Its electroweak inputs are the source defaults:
+mZ=91.1876 GeV, ΓZ=2.4952 GeV, ΓW=2.141 GeV,
+αEM=1/128.930 and sin²θW=0.23102. The hard PDF and αs come from LHAPDF
+335900. Seven scale weights vary μR and μF by 0.5, 1 and 2, excluding the
+opposite extreme pairs. The cards impose no Born jet cuts or suppression.
+No ihixs factor is applied to VBF.
 
-The exported VBF virtual-subprocess makefiles compile `polynomial.f` with
-`POLYNOMIAL_OPTIMIZATION = -O1`. MG5's dedicated rule otherwise forces `-O3`
-regardless of ordinary `FFLAGS`. With gfortran 11.5 on Timur, four such files
-were still compiling after more than 25 hours each; isolated copies compiled
-successfully with `-O1` in about 5.7 seconds each. This setting changes compiler
-optimization only. It may reduce matrix-element evaluation speed, and the
-numerical pole checks are still required. Other processes and source files
-use their existing build settings; the shared MG5 installation is unchanged.
+For the remaining MC@NLO processes, the runner exports, compiles and runs the
+MG5 numerical tests before allowing integration. Each virtual subprocess must
+complete its requested pole-check points; zero, partial, missing or aborted
+checks fail. MG5's numerical tolerances remain unchanged. An explicit fatal
+message, nonzero exit or user interrupt stops the process group started by
+that stage and records the failure. Quiet but active work is allowed.
+Logs are under `production/GROUP/logs/{export,compile,launch}.log`, with
+`nlo_runtime.json` recording the command, host, process ID and status.
+`status` flags explicit failure text even if an older runner left its saved
+state as `running`. See the [recovery notes](validation/VBF_BACKEND.md).
 
 The ggF calculation follows the diphoton convention, including the full ihixs
 scale/PDF scan and its numerical checks. Its hard PDF is NNPDF4.0 NNLO with QED;
 the target rate uses the diphoton N3LO PDF convention. Other samples use
-`NNPDF40_nlo_as_01180_qed` (LHAPDF 335900), with native NLO scales set to
-MG5's dynamical choice 3, HT/2. Loop samples are explicitly LO despite their
-NLO PDFs. No common correction factor is assigned to gg→4ℓ or non-ggF signals.
+`NNPDF40_nlo_as_01180_qed` (LHAPDF 335900), with MC@NLO scales set to
+MG5's dynamical choice 3, HT/2. VBF uses the fixed scale above. Loop samples are
+explicitly LO despite their NLO PDFs. No common correction factor is assigned
+to gg→4ℓ or non-ggF signals.
 Electroweak and finite-quark-mass corrections to the ihixs rate are disabled,
 as in the existing pure-HEFT diphoton calculation.
 
@@ -134,7 +143,9 @@ event mass within its recorded Breit-Wigner window: the default hwidth is
 0.004152 GeV and bwcutoff is 1000, giving 120.848–129.152 GeV. The
 `higgsfixedwidth` switch fixes the width prescription, not the event mass.
 Validation checks the pole inputs against ihixs and each generated Higgs mass
-against those bounds; MG5 stable-H inputs still require an on-shell Higgs.
+against those bounds. VBF_H uses the same pole mass and width with a fixed-width
+Breit-Wigner over 124.87544–125.12456 GeV (30 widths). Its source revision and
+window are checked separately. MG5 stable-H inputs require an on-shell Higgs.
 MadSpin uses a direct scalar 1→4 decay
 matrix element. Associated W/Z/top particles decay inclusively in Herwig.
 The target branching fraction is applied once through
@@ -310,6 +321,8 @@ or fit a classifier:
 ```bash
 make -C hfourlepton/LOAnalysis/Code check
 python3 -m unittest discover -s tests -p test_fourlepton_ho.py
+python3 -m unittest discover -s tests -p test_fourlepton_powheg_vbf.py
+python3 -m unittest discover -s tests -p test_fourlepton_mg5_guard.py
 python3 -m unittest discover -s tests -p test_fourlepton_campaign.py
 python3 -m unittest discover -s tests -p test_fourlepton_report.py
 python3 -m unittest discover -s tests -p test_ihixs_normalization.py

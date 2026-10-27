@@ -347,6 +347,7 @@ class Config:
     selection_profile: str = "gem"
     signal_modes: str = "ggf"
     signal_lhe: Path | None = None
+    vbf_lhe: Path | None = None
     signal_normalization: Path | None = None
 
     @property
@@ -523,6 +524,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--selection-profile", choices=("gem", "ssc", "cms"), default="gem")
     parser.add_argument("--signal-modes", default="ggf", help="comma-separated ggf,vbf,wh,zh,tth (HO), or all")
     parser.add_argument("--signal-lhe", type=Path, help="HO stable-H HJMiNNLO LHE")
+    parser.add_argument("--vbf-lhe", type=Path, help="HO stable-H POWHEG VBF_H LHE from run_powheg_vbf.py")
     parser.add_argument("--signal-normalization", type=Path, help="validated ihixs N3LO ggF record")
     parser.add_argument("--sample-set", choices=SAMPLE_SETS, default=env_text("SAMPLE_SET", "irreducible"))
     parser.add_argument("--run-samples", default=env_text("RUN_SAMPLES", "all"))
@@ -751,6 +753,7 @@ def parse_config(argv: Sequence[str]) -> Config:
         pileup_noise=not args.no_pileup_noise,
         order=args.order, selection_profile=args.selection_profile, signal_modes=args.signal_modes,
         signal_lhe=args.signal_lhe.resolve() if args.signal_lhe else None,
+        vbf_lhe=args.vbf_lhe.resolve() if args.vbf_lhe else None,
         signal_normalization=args.signal_normalization.resolve() if args.signal_normalization else None,
     )
 
@@ -1259,6 +1262,9 @@ def require_inputs(cfg: Config, samples: Sequence[SampleSpec]) -> None:
         load_signal_record(cfg)
         if cfg.signal_lhe is None or not cfg.signal_lhe.is_file():
             die("HO ggF requires a completed --signal-lhe")
+    if cfg.order == "ho" and any(s.production_mode == "vbf" for s in samples):
+        if cfg.vbf_lhe is None or not cfg.vbf_lhe.is_file():
+            die("HO VBF requires a completed --vbf-lhe from run_powheg_vbf.py")
     if not cfg.template_in.exists():
         die(f"missing Herwig template: {cfg.template_in}")
     needs_mg5 = cfg.source_backend == "mg5" or any(sample.is_signal for sample in samples)
@@ -2365,9 +2371,9 @@ def validate_stable_higgs_lhe(
 ) -> tuple[float, float | None]:
     """Require one undecayed Higgs with the source's allowed mass per event.
 
-    Stable MG5 inputs must be on shell. HO POWHEG ggF inputs may instead
-    follow their explicitly recorded Breit-Wigner mass window, provided
-    their pole mass and width agree with the ihixs normalization record.
+    Stable MG5 inputs must be on shell. POWHEG inputs follow the source's
+    Breit-Wigner window: the ihixs-compatible HJMiNNLO card for ggF, or
+    the pinned VBF_H implementation and card for VBF.
     """
 
     if event_limit <= 0:
@@ -2384,6 +2390,11 @@ def validate_stable_higgs_lhe(
             and sample.production_mode == "ggf" and sample.source_kind == "powheg"):
         from hfourlepton.higher_order import powheg_higgs_mass_bounds
         low, high, width = powheg_higgs_mass_bounds(path, cfg)
+        powheg_bounds = (low, high)
+    elif (cfg.order == "ho" and sample is not None
+          and sample.production_mode == "vbf" and sample.source_kind == "powheg"):
+        from hfourlepton.run_powheg_vbf import mass_bounds
+        low, high, width = mass_bounds(read_lhe_prefix(path), cfg)
         powheg_bounds = (low, high)
 
     events_checked = 0
@@ -3193,7 +3204,7 @@ def sample_manifest_entry(sample: SampleSpec, cfg: Config) -> dict[str, object]:
         "source_kind": "powheg" if sample.matching == "POWHEG" else cfg.source_backend,
         "declared_source_kind": sample.source_kind,
         "model": sample.model,
-        "hard_model": "pure_heft" if sample.matching == "POWHEG" else "SM",
+        "hard_model": "pure_heft" if sample.matching == "POWHEG" and sample.production_mode == "ggf" else "SM",
         "process": sample.process,
         "decay_strategy": sample.decay_strategy,
         "normalization_rule": sample.normalization_rule,
@@ -3310,7 +3321,8 @@ def sample_manifest_entry(sample: SampleSpec, cfg: Config) -> dict[str, object]:
             "handlers": decay_reweighter_handlers(sample),
         },
         "external_lhe": (
-            str(cfg.signal_lhe if cfg.order == "ho" and sample.production_mode == "ggf" else resolve_external_lhe(sample, cfg))
+            str((cfg.signal_lhe if sample.production_mode == "ggf" else cfg.vbf_lhe)
+                if cfg.order == "ho" and sample.matching == "POWHEG" else resolve_external_lhe(sample, cfg))
             if cfg.source_backend == "external-lhe"
             else None
         ),
@@ -3355,6 +3367,8 @@ def campaign_tracked_inputs(cfg: Config) -> dict[str, dict[str, object]]:
         paths["herwig_b_decays"] = cfg.herwig_b_decays
     if cfg.order == "ho":
         paths["higher_order_adapter"] = SCRIPT_DIR / "higher_order.py"
+        paths["mg5_guard"] = SCRIPT_DIR / "mg5_guard.py"
+        paths["powheg_vbf"] = SCRIPT_DIR / "run_powheg_vbf.py"
         paths["matched_template"] = REPO_ROOT / "hgammagamma/HOAnalysis/HW-LHE.in"
         paths["mcatnlo_settings"] = REPO_ROOT / "hgammagamma/HOAnalysis/MCatNLO.in"
         if cfg.signal_normalization:
@@ -3393,6 +3407,8 @@ def configuration_fingerprint(
         "selection_profile": cfg.selection_profile,
         "signal_modes": cfg.signal_modes,
         "signal_lhe": str(cfg.signal_lhe) if cfg.signal_lhe else None,
+        "vbf_lhe": str(cfg.vbf_lhe) if cfg.vbf_lhe else None,
+        "vbf_lhe_sha256": sha256_file(cfg.vbf_lhe) if cfg.vbf_lhe and cfg.vbf_lhe.is_file() and not cfg.dry_run else None,
         "signal_lhe_sha256": sha256_file(cfg.signal_lhe) if cfg.signal_lhe and cfg.signal_lhe.is_file() and not cfg.dry_run else None,
         "sample_set": cfg.sample_set,
         "samples": [

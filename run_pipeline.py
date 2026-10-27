@@ -45,7 +45,8 @@ def parse_args(argv=None):
     p.add_argument("--fc", default=None)
     p.add_argument("--ninja-dir", type=Path)
     p.add_argument("--with-ml", action="store_true", help="include optional XGBoost dependencies during setup/check")
-    p.add_argument("--signal-lhe", type=Path, help="HO only: reuse a compatible signal LHE")
+    p.add_argument("--signal-lhe", type=Path, help="HO only: reuse a compatible ggF signal LHE")
+    p.add_argument("--vbf-lhe", type=Path, help="fourlepton-ho: reuse a compatible POWHEG VBF_H LHE")
     p.add_argument("--signal-normalization", type=Path, help="HO only: reuse a validated ihixs record")
     p.add_argument("--config", type=Path, help="optional cuts/XGBoost analysis card")
     p.add_argument("--dry-run", action="store_true", help="print the plan without installing or running programs")
@@ -60,6 +61,8 @@ def parse_args(argv=None):
         p.error("select either --herwig-env or --herwig-module")
     if not args.workflow.endswith("-ho") and (args.signal_lhe or args.signal_normalization):
         p.error("signal input overrides apply only to HO workflows")
+    if args.vbf_lhe and args.workflow != 'fourlepton-ho':
+        p.error('--vbf-lhe applies only to fourlepton-ho')
     if args.energy_tev != 40 and args.workflow != "fourlepton-ho":
         p.error("--energy-tev 13 applies only to fourlepton-ho")
     if args.action in ("prepare", "validate") and args.workflow != "fourlepton-ho":
@@ -68,11 +71,11 @@ def parse_args(argv=None):
         p.error("LHC validation requires --energy-tev 13")
     if args.config and args.action not in ("cuts", "xgboost"):
         p.error("--config applies to cuts/xgboost")
-    for key in ("work_dir", "herwig_env", "ninja_dir", "signal_lhe", "signal_normalization", "config"):
+    for key in ("work_dir", "herwig_env", "ninja_dir", "signal_lhe", "vbf_lhe", "signal_normalization", "config"):
         value = getattr(args, key)
         if value is not None:
             setattr(args, key, value.expanduser().resolve())
-    for path in (REPO, args.work_dir, args.signal_lhe, args.signal_normalization):
+    for path in (REPO, args.work_dir, args.signal_lhe, args.vbf_lhe, args.signal_normalization):
         if path and re.search(r"\s|[;#\"']", str(path)):
             p.error("generator paths cannot contain whitespace or card metacharacters")
     return args
@@ -99,7 +102,7 @@ def read_state(args):
 
 
 def preflight_inputs(args):
-    for path in (args.signal_lhe, args.signal_normalization, args.config):
+    for path in (args.signal_lhe, args.vbf_lhe, args.signal_normalization, args.config):
         if path and (not path.is_file() or not path.stat().st_size):
             raise ValueError(f"supplied input is missing or empty: {path}")
     if args.signal_normalization:
@@ -111,6 +114,9 @@ def identity(args, config):
               "nevents": args.nevents, "jobs": args.jobs}
     if args.workflow == "fourlepton-ho":
         result["energy_tev"] = args.energy_tev
+        result['vbf_backend'] = 'POWHEG VBF_H'
+        result['vbf_lhe'] = ({'path': str(args.vbf_lhe), 'sha256': shared.digest(args.vbf_lhe)}
+                             if args.vbf_lhe else None)
     for key in ("signal_lhe", "signal_normalization"):
         path = getattr(args, key)
         result[key] = {"path": str(path), "sha256": shared.digest(path)} if path else None
@@ -420,6 +426,14 @@ def status(args):
         print("Log:", log)
         if log.exists():
             print("Last log activity:", datetime.fromtimestamp(log.stat().st_mtime, timezone.utc).isoformat(timespec="seconds"))
+    observed_failure = None
+    if args.workflow == 'fourlepton-ho' and log:
+        from hfourlepton.mg5_guard import current_log_failure
+        observed_failure = current_log_failure(log)
+        if observed_failure:
+            print('Observed MG5 failure:', observed_failure)
+            if state['state'] == 'running':
+                print('The saved running state does not override this failure; inspect the parent process before restarting.')
     directory, output = locations(args)
     for path in sorted(directory.glob("*/events/*/campaign.json")):
         sample = json.loads(path.read_text())
@@ -430,7 +444,9 @@ def status(args):
     print("Report:", output / "index.html" if (output / "index.html").exists() else "not created")
     if state.get("error"):
         print("Error:", state["error"])
-    if state["state"] == "complete":
+    if observed_failure:
+        print('Next: preserve the failed export and logs. Do not wait for a failed integration or disable its checks.')
+    elif state["state"] == "complete":
         print("Next: inspect the report and event/weight checks before choosing a larger run tag.")
     elif state["state"] == "running":
         print("Next: inspect the log. Integrations may be quiet; this is the last recorded state, not a liveness check.")

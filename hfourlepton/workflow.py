@@ -5,6 +5,7 @@ from hgammagamma import run_gammagamma_ho_pipeline as shared
 from hgammagamma import run_ihixs_normalization as ihixs
 from hfourlepton import run_four_lepton_campaign as four
 from hfourlepton import higher_order
+from hfourlepton import run_powheg_vbf as vbf
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -27,7 +28,7 @@ def prepare(args):
     directory = REPO / "hfourlepton/runs" / args.run_tag
     cfg = four.parse_config(["--order", "ho", "--signal-modes", "all", "--run-tag", args.run_tag,
         "--nevents", str(args.nevents), "--nb-core", str(args.jobs), "--ebeam", str(500 * args.energy_tev),
-        "--higgs-mass", "125", "--detector-response", "perfect",
+        "--higgs-mass", "125", "--seed-base", "31122002", "--detector-response", "perfect",
         "--selection-profile", selection(args), "--dry-run"])
     samples = higher_order.selected_samples(cfg)
     groups = {}
@@ -45,8 +46,13 @@ def prepare(args):
         procdir = directory / "production" / name / "mg5_process"
         if sample.production_mode == "ggf":
             continue
+        if sample.production_mode == "vbf":
+            ihixs.write_same_or_new(destination / name / "powheg.input",
+                vbf.input_card(cfg.ebeam, cfg.higgs_mass, four.group_event_count(name, samples, cfg)))
+            continue
         if sample.matching == "MC@NLO":
             process, launch = higher_order.nlo_cards(sample, cfg, procdir, four.group_event_count(name, samples, cfg))
+            ihixs.write_same_or_new(destination / name / "compile.mg5", higher_order.nlo_compile_card(launch))
             ihixs.write_same_or_new(destination / name / "launch.mg5", launch)
         else:
             process = four.process_card_text(sample, procdir)
@@ -112,6 +118,13 @@ def run(pipeline):
             "--nevents", 3 * args.nevents, "--jobs", args.jobs, "--ebeam", args.energy_tev * 500,
             "--powheg-dir", pipeline.powheg / "HJ/HJMiNNLO", "--run-dir", directory / "powheg",
             "--card", card, "--no-herwig-env", "--no-herwig-module", "--skip-build", "--resume"])
+    vbf_lhe = args.vbf_lhe or directory / 'powheg-vbf' / vbf.LHE_NAME
+    if not args.vbf_lhe:
+        cfg = four.parse_config(['--order', 'ho', '--run-tag', args.run_tag, '--seed-base', '31122002', '--dry-run'])
+        pipeline.call(args.run_tag + '-powheg-vbf', [pipeline.python, REPO / 'hfourlepton/run_powheg_vbf.py',
+            '--nevents', 3 * args.nevents, '--jobs', args.jobs, '--ebeam', args.energy_tev * 500,
+            '--powheg-dir', pipeline.powheg / 'VBF_H', '--run-dir', directory / 'powheg-vbf',
+            '--seed', four.seed_for('signal_vbf_h_stable', cfg)])
     for profile in profiles(args):
         pipeline.call(args.run_tag + "-fourlepton-" + profile, [pipeline.python,
             REPO / "hfourlepton/run_four_lepton_campaign.py", "--order", "ho", "--signal-modes", "all",
@@ -120,4 +133,5 @@ def run(pipeline):
             "--ebeam", args.energy_tev * 500, "--mg5-dir", pipeline.mg5, "--mg5-python", pipeline.python,
             "--higgs-mass", "125",
             "--no-herwig-env", "--no-herwig-module", "--signal-lhe", lhe,
+            "--vbf-lhe", vbf_lhe,
             "--signal-normalization", record])

@@ -583,7 +583,7 @@ def number(value):
     return result
 
 
-def inspect_lhe(path, sample, args):
+def inspect_lhe(path, sample, args, *, powheg_validator=None):
     """Stream full LHE: signed cross section, weights, beams/PDFs, and decay state."""
     opener = gzip.open if path.suffix == ".gz" else open
     header = []
@@ -665,10 +665,10 @@ def inspect_lhe(path, sample, args):
         raise ValueError(f"LHE PDF IDs differ from required {sample.lhaid}")
     if not sample.signal and not re.search(r"HERWIGPP\s*['\"]?\s*=\s*parton_shower", header_text, re.I):
         raise ValueError("MC@NLO LHE lacks parton_shower=HERWIGPP provenance")
-    if sample.signal and not re.search(r"\bminnlo\s+1\b", header_text, re.I):
+    if sample.signal and powheg_validator is None and not re.search(r"\bminnlo\s+1\b", header_text, re.I):
         raise ValueError("signal LHE lacks HJMiNNLO provenance (minnlo 1)")
     if sample.signal:
-        validate_signal_hard_inputs(header_text, args, non_nominal_higgs_mass)
+        (powheg_validator or validate_signal_hard_inputs)(header_text, args, non_nominal_higgs_mass)
     if count < args.nevents:
         raise ValueError(f"only {count} LHE events, but --nevents={args.nevents}")
     xsec = sum(number(row[0]) for row in init[1:])

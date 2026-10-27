@@ -513,6 +513,28 @@ class Pipeline:
                       f"CC={self.config['cc']}", f"FC={self.config['fc']}", "STDCLIB=-lstdc++"], process)
         self.record_component("powheg", {"commit": POWHEG_COMMIT, "hj_commit": HJ_COMMIT,
                                          "executable_sha256": digest(process / "pwhg_main")})
+        if self.workflow == 'fourlepton-ho':
+            self.setup_powheg_vbf()
+
+    def setup_powheg_vbf(self):
+        from hfourlepton import run_powheg_vbf as vbf
+        from hgammagamma.run_ihixs_normalization import write_same_or_new
+        process = self.powheg / 'VBF_H'
+        if not (process / '.git').exists():
+            if (self.powheg / '.git/info/sparse-checkout').is_file():
+                self.call('powheg-vbf-sparse', ['git', '-C', self.powheg, 'sparse-checkout', 'add', 'VBF_H'])
+            self.call('powheg-vbf-source', ['git', '-C', self.powheg, 'submodule', 'update', '--init', 'VBF_H'])
+        if self.capture(['git', '-C', process, 'rev-parse', 'HEAD']) != vbf.COMMIT:
+            raise ValueError('VBF_H submodule differs from the pinned version; preserve this installation')
+        write_same_or_new(process / 'svn.version', vbf.version_include())
+        command = vbf.build_command(self.config)
+        if not (process / 'pwhg_main').is_file():
+            self.call('powheg-vbf-build', command, process)
+        expected = dict(vbf.source_identity(process), build_command=command)
+        previous = self.components().get('powheg_vbf')
+        if previous is not None and previous != expected:
+            raise ValueError('VBF_H installation differs from its saved build; use a new work directory')
+        self.record_component('powheg_vbf', expected)
 
     def setup_analysis(self):
         if self.workflow.startswith("fourlepton-"):
@@ -577,6 +599,8 @@ class Pipeline:
         if self.workflow.endswith("-ho"):
             required.extend([self.cuba / "include/cuba.h", self.cuba / "lib/libcuba.a",
                              self.powheg / "HJ/HJMiNNLO/pwhg_main", REPO / "external/ihixs/CMakeLists.txt"])
+        if self.workflow == 'fourlepton-ho':
+            required.append(self.powheg / 'VBF_H/pwhg_main')
         if self.workflow.startswith("fourlepton-"):
             required.append(REPO / "hfourlepton/LOAnalysis/Code/HwSimPostAnalysis_fourlepton")
         else:
@@ -592,6 +616,11 @@ class Pipeline:
         missing = [str(p) for p in required if not p.is_file() or not p.stat().st_size]
         if missing:
             raise ValueError(f"setup is incomplete for {self.workflow}; run setup first. Missing:\n" + "\n".join(missing[:12]))
+        if self.workflow == 'fourlepton-ho':
+            from hfourlepton import run_powheg_vbf as vbf
+            expected = dict(vbf.source_identity(self.powheg / 'VBF_H'), build_command=vbf.build_command(self.config))
+            if self.components().get('powheg_vbf') != expected:
+                raise ValueError('VBF_H build is missing or changed; run setup before the campaign')
         imports = "import ROOT,numpy,matplotlib,yaml,six"
         if self.with_ml:
             imports += ",xgboost,sklearn,tqdm"

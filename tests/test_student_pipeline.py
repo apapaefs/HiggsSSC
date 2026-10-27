@@ -425,6 +425,20 @@ class StudentPipelineTests(unittest.TestCase):
             self.assertIn("ihixs-calculate", text.getvalue())
             self.assertIn("not a liveness check", text.getvalue())
 
+    def test_fourlepton_status_flags_explicit_failure_in_stale_running_state(self):
+        with self.repository() as root:
+            args = self.args(root, '--workflow', 'fourlepton-ho', '--energy-tev', '13')
+            log = root / 'failed.log'
+            log.write_text('\nCOMMAND: current\nends with non zero status: 134. Stop all computation\n')
+            cli.prepare_run(args, {})
+            cli.progress(args, state='running', stage='fourlepton-perfect', log=str(log))
+            text = io.StringIO()
+            with contextlib.redirect_stdout(text):
+                cli.status(args)
+            self.assertIn('Observed MG5 failure', text.getvalue())
+            self.assertIn('saved running state does not override this failure', text.getvalue())
+            self.assertNotIn('Integrations may be quiet', text.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
