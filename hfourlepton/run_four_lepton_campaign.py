@@ -3923,8 +3923,39 @@ def _slha_block_values(slha: str, block_name: str) -> dict[int, list[float]]:
     return values
 
 
-def canonical_madspin_slha(cfg: Config) -> str:
-    card = cfg.mg5_dir / "models" / "sm" / "restrict_default.dat"
+_MADSPIN_SM_MODELS = {"sm", "loop_sm", "sm-no_b_mass", "loop_sm-no_b_mass"}
+_MADSPIN_BANNER_STRATEGY = "model_consistent_sm_madspin_metadata_v4"
+
+
+def madspin_banner_model(prefix: str) -> str:
+    """Read the model MadSpin will actually import, including its restriction."""
+    cards = re.findall(r"(?is)<MG5ProcCard\b[^>]*>(.*?)</MG5ProcCard\s*>", prefix)
+    opened = len(re.findall(r"(?i)<MG5ProcCard\b", prefix))
+    closed = len(re.findall(r"(?i)</MG5ProcCard\s*>", prefix))
+    if opened != closed or opened > 1 or len(cards) != opened:
+        raise ValueError("malformed or ambiguous MadSpin MG5ProcCard")
+    if not cards:
+        return "sm"  # The standalone bridge process card is injected below.
+    models = re.findall(r"(?im)^\s*import\s+model\s+([^\r\n#]+)", cards[0])
+    if len(models) != 1:
+        raise ValueError("MadSpin requires one explicit SM model import in MG5ProcCard")
+    tokens = models[0].split()
+    if tokens[0] not in _MADSPIN_SM_MODELS or tokens[1:] not in ([], ["-modelname"]):
+        raise ValueError(f"unsupported MadSpin SM model import: {models[0].strip()}")
+    return tokens[0]
+
+
+def madspin_restriction_card(cfg: Config, model: str) -> Path:
+    if model not in _MADSPIN_SM_MODELS:
+        raise ValueError(f"unsupported MadSpin SM model: {model}")
+    if model.endswith("-no_b_mass"):
+        return cfg.mg5_dir / "models" / model.split("-")[0] / "restrict_no_b_mass.dat"
+    # The default SM and loop_SM have the same tree-level decay parameters.
+    return cfg.mg5_dir / "models" / "sm" / "restrict_default.dat"
+
+
+def canonical_madspin_slha(cfg: Config, *, model: str = "sm") -> str:
+    card = madspin_restriction_card(cfg, model)
     if not card.exists():
         raise ValueError(f"missing canonical SM parameter card: {card}")
     text = card.read_text()
@@ -3990,7 +4021,7 @@ def canonical_madspin_slha(cfg: Config) -> str:
             f"canonical SM card has no positive Higgs width: {card}"
         )
     completed = updated.rstrip() + "\n"
-    validation = validate_madspin_slha(completed, cfg)
+    validation = validate_madspin_slha(completed, cfg, model=model)
     if not validation["valid"]:
         raise ValueError(
             "canonical SM card is not standalone-complete for MadSpin: "
@@ -4002,8 +4033,19 @@ def canonical_madspin_slha(cfg: Config) -> str:
 def validate_madspin_slha(
     slha: str,
     cfg: Config,
+    *,
+    model: str = "sm",
 ) -> dict[str, object]:
-    """Validate all SM inputs required by standalone MadSpin."""
+    """Validate standalone SM inputs against the declared model restriction.
+
+    MG5 omits fixed-zero Yukawa entries from exported parameter cards. They
+    are valid in that restricted model; replacing them with default massive-b
+    parameters makes MadSpin's generated decay process reject the card.
+    """
+
+    if model not in _MADSPIN_SM_MODELS:
+        raise ValueError(f"unsupported MadSpin SM model: {model}")
+    massless_bottom = model.endswith("-no_b_mass")
 
     block_values = {
         name: _slha_block_values(slha, name)
@@ -4037,6 +4079,8 @@ def validate_madspin_slha(
         values = block_values[block_name]
         for code in required_codes:
             entries = values.get(code, [])
+            if massless_bottom and block_name == "yukawa" and code == 5 and not entries:
+                continue  # Fixed to zero by the model, not an external parameter.
             reason = f"missing_or_ambiguous_{block_name}_{code}"
             if len(entries) != 1:
                 if not (
@@ -4053,13 +4097,28 @@ def validate_madspin_slha(
             value = entries[0]
             if not math.isfinite(value):
                 reasons.append(f"nonfinite_{block_name}_{code}")
-            elif block_name in {"sminputs", "mass", "decay"} and value <= 0.0:
+            elif (
+                block_name in {"sminputs", "mass", "decay"} and value <= 0.0
+                and not (massless_bottom and block_name == "mass" and code == 5 and value == 0.0)
+            ):
                 if not (
                     block_name == "decay"
                     and code == 25
                     and "nonpositive_decay_25" in reasons
                 ):
                     reasons.append(f"nonpositive_{block_name}_{code}")
+
+    fixed_zero = {"mass": (4, 11, 13), "yukawa": (4, 11, 13),
+                  "decay": (15,), "wolfenstein": (1, 2, 3, 4)}
+    if massless_bottom:
+        fixed_zero["mass"] += (5,)
+        fixed_zero["yukawa"] += (5,)
+    for block_name, codes in fixed_zero.items():
+        values = _slha_block_values(slha, block_name)
+        for code in codes:
+            entries = values.get(code, [])
+            if entries and (len(entries) != 1 or entries[0] != 0.0):
+                reasons.append(f"model_requires_zero_{block_name}_{code}")
 
     return {
         "valid": not reasons,
@@ -4089,6 +4148,7 @@ def madspin_banner_plan(path: Path, cfg: Config) -> dict[str, object]:
     )
     if has_header_open != has_header_close:
         raise ValueError(f"LHE file has a malformed <header> block: {path}")
+    model = madspin_banner_model(prefix)
     run_card_open_count = len(
         re.findall(r"<MGRunCard\b", prefix, flags=re.IGNORECASE)
     )
@@ -4116,6 +4176,7 @@ def madspin_banner_plan(path: Path, cfg: Config) -> dict[str, object]:
         slha_validation = validate_madspin_slha(
             slha_blocks[0].group("body"),
             cfg,
+            model=model,
         )
     else:
         slha_validation = {
@@ -4136,7 +4197,8 @@ def madspin_banner_plan(path: Path, cfg: Config) -> dict[str, object]:
         "preserved_slha": has_slha and valid_slha,
         "slha_validation": slha_validation,
         "created_header": not has_header_open,
-        "strategy": "standalone_complete_sm_madspin_metadata_v3",
+        "model": model,
+        "strategy": _MADSPIN_BANNER_STRATEGY,
     }
 
 
@@ -4159,7 +4221,8 @@ def prepare_madspin_banner_input(
     needs_canonical_slha = bool(
         plan["added_slha"] or plan["replaced_slha"]
     )
-    slha = canonical_madspin_slha(cfg) if needs_canonical_slha else ""
+    model = str(plan["model"])
+    slha = canonical_madspin_slha(cfg, model=model) if needs_canonical_slha else ""
     proc_card = """<MG5ProcCard>
 <![CDATA[
 # Injected by HiggsSSC for standalone MadSpin decay of a stable Higgs.
@@ -4193,7 +4256,7 @@ generate p p > h
     if plan["added_slha"]:
         additions += f"<slha>\n{slha}</slha>\n"
 
-    canonical_card = cfg.mg5_dir / "models" / "sm" / "restrict_default.dat"
+    canonical_card = madspin_restriction_card(cfg, model)
     identity = {
         "schema_version": 1,
         "source_sha256": sha256_file(source),
@@ -4210,6 +4273,7 @@ generate p p > h
             if needs_canonical_slha and canonical_card.exists()
             else None
         ),
+        "canonical_sm_card_path": str(canonical_card) if needs_canonical_slha else None,
         "runner_sha256": sha256_file(Path(__file__).resolve()),
     }
     marker = destination.with_name("fourlepton_madspin_banner_stage.json")
@@ -4330,7 +4394,7 @@ def run_signal_madspin(
     if cfg.dry_run:
         augmentation: dict[str, object] = {
             "status": "pending_dry_run",
-            "strategy": "standalone_complete_sm_madspin_metadata_v3",
+            "strategy": _MADSPIN_BANNER_STRATEGY,
         }
     else:
         try:
@@ -4905,6 +4969,8 @@ def merge_manifest_samples(
         merged_entries.append(old_entries.get(name, planned_entry))
     planned["samples"] = merged_entries
     planned["status"] = existing.get("status", "running")
+    if "software_migrations" in existing:
+        planned["software_migrations"] = existing["software_migrations"]
     return planned
 
 

@@ -174,6 +174,19 @@ class FourLeptonHOTests(unittest.TestCase):
                     self.assertEqual(command[command.index("--nevents")+1], 30)
                     self.assertEqual(command[command.index("--signal-modes")+1], "all")
 
+    def test_managed_repair_uses_same_campaign_arguments_without_generation(self):
+        args = run_pipeline.parse_args(["repair-madspin", "--workflow", "fourlepton-ho",
+            "--energy-tev", "13", "--run-tag", "repair", "--nevents", "30", "--jobs", "4"])
+        calls = []
+        pipeline = SimpleNamespace(args=args, work=Path("/work"), python=Path("/work/venv/bin/python"),
+            mg5=Path("/work/mg5"), call=lambda label, argv: calls.append((label, argv)))
+        workflow.repair_madspin(pipeline)
+        self.assertEqual(len(calls), 1)
+        command = calls[0][1]
+        self.assertEqual(command[1].name, "repair_madspin_banner.py")
+        self.assertEqual(command[2], "--apply")
+        self.assertEqual(command[3:], workflow.campaign_arguments(pipeline, "perfect"))
+
     def test_nlo_card_matching_pdf_and_loose_cuts(self):
         sample = next(s for s in ho.all_samples() if s.name == "bkg_qq_2e2mu")
         proc, launch = ho.nlo_cards(sample, cfg("--ebeam", "6500"), Path("/tmp/process"), 100)

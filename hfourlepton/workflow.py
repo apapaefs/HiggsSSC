@@ -88,6 +88,27 @@ def rate_inputs(args):
     return settings, card
 
 
+def campaign_arguments(pipeline, profile):
+    """One configuration for both a managed run and its bounded metadata repair."""
+    args = pipeline.args
+    directory = REPO / "hfourlepton/runs" / args.run_tag
+    tag = "lhc13" if args.energy_tev == 13 else "ssc40"
+    return ["--order", "ho", "--signal-modes", "all",
+            "--selection-profile", selection(args), "--detector-response", profile,
+            "--run-tag", args.run_tag, "--nevents", args.nevents, "--nb-core", args.jobs,
+            "--ebeam", args.energy_tev * 500, "--mg5-dir", pipeline.mg5, "--mg5-python", pipeline.python,
+            "--higgs-mass", "125", "--no-herwig-env", "--no-herwig-module",
+            "--signal-lhe", args.signal_lhe or directory / "powheg/powheg-hjminnlo-merged.lhe",
+            "--vbf-lhe", args.vbf_lhe or directory / "powheg-vbf" / vbf.LHE_NAME,
+            "--signal-normalization", args.signal_normalization or pipeline.work / f"normalization/ggf-{tag}-n3lo.json"]
+
+
+def repair_madspin(pipeline):
+    pipeline.call(pipeline.args.run_tag + "-repair-madspin", [pipeline.python,
+        REPO / "hfourlepton/repair_madspin_banner.py", "--apply",
+        *campaign_arguments(pipeline, "perfect")])
+
+
 def run(pipeline):
     args = pipeline.args
     pipeline.check()
@@ -112,13 +133,11 @@ def run(pipeline):
     checked = shared.norm.load_record(record)
     if checked["sqrt_s_gev"] != args.energy_tev * 1000.:
         raise ValueError("ihixs record has the wrong collider energy")
-    lhe = args.signal_lhe or directory / "powheg/powheg-hjminnlo-merged.lhe"
     if not args.signal_lhe:
         pipeline.call(args.run_tag + "-powheg", [pipeline.python, REPO / "hgammagamma/run_powheg_hjminnlo.py",
             "--nevents", 3 * args.nevents, "--jobs", args.jobs, "--ebeam", args.energy_tev * 500,
             "--powheg-dir", pipeline.powheg / "HJ/HJMiNNLO", "--run-dir", directory / "powheg",
             "--card", card, "--no-herwig-env", "--no-herwig-module", "--skip-build", "--resume"])
-    vbf_lhe = args.vbf_lhe or directory / 'powheg-vbf' / vbf.LHE_NAME
     if not args.vbf_lhe:
         cfg = four.parse_config(['--order', 'ho', '--run-tag', args.run_tag, '--seed-base', '31122002', '--dry-run'])
         pipeline.call(args.run_tag + '-powheg-vbf', [pipeline.python, REPO / 'hfourlepton/run_powheg_vbf.py',
@@ -127,11 +146,4 @@ def run(pipeline):
             '--seed', four.seed_for('signal_vbf_h_stable', cfg)])
     for profile in profiles(args):
         pipeline.call(args.run_tag + "-fourlepton-" + profile, [pipeline.python,
-            REPO / "hfourlepton/run_four_lepton_campaign.py", "--order", "ho", "--signal-modes", "all",
-            "--selection-profile", selection(args), "--detector-response", profile,
-            "--run-tag", args.run_tag, "--nevents", args.nevents, "--nb-core", args.jobs,
-            "--ebeam", args.energy_tev * 500, "--mg5-dir", pipeline.mg5, "--mg5-python", pipeline.python,
-            "--higgs-mass", "125",
-            "--no-herwig-env", "--no-herwig-module", "--signal-lhe", lhe,
-            "--vbf-lhe", vbf_lhe,
-            "--signal-normalization", record])
+            REPO / "hfourlepton/run_four_lepton_campaign.py", *campaign_arguments(pipeline, profile)])

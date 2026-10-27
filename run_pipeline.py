@@ -20,7 +20,7 @@ from hgammagamma import run_gammagamma_ho_pipeline as shared
 
 REPO = Path(__file__).resolve().parent
 WORKFLOWS = ("gammagamma-lo", "gammagamma-ho", "fourlepton-lo", "fourlepton-ho")
-ACTIONS = ("setup", "check", "prepare", "run", "status", "report", "cuts", "xgboost", "validate")
+ACTIONS = ("setup", "check", "prepare", "run", "status", "report", "cuts", "xgboost", "validate", "repair-madspin")
 
 
 def now():
@@ -69,6 +69,8 @@ def parse_args(argv=None):
         p.error("prepare and validate apply to fourlepton-ho")
     if args.action == "validate" and args.energy_tev != 13:
         p.error("LHC validation requires --energy-tev 13")
+    if args.action == "repair-madspin" and (args.workflow != "fourlepton-ho" or args.energy_tev != 13):
+        p.error("repair-madspin applies only to the known fourlepton-ho 13 TeV WH banner failure")
     if args.config and args.action not in ("cuts", "xgboost"):
         p.error("--config applies to cuts/xgboost")
     for key in ("work_dir", "herwig_env", "ninja_dir", "signal_lhe", "vbf_lhe", "signal_normalization", "config"):
@@ -486,6 +488,9 @@ def main(argv=None):
                 verify_pilot(args, config)
             prepare_run(args, config)
             validate_saved_run_artifacts(args)
+        elif args.action == "repair-madspin":
+            if read_state(args)["identity"] != identity(args, config):
+                raise ValueError("repair requires the original campaign options and environment")
         elif args.action in ("report", "cuts", "xgboost", "validate"):
             saved = read_state(args)
             if saved["identity"]["environment"] != config:
@@ -496,6 +501,10 @@ def main(argv=None):
                 getattr(pipeline, args.action)()
             elif args.action == "run":
                 run(pipeline, saved_artifacts_checked=True)
+            elif args.action == "repair-madspin":
+                from hfourlepton.workflow import repair_madspin
+                repair_madspin(pipeline)
+                progress(args, state="prepared", stage="madspin-model-repaired", error=None)
             else:
                 previous = read_state(args)
                 if args.action == "report":

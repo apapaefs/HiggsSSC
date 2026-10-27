@@ -51,6 +51,33 @@ Use `status` with the same workflow, energy and tag to inspect progress. Repeat
 the original `run` command to resume completed stages. Existing mismatched or
 partial outputs cause an error rather than automatic replacement.
 
+If an older checkout failed at the first WH decay with
+`InvalidParamCard: parameter yukawa: 5 is not at zero`, update the repository.
+The old banner validator mistook the `loop_sm-no_b_mass` card for incomplete
+metadata and inserted massive-bottom parameters into a massless-bottom model.
+The corrected validator accepts the model's zero bottom mass and omitted
+fixed-zero Yukawa entry. When replacement metadata is needed, it uses the
+declared model's restriction card. This also covers W−H, qqZH, ggZH and ttH.
+
+For the affected 13 TeV pilot, with only the six ggF/VBF samples complete and
+the first WH decay failed, run the bounded recovery command using the original
+options (including any input overrides):
+
+```bash
+python3 run_pipeline.py repair-madspin --workflow fourlepton-ho \
+  --energy-tev 13 --run-tag fourl_lhc13_vbf_pilot --nevents 30 --jobs 4 \
+  --signal-lhe hfourlepton/runs/fourl_lhc13_pilot/powheg/powheg-hjminnlo-merged.lhe \
+  --signal-normalization inputs/pipeline/normalization/ggf-lhc13-n3lo.json
+```
+
+This command runs no generators. It checks the specific software transition,
+original configuration, completed output hashes, WH production and decay slice.
+It backs up the manifest and failed private MadSpin directory under
+`recovery/madspin-no-b-mass-v1`, records the migration and makes the original
+`run` command resumable. It preserves completed samples and WH hard events.
+Other failure states or changed inputs are rejected. Do not use `--force` or
+manually remove provenance checks to work around a rejected repair.
+
 For a campaign that failed with the old MG5 VBF definition, first stop its
 parent with Ctrl-C in the original terminal/screen session. Keep that directory
 and its logs. Run `setup` again to install the pinned `VBF_H` executable, then

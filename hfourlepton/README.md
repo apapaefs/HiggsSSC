@@ -66,7 +66,10 @@ The signal input must contain exactly one status-one stable Higgs with
 possibly stale banner mass, are authoritative.  Banner-light POWHEG-style
 inputs are augmented with the minimal MG5 process/run metadata and a
 standalone-complete restricted-SM SLHA card needed by MadSpin. Existing SLHA
-blocks are preserved only when all MadSpin-required SM entries are present;
+blocks are preserved when the MadSpin-required SM entries are valid for the
+declared model restriction. In `sm-no_b_mass` and `loop_sm-no_b_mass`, the
+bottom mass is zero and MG5 may omit its fixed-zero bottom Yukawa entry.
+Replacement cards use the same restriction as the production model;
 the augmentation strategy and source/prepared checksums are recorded in the
 manifest.
 

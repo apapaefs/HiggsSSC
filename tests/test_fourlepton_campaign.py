@@ -47,6 +47,12 @@ Block YUKAWA
     6 1.730000e+02
    15 1.777000e+00
 """)
+    for name in ("sm", "loop_sm"):
+        directory = MG5_FIXTURE / "models" / name
+        directory.mkdir(exist_ok=True)
+        (directory / "restrict_no_b_mass.dat").write_text(
+            (model / "restrict_default.dat").read_text().replace("4.700000e+00", "0.000000e+00")
+        )
 
 
 def tearDownModule() -> None:
@@ -600,6 +606,71 @@ DECAY 25 4.070000000e-03
         self.assertIn("invalid_mass_25", plan["slha_validation"]["reasons"])
         self.assertNotIn("1.250000000e+02 # stale MH", prepared)
         self.assertRegex(prepared, r"(?m)^\s*25\s+1\.250900000e\+02")
+
+    def test_massless_bottom_production_card_is_preserved_for_all_associated_modes(self):
+        cfg = config()
+        cfg.dry_run = False
+        slha = campaign.canonical_madspin_slha(cfg, model="loop_sm-no_b_mass")
+        # MG5 omits YUKAWA(5) because it is fixed to zero by this model.
+        slha = slha.replace("Block YUKAWA\n    5 0.000000e+00\n", "Block YUKAWA\n")
+        self.assertNotIn(5, campaign._slha_block_values(slha, "yukawa"))
+        processes = ("p p > h w+ [QCD]", "p p > h w- [QCD]", "p p > h z [QCD]",
+                     "g g > h z [noborn=QCD]", "p p > t t~ h [QCD]")
+        for process in processes:
+            with self.subTest(process=process), TemporaryDirectory() as tmpdir:
+                source = Path(tmpdir) / "source.lhe"
+                destination = Path(tmpdir) / "prepared.lhe"
+                text = (
+                    '<LesHouchesEvents version="3.0">\n<header>\n'
+                    f'<MG5ProcCard>\nimport model loop_sm-no_b_mass\ngenerate {process}\n</MG5ProcCard>\n'
+                    '<MGRunCard>\n3.0 = lhe_version\n</MGRunCard>\n'
+                    f'<slha>\n{slha}</slha>\n</header>\n'
+                    '<init>\n2212 2212 6500 6500 0 0 335900 335900 -4 1\n1 0 1 1\n</init>\n'
+                    '<event>\n1 1 -1 100 .007 .118\n25 1 0 0 0 0 0 0 0 125.09 125.09 0 9\n'
+                    '<rwgt><wgt id="1001">-1.1</wgt></rwgt>\n</event>\n</LesHouchesEvents>\n'
+                )
+                source.write_text(text)
+                plan = campaign.prepare_madspin_banner_input(source, destination, cfg)
+                self.assertTrue(plan["preserved_slha"])
+                self.assertEqual(plan["model"], "loop_sm-no_b_mass")
+                self.assertEqual(destination.read_bytes(), source.read_bytes())
+                self.assertEqual(source.read_text(), text)
+                self.assertEqual(campaign.prepare_madspin_banner_input(source, destination, cfg), plan)
+
+    def test_replacement_card_uses_the_production_model_restriction(self):
+        cfg = config()
+        cfg.dry_run = False
+        for model in ("sm-no_b_mass", "loop_sm-no_b_mass"):
+            with self.subTest(model=model), TemporaryDirectory() as tmpdir:
+                source = Path(tmpdir) / "source.lhe"
+                destination = Path(tmpdir) / "prepared.lhe"
+                source.write_text(
+                    '<LesHouchesEvents>\n<header>\n'
+                    f'<MG5ProcCard>\nimport model {model}\ngenerate p p > h w+\n</MG5ProcCard>\n'
+                    '<slha>\nBLOCK MASS\n25 125.09\nDECAY 25 0\n</slha>\n</header>\n'
+                    '<init>\n2212 2212 6500 6500 0 0 0 0 -4 1\n1 0 1 1\n</init>\n</LesHouchesEvents>\n'
+                )
+                plan = campaign.prepare_madspin_banner_input(source, destination, cfg)
+                self.assertTrue(plan["replaced_slha"])
+                prepared = campaign._SLHA_BLOCK_RE.search(destination.read_text())["body"]
+                self.assertEqual(campaign._slha_block_values(prepared, "mass")[5], [0.])
+                self.assertEqual(campaign._slha_block_values(prepared, "yukawa")[5], [0.])
+                self.assertTrue(campaign.validate_madspin_slha(prepared, cfg, model=model)["valid"])
+
+    def test_madspin_rejects_model_restriction_mismatches(self):
+        cfg = config()
+        slha = campaign.canonical_madspin_slha(cfg)
+        result = campaign.validate_madspin_slha(slha, cfg, model="loop_sm-no_b_mass")
+        self.assertFalse(result["valid"])
+        self.assertIn("model_requires_zero_yukawa_5", result["reasons"])
+        self.assertIn("model_requires_zero_mass_5", result["reasons"])
+        for model in ("loop_sm-unknown", "heft", "sm-full"):
+            with self.subTest(model=model), self.assertRaisesRegex(ValueError, "unsupported"):
+                campaign.madspin_banner_model(f"<MG5ProcCard>\nimport model {model}\n</MG5ProcCard>")
+        for card in ("<MG5ProcCard>", "<MG5ProcCard>\ngenerate p p > h\n</MG5ProcCard>",
+                     "<MG5ProcCard>\nimport model sm\nimport model loop_sm\n</MG5ProcCard>"):
+            with self.subTest(card=card), self.assertRaises(ValueError):
+                campaign.madspin_banner_model(card)
 
     def test_patch_run_card_applies_lo_pdf_beams_and_loose_lepton_cuts(self) -> None:
         template = """ 100 = nevents
