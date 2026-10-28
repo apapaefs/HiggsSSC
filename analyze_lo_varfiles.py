@@ -581,6 +581,11 @@ def summarize_sample(sample: SampleInfo, cuts: Sequence[Cut], luminosity_fb: flo
         rows, weights = read_named_ROOT_varfile(sample.var_file, max_events=None, strict=True)
     else:
         rows, weights = read_named_ROOT_varfile(sample.var_file, max_events=max_events)
+    return _summarize_loaded_sample(sample, rows, weights, cuts, luminosity_fb)
+
+
+def _summarize_loaded_sample(sample, rows, weights, cuts, luminosity_fb):
+    """Use one validated population for both cut yields and optional mass plots."""
     decisions = apply_cuts(rows, cuts)
     sum_weight = math.fsum(weights)
     sum_selected_weight = math.fsum(weight for weight, selected in zip(weights, decisions) if selected)
@@ -689,6 +694,13 @@ def write_html_report(metadata: dict[str, Any], rows: Sequence[dict[str, Any]], 
         f"{'inf' if cut.get('max') is None else html.escape(fmt(cut.get('max')))}</li>"
         for cut in cuts
     )
+    mass_plots_html = ""
+    if metadata.get("mass_bin_width_gev") is not None:
+        mass_plots_html = f'''<h2>Diphoton mass</h2>
+  <p>{metadata['mass_bin_width_gev']:g} GeV bins. The blue curve applies all cuts except the mass cut;
+  the orange curve also applies the mass window. Only two-candidate rows have a defined mass.
+  Both use the full sample and signed physical weights. Bands show MC uncertainties grouped by source event.</p>
+  <figure><img src="m_gg_cut_based.png" alt="Diphoton mass after the other cuts"></figure>'''
     html_text = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -702,6 +714,8 @@ def write_html_report(metadata: dict[str, Any], rows: Sequence[dict[str, Any]], 
     th {{ background: #f0f4f8; }}
     .meta {{ display: flex; gap: 2rem; flex-wrap: wrap; margin: 1rem 0; }}
     a {{ color: #1f5eff; }}
+    img {{ max-width: 100%; height: auto; }}
+    figure {{ margin: 1.5rem 0; }}
   </style>
 </head>
 <body>
@@ -729,6 +743,7 @@ def write_html_report(metadata: dict[str, Any], rows: Sequence[dict[str, Any]], 
       <tr><th>approx_significance_s_over_sqrt_b</th><td>{html.escape(fmt_optional(totals['approx_significance_s_over_sqrt_b']))}</td></tr>
     </tbody>
   </table>
+  {mass_plots_html}
   <h2>Additional outputs</h2>
   <ul>{asset_links}</ul>
 </body>
@@ -874,11 +889,27 @@ def run_cuts(config_path: Path, run_tag_override: str | None = None, progress_en
     max_events = analysis.get("max_events")
     if max_events is not None and any(sample.requires_full_sample for sample in samples):
         raise ValueError("HO cut yields require the full sample; remove analysis.max_events")
+    # HO plots need source identities to combine correlated response rows in
+    # each error bar. Read once and share the population with the cut summary.
+    mass_inputs = [] if all(sample.requires_full_sample for sample in samples) else None
+    if mass_inputs is not None:
+        from read_root_varfiles import read_ho_ROOT_varfile
+        from hgammagamma.plot_ho_mass_diagnostics import (
+            MASS_BIN_WIDTH_GEV, sample_plot_data, write_cut_mass_plots,
+        )
     rows: list[dict[str, Any]] = []
     progress = ProgressBar(len(samples), "Analyzing samples", enabled=progress_enabled)
     try:
         for index, sample in enumerate(samples, start=1):
-            rows.append(summarize_sample(sample, cuts, luminosity_fb, _optional_float(max_events)))
+            if mass_inputs is None:
+                rows.append(summarize_sample(sample, cuts, luminosity_fb, _optional_float(max_events)))
+            else:
+                source_rows, weights, source_events, entries = read_ho_ROOT_varfile(sample.var_file)
+                rows.append(_summarize_loaded_sample(sample, source_rows, weights, cuts, luminosity_fb))
+                if len(set(source_events)) != sample.events_read:
+                    raise ValueError(f"HO source-event count differs from its analysis summary: {sample.var_file}")
+                mass_inputs.append(sample_plot_data(sample, source_rows, weights, source_events, luminosity_fb))
+                del source_rows, weights, source_events, entries
             progress.update(index, sample.name)
     finally:
         progress.finish()
@@ -895,8 +926,16 @@ def run_cuts(config_path: Path, run_tag_override: str | None = None, progress_en
         "cuts": cut_metadata,
     }
     metadata["totals"] = compute_analysis_totals(rows)
-    index = write_outputs(metadata, rows, output_dir)
-    return AnalysisRunResult(index_html=index, output_dir=output_dir, metadata=metadata, rows=rows, assets=[])
+    assets = []
+    if mass_inputs is not None:
+        import numpy as np
+        mass_data = {key: np.concatenate([sample[key] for sample in mass_inputs]) for key in mass_inputs[0]}
+        assets = write_cut_mass_plots(output_dir, mass_data, cut_metadata, luminosity_fb)
+        metadata["mass_bin_width_gev"] = MASS_BIN_WIDTH_GEV
+        metadata["mass_plot_scope"] = "full sample, two reconstructed photon candidates"
+        metadata["outputs"] = {path.name: str(path) for path in assets}
+    index = write_outputs(metadata, rows, output_dir, assets)
+    return AnalysisRunResult(index_html=index, output_dir=output_dir, metadata=metadata, rows=rows, assets=assets)
 
 
 def run_xgboost(config_path: Path, run_tag_override: str | None = None, progress_enabled: bool = True,

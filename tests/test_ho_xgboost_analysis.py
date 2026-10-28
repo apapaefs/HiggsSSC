@@ -156,6 +156,8 @@ class HOXGBoostEndToEndTests(unittest.TestCase):
                     "metrics.json", "signal_background_xgboost.json", "model_metadata.json", "scores.csv",
                     "partitions.csv", "threshold_scan.csv", "roc.png", "feature_importance.png",
                     "score_distributions.png", "mass_distributions.png"}
+        expected.update(f"{stem}.{extension}" for stem in ("m_gg_cut_based", "m_gg_xgboost", "mass_acceptance")
+                        for extension in ("png", "pdf", "csv"))
         self.assertEqual({path.name for path in self.output.iterdir()}, expected)
         for path in self.output.iterdir():
             self.assertGreater(path.stat().st_size, 0)
@@ -178,6 +180,10 @@ class HOXGBoostEndToEndTests(unittest.TestCase):
                                for name in self.metrics["feature_names"]] for row in self.scores])
         np.testing.assert_allclose(model.predict_proba(features)[:, 1],
                                    [float(row["score"]) for row in self.scores], rtol=0., atol=1.e-7)
+        for row in self.scores:
+            original = input_rows[row["sample"]][int(row["tree_entry"])]
+            for name in reader.FEATURE_NAMES:
+                self.assertEqual(float(row[name]), original[name])
 
     def test_all_outcomes_share_group_and_fractions_use_full_population(self):
         self.assertEqual(len(self.partitions), sum(self.source_counts.values()) * 3)
@@ -270,6 +276,59 @@ class HOXGBoostEndToEndTests(unittest.TestCase):
                 self.assertAlmostEqual(summary["analysis_efficiency"],
                                        math.fsum(weight for _, weight in accepted) / fraction / sample.normalization_sum_weight)
 
+    def test_automatic_mass_plots_use_one_gev_bins_and_independent_test_yields(self):
+        self.assertEqual(self.metrics["mass_bin_width_gev"], 1.)
+        mass_rows = read_csv(self.output / "m_gg_xgboost.csv")
+        for row in mass_rows:
+            self.assertAlmostEqual(float(row["high_gev"]) - float(row["low_gev"]), 1.)
+        for label, category in ((1, "Signal"), (0, "Total background")):
+            for selection in ("two_photons", "xgboost"):
+                expected = math.fsum(float(row["projected_physical_weight"]) for row in self.scores
+                                    if row["partition"] == "test" and int(row["label"]) == label
+                                    and 120 <= float(row["m_gg"]) <= 130
+                                    and (selection == "two_photons" or float(row["score"]) >= self.metrics["best_threshold"]))
+                actual = math.fsum(float(row["expected_events"]) for row in mass_rows
+                                  if row["view"] == "peak" and row["category"] == category and row["selection"] == selection)
+                self.assertAlmostEqual(actual, expected)
+        html = (self.output / "index.html").read_text()
+        for stem in ("m_gg_cut_based", "m_gg_xgboost", "mass_acceptance"):
+            self.assertIn(f'<img src="{stem}.png"', html)
+            self.assertIn(f'href="{stem}.pdf"', html)
+            self.assertIn(f'href="{stem}.csv"', html)
+
+    def test_cut_command_generates_mass_plot_from_one_root_read_per_sample(self):
+        cuts = [{"variable": "n_selected_photons", "min": 2},
+                {"variable": "pt_gamma1", "min": 64},
+                {"variable": "m_gg", "min": 120, "max": 130}]
+        analysis = {"_resolved_detector_response": "ssc", "cuts": cuts}
+        output = self.root / "cut_mass_report"
+        inputs = (analysis, self.root, "cut_mass_report", "test", self.luminosity, self.samples, output)
+        with mock.patch.object(cli, "load_analysis_inputs", return_value=inputs), \
+                mock.patch.object(reader, "read_ho_ROOT_varfile", wraps=reader.read_ho_ROOT_varfile) as reads, \
+                mock.patch.object(cli, "read_named_ROOT_varfile", side_effect=AssertionError("second ROOT read")), \
+                mock.patch.object(subject, "run_ho_signal_background_analysis", side_effect=AssertionError("unexpected ML training")):
+            result = cli.run_cuts(Path("unused.yaml"), progress_enabled=False)
+        self.assertEqual(reads.call_count, len(self.samples))
+        self.assertEqual(result.metadata["mass_bin_width_gev"], 1.)
+        self.assertEqual({path.name for path in result.assets}, {"m_gg_cut_based.png", "m_gg_cut_based.pdf", "m_gg_cut_based.csv"})
+        histogram = read_csv(output / "m_gg_cut_based.csv")
+        for category, label in (("Signal", "Signal"), ("Backgrounds", "Total background")):
+            expected = 0.
+            for sample, source_rows, weights, _, _ in self.loaded:
+                if sample.category != category:
+                    continue
+                scale = self.luminosity * 1000 * sample.cross_section_pb * sample.weight_scale / sample.normalization_sum_weight
+                expected += math.fsum(weight * scale for row, weight in zip(source_rows, weights)
+                                     if row["n_selected_photons"] >= 2 and row["pt_gamma1"] >= 64
+                                     and 100 <= row["m_gg"] <= 150)
+            actual = math.fsum(float(row["expected_events"]) for row in histogram
+                              if row["view"] == "overview" and row["selection"] == "other_cuts" and row["category"] == label)
+            self.assertAlmostEqual(actual, expected)
+        html = result.index_html.read_text()
+        self.assertIn('<img src="m_gg_cut_based.png"', html)
+        self.assertIn('href="m_gg_cut_based.pdf"', html)
+        self.assertIn('href="m_gg_cut_based.csv"', html)
+
     def test_insufficient_statistics_has_null_threshold_and_no_ml_rows(self):
         output = self.root / "insufficient"
         analysis = {**self.analysis, "xgboost": {**self.analysis["xgboost"],
@@ -287,6 +346,10 @@ class HOXGBoostEndToEndTests(unittest.TestCase):
         self.assertEqual(len(comparison["baseline"]["samples"]), 4)
         self.assertEqual({row["selection"] for row in read_csv(output / "comparison.csv")}, {"baseline"})
         self.assertIn("insufficient_statistics", (output / "index.html").read_text())
+        self.assertEqual({row["selection"] for row in read_csv(output / "m_gg_xgboost.csv")}, {"two_photons"})
+        for row in read_csv(output / "mass_acceptance.csv"):
+            self.assertEqual(row["after_events"], "")
+            self.assertEqual(row["efficiency"], "")
         self.assertEqual(len(read_csv(output / "threshold_scan.csv")), 501)
         for path in output.glob("*.json"):
             read_json(path)

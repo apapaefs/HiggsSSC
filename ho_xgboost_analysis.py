@@ -319,8 +319,11 @@ The classifier uses diphoton mass; no mass window is applied before training. Ba
 MC errors combine response rows from each source event before squaring and condition on the saved normalization.
 They do not include cross-section or detector systematic uncertainties.</p>{summary}
 <h2>Per-sample signed yields</h2>{detail}
-<p>Training uses class-balanced absolute physical weights. Signs are retained for all physics yields.
+<p>Training uses class-balanced absolute physical weights. Physics yields use signed weights.
 ROC and score overlays use nonnegative diagnostic weights; training scores never enter the test comparison.</p>
+<p>The additional mass spectra use {metadata['mass_bin_width_gev']:g} GeV bins with source-event MC uncertainty bands.
+The cut spectrum uses the full sample and overlays the selections without and with the mass cut.
+The XGBoost spectrum and mass acceptance use only the independent test partition at the frozen score threshold.</p>
 <h2>Diagnostics</h2>{pictures}<h2>Reproducibility and downloads</h2><ul>{links}</ul>
 </body></html>''')
 
@@ -431,6 +434,22 @@ def _run(loaded, stage, output_dir, metadata, baseline_cuts, config, xgb, plt, r
     model.save_model(str(stage / "signal_background_xgboost.json"))
     metadata["diagnostics"] = _plots(stage, data, split, scores, model, threshold, baseline_mask, plt,
                                       roc_curve, roc_auc_score)
+    from hgammagamma.plot_ho_mass_diagnostics import (
+        MASS_BIN_WIDTH_GEV, write_cut_mass_plots, write_xgboost_mass_plots,
+    )
+    eligible = np.flatnonzero(data["eligible"])
+    mass_data = {name: data["features"][eligible, index] for index, name in enumerate(FEATURE_NAMES)}
+    mass_data.update(
+        n_selected_photons=np.asarray([data["rows"][i]["n_selected_photons"] for i in eligible]),
+        sample=data["sample_ids"][eligible], sourceevent=data["source_events"][eligible],
+        label=data["labels"][eligible], score=scores[eligible], partition=split.partitions[eligible],
+        physical_weight=data["physical_weights"][eligible],
+        projected_physical_weight=project_partition_weights(
+            data["physical_weights"], data["sample_ids"], split, "test")[eligible],
+    )
+    mass_assets = write_cut_mass_plots(stage, mass_data, metadata["baseline_cuts"], luminosity, plt)
+    mass_assets += write_xgboost_mass_plots(stage, mass_data, threshold, luminosity, plt)
+    metadata["mass_bin_width_gev"] = MASS_BIN_WIDTH_GEV
     _csv(stage / "summary.csv", SUMMARY_FIELDS, summary_rows)
     _csv(stage / "comparison.csv", ["selection", *SUMMARY_FIELDS],
          ({"selection": name, **row} for name, rows in (("baseline", baseline_rows), ("xgboost", summary_rows)) for row in rows))
@@ -440,18 +459,24 @@ def _run(loaded, stage, output_dir, metadata, baseline_cuts, config, xgb, plt, r
         {"sample": data["sample_ids"][i], "sourceevent": int(data["source_events"][i]),
          "tree_entry": int(data["entries"][i]), "partition": split.partitions[i], "eligible": bool(data["eligible"][i])}
         for i in range(len(scores))))
+    # Export the reconstructed variables as well as scores so copied reports
+    # support mass plots and alternative cuts without the original ROOT files.
+    from read_root_varfiles import FEATURE_NAMES as exported_variables
     _csv(stage / "scores.csv", ["sample", "source", "sourceevent", "tree_entry", "partition", "label", "score",
-                                 "raw_signed_weight", "physical_weight", "partition_fraction", "projected_physical_weight"], (
+                                 "raw_signed_weight", "physical_weight", "partition_fraction", "projected_physical_weight",
+                                 *exported_variables], (
         {"sample": data["sample_ids"][i], "source": str(data["samples"][data["sample_ids"][i]].var_file),
          "sourceevent": int(data["source_events"][i]), "tree_entry": int(data["entries"][i]),
          "partition": split.partitions[i], "label": int(data["labels"][i]), "score": float(scores[i]),
          "raw_signed_weight": float(data["raw_weights"][i]), "physical_weight": float(data["physical_weights"][i]),
          "partition_fraction": split.sample_fractions[data["sample_ids"][i]][split.partitions[i]],
-         "projected_physical_weight": float(data["physical_weights"][i]) / split.sample_fractions[data["sample_ids"][i]][split.partitions[i]]}
+         "projected_physical_weight": float(data["physical_weights"][i]) / split.sample_fractions[data["sample_ids"][i]][split.partitions[i]],
+         **{name: float(data["rows"][i][name]) for name in exported_variables}}
         for i in np.flatnonzero(data["eligible"])))
     assets = ["summary.csv", "summary.json", "comparison.csv", "comparison.json", "metrics.json",
               "signal_background_xgboost.json", "model_metadata.json", "scores.csv", "partitions.csv",
-              "threshold_scan.csv", "roc.png", "feature_importance.png", "score_distributions.png", "mass_distributions.png"]
+              "threshold_scan.csv", "roc.png", "feature_importance.png", "score_distributions.png", "mass_distributions.png",
+              *[path.name for path in mass_assets]]
     metadata["outputs"] = {name: str(output_dir / name) for name in assets}
     _json(stage / "metrics.json", metadata)
     _json(stage / "model_metadata.json", {key: value for key, value in metadata.items() if key not in ("comparison", "outputs")})
