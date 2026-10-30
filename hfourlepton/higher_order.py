@@ -162,8 +162,8 @@ def normalization(sample, native_lhe, cfg, stable_lhe=None):
 def nlo_cards(sample, cfg, process_dir, count):
     if sample.matching != "MC@NLO":
         raise ValueError('MG5 NLO cards require an MC@NLO sample; VBF uses POWHEG VBF_H')
-    options = "set automatic_html_opening False\nset output_dependencies internal\n"
-    process = options + four.process_card_text(sample, process_dir)
+    options = "" if cfg.preset == "minimal" else "set automatic_html_opening False\nset output_dependencies internal\n"
+    process = options + four.process_card_text(sample, process_dir, cfg)
     settings = dict(nevents=count, iseed=four.seed_for(sample.production_group_id, cfg),
         ebeam1=cfg.ebeam, ebeam2=cfg.ebeam, lpp1=1, lpp2=1, pdlabel="lhapdf", lhaid=sample.lhaid,
         parton_shower="HERWIGPP", event_norm="average", ickkw=0,
@@ -171,6 +171,8 @@ def nlo_cards(sample, cfg, process_dir, count):
         mur_over_ref=1., muf_over_ref=1., reweight_scale=True, reweight_PDF=False,
         jetalgo=-1, jetradius=0.4, maxjetflavor=5, ptj=0., etaj=-1.,
         ptl=2., etal=5., mll=2., mll_sf=2., drll=0., drll_sf=0.)
+    if cfg.preset == "minimal":
+        settings["req_acc"] = 0.03
     launch = (f"set nb_core {cfg.nb_core}\nlaunch {process_dir} aMC@NLO --parton --nocompile --name={cfg.run_tag}\n" +
               "".join(f"set {k} {v}\n" for k, v in settings.items()) +
               f"set mass 25 {cfg.higgs_mass}\ndone\n")
@@ -229,6 +231,9 @@ def generate_nlo(sample, cfg, group, count, *, deadline=None, tests_only=False):
     identity = dict(process_card=process, compile_card=compile_card, launch_card=launch,
                     adapter_sha256=four.sha256_file(Path(__file__)),
                     guard_sha256=four.sha256_file(Path(__file__).with_name('mg5_guard.py')))
+    if cfg.preset == "minimal":
+        from hfourlepton.minimal_runtime import production_settings
+        identity["runtime"] = production_settings(sample, cfg)
     path = process_dir / 'Events' / cfg.run_tag / 'events.lhe.gz'
     if not cfg.dry_run and path.exists():
         if not four.artifact_stage_matches(marker, identity, path):
@@ -237,10 +242,15 @@ def generate_nlo(sample, cfg, group, count, *, deadline=None, tests_only=False):
         return path
     if not cfg.dry_run and process_dir.exists():
         raise ValueError(f'incomplete NLO export: {process_dir}; preserve it and use a new tag')
+    if cfg.postprocess_only:
+        raise ValueError(f'production is not complete: {process_dir}')
     four.ensure_dir(group / 'cards', cfg)
     for name, content in (('process_card.dat', process), ('compile.mg5', compile_card), ('launch.mg5', launch)):
         four.write_text(group / 'cards' / name, content, cfg, name)
     run_nlo_command(four.mg5_command(cfg, group / 'cards/process_card.dat'), cfg, group, 'export', deadline=deadline)
+    if cfg.preset == "minimal":
+        from hfourlepton.minimal_runtime import configure_export
+        configure_export(process_dir, sample, cfg)
     if not cfg.dry_run:
         ho.patch_mg5_fortran(process_dir)
     command = [process_dir / 'bin/aMCatNLO', group / 'cards/compile.mg5']
@@ -439,7 +449,10 @@ def herwig_card(sample, lhe, seed, count, cfg):
 
 def write_herwig_input(sample, lhe, seed, count, output, cfg):
     text = herwig_card(sample, lhe, seed, count, cfg)
-    four.write_text(output, text, cfg, "matched four-lepton Herwig card")
+    # Completion evidence includes the card's mtime as well as its checksum.
+    # Sharing or resuming a shower must not rewrite an identical card.
+    if cfg.dry_run or not output.exists() or output.read_text() != text:
+        four.write_text(output, text, cfg, "matched four-lepton Herwig card")
     return {"prompt_selection": None, "decay_bias": {"enabled": False},
             "branching_ratio_reweighter": False, "handlers": []}
 
@@ -458,7 +471,7 @@ def logged_command(argv, cfg, cwd, log):
 
 
 def run_shower(sample, lhe, cfg):
-    work = four.sample_work_dir(sample, cfg)
+    work = four.shower_work_dir(sample, cfg)
     directory = work / "herwig"
     four.ensure_dir(directory / "events", cfg)
     card_path = directory / f"{sample.name}.in"
@@ -469,6 +482,8 @@ def run_shower(sample, lhe, cfg):
     metadata = write_herwig_input(sample, lhe, four.seed_for(f"{sample.name}:herwig", cfg), cfg.events_for(sample), card_path, cfg)
     if not cfg.dry_run and marker.exists():
         saved = json.loads(marker.read_text())
+        if cfg.preset == "minimal" and saved.get("input_lhe_sha256") != four.sha256_file(lhe):
+            raise ValueError(f"shared shower LHE changed: {lhe}; use a new tag")
         completion.validate_completion(saved, {"sample": sample.name,
             "nevents_requested": cfg.events_for(sample), "lhe": {"events": saved["lhe_events"]}})
         # The completion validator verifies file provenance when a directory is supplied.
@@ -492,6 +507,8 @@ def run_shower(sample, lhe, cfg):
             lhe_count = sum(line.strip() == "</event>" for line in stream)
         saved = completion.build_completion(directory, sample.name, cfg.events_for(sample), lhe_count, root_info, termination)
         saved["source_weights"] = completion.source_weight_summary(lhe, saved["attempted_events"])
+        if cfg.preset == "minimal":
+            saved["input_lhe_sha256"] = four.sha256_file(lhe)
         saved["fingerprint"] = completion.completion_fingerprint(saved)
         completion.validate_completion(saved, {"sample": sample.name,
             "nevents_requested": cfg.events_for(sample), "lhe": {"events": saved["lhe_events"]}})

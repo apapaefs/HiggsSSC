@@ -162,6 +162,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="disable the automatic platform Herwig module default",
     )
     parser.add_argument("--skip-build", action="store_true", help="require an existing pwhg_main executable")
+    parser.add_argument("--seed-base", type=int, default=None,
+                        help="generate an independent deterministic seed list instead of the supplied default list")
     parser.add_argument(
         "--status",
         action="store_true",
@@ -559,18 +561,26 @@ def seed_event_targets(groups: Iterable[tuple[int, list[int]]]) -> dict[int, int
     return {seed: events for events, seeds in groups for seed in seeds}
 
 
-def copy_or_make_seeds(powheg_dir: Path, run_dir: Path, nseeds: int, resume: bool, dry_run: bool) -> None:
+def copy_or_make_seeds(powheg_dir: Path, run_dir: Path, nseeds: int, resume: bool, dry_run: bool,
+                       seed_base: int | None = None) -> None:
     source = powheg_dir / "suggested_run" / "pwgseeds.dat"
     target = run_dir / "pwgseeds.dat"
+    explicit = None
+    if seed_base is not None:
+        if not 0 < seed_base < 900000000:
+            raise ValueError("--seed-base must be between 1 and 899999999")
+        explicit = [str(1 + (seed_base + 104729 * i) % 900000000) for i in range(nseeds)]
     if resume and target.exists():
+        if explicit is not None and target.read_text().split() != explicit:
+            raise ValueError(f"saved POWHEG seeds differ: {target}; use a new run directory")
         print(f"+ resume: keep existing {target}")
         return
     if dry_run:
         print(f"+ write {target} with {nseeds} seed entries")
         return
 
-    seeds: list[str] = []
-    if source.exists():
+    seeds: list[str] = explicit or []
+    if explicit is None and source.exists():
         for line in source.read_text().splitlines():
             line = line.strip()
             if line:
@@ -889,7 +899,7 @@ def main() -> None:
         timings = run_dir / "Timings.txt"
         if not args.resume or not timings.exists():
             timings.write_text("")
-    copy_or_make_seeds(powheg_dir, run_dir, nseeds, args.resume, args.dry_run)
+    copy_or_make_seeds(powheg_dir, run_dir, nseeds, args.resume, args.dry_run, args.seed_base)
 
     print(f"Requested {args.nevents} LHE events over {nseeds} POWHEG seed job(s).")
     print(f"Beam setup: pp at sqrt(s) = {2 * args.ebeam:g} GeV ({args.ebeam:g} GeV per beam).")

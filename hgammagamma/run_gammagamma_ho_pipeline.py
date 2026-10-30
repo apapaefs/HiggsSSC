@@ -34,6 +34,8 @@ except ImportError:
     import run_gammagamma_ho_campaign as ho_campaign
 
 REPO = Path(__file__).resolve().parent.parent
+if str(REPO) not in sys.path:
+    sys.path.insert(0, str(REPO))
 HO = REPO / "hgammagamma/HOAnalysis"
 POWHEG_URL = "https://gitlab.com/POWHEG-BOX/V2/POWHEG-BOX-V2.git"
 POWHEG_COMMIT = "d20df70ba6708da3978d5ab32d91b2a069457c1a"
@@ -217,6 +219,10 @@ class Pipeline:
                         OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", MKL_NUM_THREADS="1")
         self.mg5 = self.work / "MG5_aMC_v3_5_15"
         _known, ninja = self.recorded_ninja()
+        from hfourlepton.minimal_runtime import library_directory
+        collier = getattr(args, "collier_dir", None) or library_directory(self.mg5, "collier")
+        if collier is None or collier.is_dir() or args.action != "setup":
+            self.activate_ninja_runtime(collier)
         self.activate_ninja_runtime(ninja)
         self.powheg = self.work / "POWHEG-BOX-V2"
         self.cuba = self.work / "cuba"
@@ -329,7 +335,7 @@ class Pipeline:
         if directory is None:
             return
         if not directory.is_dir():
-            raise ValueError(f"recorded MG5 Ninja library directory is missing: {directory}")
+            raise ValueError(f"recorded MG5 loop-library directory is missing: {directory}")
         # MG5 links the configured quad-capable Ninja but emits no RUNPATH.
         # A site's ordinary Ninja can have the same SONAME and omit quad
         # symbols. Restore the configured library before inherited site paths
@@ -452,7 +458,18 @@ class Pipeline:
         # defaults internally and writes this file on its first invocation.
         original = cfg.read_text() if cfg.exists() else ""
         text = original
-        values = {"ninja": str(ninja) if ninja else "None", "collier": "None", "auto_update": "0",
+        from hfourlepton.minimal_runtime import collier_available, library_directory, validate_libraries
+        requested_collier = getattr(self.args, "collier_dir", None)
+        configured_collier = library_directory(self.mg5, "collier")
+        candidates = ([requested_collier] if requested_collier else [configured_collier] if configured_collier else
+                      [self.mg5 / "HEPTools/collier", self.work / "HEPTools/collier", REPO / "HEPTools/collier",
+                       *sorted(self.prefix.glob("opt/MG5*/HEPTools/collier"))])
+        collier = next((p for p in candidates if collier_available(p)), None)
+        if (requested_collier or configured_collier) and collier is None:
+            raise ValueError("--collier-dir must contain libcollier.a and modules/collier.mod (or ../include/collier.mod)")
+        self.activate_ninja_runtime(collier)
+        self.activate_ninja_runtime(ninja)
+        values = {"ninja": str(ninja) if ninja else "None", "collier": str(collier) if collier else "None", "auto_update": "0",
                   "fortran_compiler": self.config["fc"], "cpp_compiler": self.config["cxx"],
                   "fastjet": self.capture(["which", "fastjet-config"]),
                   "lhapdf": self.capture(["which", "lhapdf-config"])}
@@ -464,6 +481,20 @@ class Pipeline:
             if cfg.exists() and not backup.exists():
                 shutil.copy2(cfg, backup)
             cfg.write_text(text)
+
+        if getattr(self.args, "preset", "standard") == "minimal" and collier is None:
+            # Executed only by the user's setup action. Use MG5's supported
+            # installer in this private installation, with the chosen compilers.
+            card = self.work / "checks/install-collier.mg5"
+            card.parent.mkdir(parents=True, exist_ok=True)
+            card.write_text("set automatic_html_opening False --no_save\n"
+                            "set heptools_install_dir None --no_save\ninstall collier\nquit\n")
+            self.call("install-collier", [self.python, self.mg5 / "bin/mg5_aMC", card], mg5=True)
+            collier = library_directory(self.mg5, "collier")
+            self.activate_ninja_runtime(collier)
+            self.activate_ninja_runtime(ninja)
+        if getattr(self.args, "preset", "standard") == "minimal":
+            validate_libraries(self.mg5)
 
         if self.workflow.endswith("-ho"):
             # MG5 sometimes exits zero even when exporting a process failed. Test
@@ -485,7 +516,8 @@ class Pipeline:
         self.record_component("mg5", {"commit": MG5_COMMIT,
                               "configuration_sha256": digest(cfg),
                               "startup_sha256": digest(self.mg5 / "bin/mg5_aMC"),
-                              "ninja": str(ninja) if ninja else None})
+                              "ninja": str(ninja) if ninja else None,
+                              "collier": str(collier) if collier else None})
         if self.workflow == "gammagamma-lo":
             self.install_lo_model()
 

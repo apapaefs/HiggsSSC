@@ -105,6 +105,22 @@ writes inputs without running generators. Follow the
 [four-lepton HO run guide](hfourlepton/HIGHER_ORDER.md) for both energy-specific
 pilots and the subsequent validation. Numerical LHC validation awaits those runs.
 
+For a smaller complete student campaign, use `--preset minimal`. It includes
+all 27 HO samples with process-dependent counts (231,000 events in total):
+
+```bash
+python3 run_pipeline.py prepare --workflow fourlepton-ho --preset minimal \
+  --energy-tev 13 --run-tag fourl13_minimal --jobs 40
+python3 run_pipeline.py run --workflow fourlepton-ho --preset minimal \
+  --energy-tev 13 --run-tag fourl13_minimal --jobs 40
+```
+
+First complete setup and the energy-specific pilot described in the
+[minimal-preset guide](hfourlepton/HIGHER_ORDER.md#minimal-student-preset).
+Add `--event-multiplier 2` with a new tag to double every sample; use
+`--energy-tev 40` and a separate tag for the SSC. The 1–2 day target on 40 cores
+still needs a full timing run. You launch all simulations yourself.
+
 ## Next steps and references
 
 - [Additional cuts and optional XGBoost](docs/ANALYSIS.md).

@@ -1,10 +1,12 @@
 """Managed four-lepton HO workflow; preparation never runs generators."""
 import json
+from dataclasses import replace
 from pathlib import Path
 from hgammagamma import run_gammagamma_ho_pipeline as shared
 from hgammagamma import run_ihixs_normalization as ihixs
 from hfourlepton import run_four_lepton_campaign as four
 from hfourlepton import higher_order
+from hfourlepton import presets
 from hfourlepton import run_powheg_vbf as vbf
 
 REPO = Path(__file__).resolve().parents[1]
@@ -22,25 +24,32 @@ def configuration(args):
     return json.loads((REPO / f"hfourlepton/campaign_cards/{'lhc13' if args.energy_tev == 13 else 'ssc40'}.json").read_text())
 
 
+def planning_config(args):
+    event_options = presets.arguments(args) or ["--nevents", str(args.nevents)]
+    return four.parse_config(["--order", "ho", "--signal-modes", "all", "--run-tag", args.run_tag,
+        *event_options, "--nb-core", str(args.jobs), "--ebeam", str(500 * args.energy_tev),
+        "--higgs-mass", "125", "--seed-base", "31122002", "--detector-response", "perfect",
+        "--selection-profile", selection(args), "--dry-run"])
+
+
 def prepare(args):
     """Write reviewable generator cards and sample inventory, without launching jobs."""
     destination = REPO / "hfourlepton/plans" / args.run_tag
     directory = REPO / "hfourlepton/runs" / args.run_tag
-    cfg = four.parse_config(["--order", "ho", "--signal-modes", "all", "--run-tag", args.run_tag,
-        "--nevents", str(args.nevents), "--nb-core", str(args.jobs), "--ebeam", str(500 * args.energy_tev),
-        "--higgs-mass", "125", "--seed-base", "31122002", "--detector-response", "perfect",
-        "--selection-profile", selection(args), "--dry-run"])
+    cfg = planning_config(args)
     samples = higher_order.selected_samples(cfg)
     groups = {}
     for sample in samples:
         groups.setdefault(sample.production_group_id, sample)
     plan = {"schema_version": 1, "configuration": configuration(args), "run_tag": args.run_tag,
-            "events_per_sample": args.nevents, "jobs": args.jobs, "status": "prepared_not_run",
-            "higgs_events_per_production_group": 3 * args.nevents,
+            "events_per_sample": None if cfg.preset == "minimal" else args.nevents,
+            "jobs": args.jobs, "status": "prepared_not_run", "sampling": presets.description(args),
+            "higgs_events_per_production_group": None if cfg.preset == "minimal" else 3 * args.nevents,
+            "production_events": {name: four.group_event_count(name, samples, cfg) for name in groups},
             "decay_sampling": "disjoint hard-event slices; independent events for 4e, 4mu, 2e2mu",
             "samples": [{"name": s.name, "production_group": s.production_group_id,
                          "process": s.process, "order": s.perturbative_order,
-                         "matching": s.matching, "pdf": s.pdf_name} for s in samples]}
+                         "matching": s.matching, "pdf": s.pdf_name, "nevents": cfg.events_for(s)} for s in samples]}
     shared.frozen(destination / "plan.json", plan)
     for name, sample in groups.items():
         procdir = directory / "production" / name / "mg5_process"
@@ -55,18 +64,25 @@ def prepare(args):
             ihixs.write_same_or_new(destination / name / "compile.mg5", higher_order.nlo_compile_card(launch))
             ihixs.write_same_or_new(destination / name / "launch.mg5", launch)
         else:
-            process = four.process_card_text(sample, procdir)
+            process = four.process_card_text(sample, procdir, cfg)
             ihixs.write_same_or_new(destination / name / "run_settings.json", json.dumps({
                 "nevents": four.group_event_count(name, samples, cfg), "seed": four.seed_for(name, cfg),
                 "ebeam_gev": cfg.ebeam, "lhaid": sample.lhaid, "higgs_mass_gev": cfg.higgs_mass,
                 "generation_cuts": higher_order.GENERATION_CUTS,
+                "minimal_runtime": presets.description(cfg),
                 "applied_by": "run_four_lepton_campaign.patch_run_card"}, indent=2) + "\n")
         ihixs.write_same_or_new(destination / name / "process.mg5", process)
+        if cfg.preset == "minimal":
+            from hfourlepton.minimal_runtime import continuum_cut
+            order = "7|6|1" if sample.name.startswith("bkg_gg_") else "6|7|1"
+            ihixs.write_same_or_new(destination / name / "MadLoopParams.override", f"#MLReductionLib\n{order}\n")
+            if not sample.is_signal and not cfg.wide_continuum:
+                ihixs.write_same_or_new(destination / name / "dummy_cuts.f", continuum_cut(sample.matching == "MC@NLO"))
     for sample in samples:
         filename = "unweighted_events.lhe.gz" if sample.matching == "LO" else "events.lhe.gz"
         lhe = four.sample_decay_dir(sample, cfg) / "stable_input_decayed.lhe.gz" if sample.is_signal else directory / "production" / sample.production_group_id / "mg5_process/Events" / args.run_tag / filename
         ihixs.write_same_or_new(destination / sample.name / "herwig.in",
-            higher_order.herwig_card(sample, lhe, four.seed_for(f"{sample.name}:herwig", cfg), args.nevents, cfg))
+            higher_order.herwig_card(sample, lhe, four.seed_for(f"{sample.name}:herwig", cfg), cfg.events_for(sample), cfg))
         if sample.is_signal:
             source = four.sample_decay_dir(sample, cfg) / "stable_input.lhe"
             ihixs.write_same_or_new(destination / sample.name / "madspin.dat",
@@ -75,6 +91,10 @@ def prepare(args):
     ihixs.write_same_or_new(destination / "ihixs.json", json.dumps(settings, indent=2) + "\n")
     ihixs.write_same_or_new(destination / "powheg.input", card)
     print(f"Prepared {len(samples)} samples / {len(groups)} hard-production groups: {destination}")
+    print(f"Total hard events: {sum(cfg.events_for(s) for s in samples):,}")
+    if cfg.preset == "minimal":
+        window = "wide continuum generation" if cfg.wide_continuum else "90–180 GeV continuum window"
+        print(f"Minimal multiplier {args.event_multiplier}; {min(8, args.jobs)} postprocessing workers; {window}")
     return destination
 
 
@@ -95,7 +115,7 @@ def campaign_arguments(pipeline, profile):
     tag = "lhc13" if args.energy_tev == 13 else "ssc40"
     return ["--order", "ho", "--signal-modes", "all",
             "--selection-profile", selection(args), "--detector-response", profile,
-            "--run-tag", args.run_tag, "--nevents", args.nevents, "--nb-core", args.jobs,
+            "--run-tag", args.run_tag, *(presets.arguments(args) or ["--nevents", args.nevents]), "--nb-core", args.jobs,
             "--ebeam", args.energy_tev * 500, "--mg5-dir", pipeline.mg5, "--mg5-python", pipeline.python,
             "--higgs-mass", "125", "--no-herwig-env", "--no-herwig-module",
             "--signal-lhe", args.signal_lhe or directory / "powheg/powheg-hjminnlo-merged.lhe",
@@ -112,6 +132,20 @@ def repair_madspin(pipeline):
 def run(pipeline):
     args = pipeline.args
     pipeline.check()
+    cfg = planning_config(args)
+    samples = higher_order.selected_samples(cfg)
+    if cfg.preset == "minimal":
+        from hfourlepton.minimal_runtime import validate_libraries
+        validate_libraries(pipeline.mg5)
+        prepare(args)
+        for mode, source in (("ggf", args.signal_lhe), ("vbf", args.vbf_lhe)):
+            if source:
+                sample = next(s for s in samples if s.production_mode == mode)
+                info = higher_order.inspect_production(source, sample, replace(cfg, dry_run=False))
+                needed = four.group_event_count(sample.production_group_id, samples, cfg)
+                if info["events"] < needed:
+                    raise ValueError(f"{source} has {info['events']} events; minimal {mode} needs {needed} "
+                                     "across its decay channels. Omit this LHE override to generate a new file.")
     directory = REPO / "hfourlepton/runs" / args.run_tag
     directory.mkdir(parents=True, exist_ok=True)
     tag = "lhc13" if args.energy_tev == 13 else "ssc40"
@@ -135,13 +169,13 @@ def run(pipeline):
         raise ValueError("ihixs record has the wrong collider energy")
     if not args.signal_lhe:
         pipeline.call(args.run_tag + "-powheg", [pipeline.python, REPO / "hgammagamma/run_powheg_hjminnlo.py",
-            "--nevents", 3 * args.nevents, "--jobs", args.jobs, "--ebeam", args.energy_tev * 500,
+            "--nevents", four.group_event_count("signal_gg_h_stable", samples, cfg), "--jobs", args.jobs, "--ebeam", args.energy_tev * 500,
             "--powheg-dir", pipeline.powheg / "HJ/HJMiNNLO", "--run-dir", directory / "powheg",
-            "--card", card, "--no-herwig-env", "--no-herwig-module", "--skip-build", "--resume"])
+            "--card", card, "--no-herwig-env", "--no-herwig-module", "--skip-build", "--resume",
+            *(["--seed-base", cfg.seed_base] if cfg.preset == "minimal" else [])])
     if not args.vbf_lhe:
-        cfg = four.parse_config(['--order', 'ho', '--run-tag', args.run_tag, '--seed-base', '31122002', '--dry-run'])
         pipeline.call(args.run_tag + '-powheg-vbf', [pipeline.python, REPO / 'hfourlepton/run_powheg_vbf.py',
-            '--nevents', 3 * args.nevents, '--jobs', args.jobs, '--ebeam', args.energy_tev * 500,
+            '--nevents', four.group_event_count("signal_vbf_h_stable", samples, cfg), '--jobs', args.jobs, '--ebeam', args.energy_tev * 500,
             '--powheg-dir', pipeline.powheg / 'VBF_H', '--run-dir', directory / 'powheg-vbf',
             '--seed', four.seed_for('signal_vbf_h_stable', cfg)])
     for profile in profiles(args):

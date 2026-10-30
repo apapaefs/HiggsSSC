@@ -6,6 +6,115 @@ validation remain separate steps. Start with the pilots below before choosing
 larger samples. The [VBF investigation](validation/VBF_BACKEND.md) explains the
 switch from MG5 VBF to POWHEG `VBF_H` and records what was tested.
 
+## Minimal student preset
+
+Use `--preset minimal` for a smaller complete campaign, designed around a
+40-core allocation and a 1–2 day **target per collider energy**. The runtime
+target needs a full timing run; it is not a measured completion time or a
+deadline enforced by the runner. No production run is launched by `prepare`.
+
+All 27 samples are included. The default event counts below apply separately
+to each of `4e`, `4mu` and `2e2mu`:
+
+| Process | Events per decay channel | Production treatment |
+| --- | ---: | --- |
+| ggF Higgs | 20,000 | HJMiNNLO + ihixs N3LO normalization |
+| VBF Higgs | 10,000 | POWHEG VBF_H NLO+PS |
+| W+H, W−H, qqZH, ttH (each) | 5,000 | MC@NLO |
+| ggZH | 5,000 | Loop-induced LO |
+| qq → 4ℓ | 20,000 | MC@NLO |
+| gg → 4ℓ | 2,000 | Loop-induced LO |
+
+This totals **231,000 hard events**, with disjoint Higgs-event slices for the
+three decay channels. Zbb, ttZ and ttbar remain separate reducible-background
+control studies. The minimal preset does not change PDFs, matching, signal
+branching fractions, detector resolutions, analysis observables or the full
+109-point ihixs calculation. An existing valid normalization record is reused.
+
+Install/check the loop libraries and optional XGBoost dependencies first:
+
+```bash
+python3 run_pipeline.py setup --workflow fourlepton-ho --preset minimal --with-ml
+python3 run_pipeline.py check --workflow fourlepton-ho --preset minimal --with-ml
+```
+
+Setup preserves a configured COLLIER installation, otherwise looks for one
+locally and in the shared runtime. If none is available, minimal setup uses
+MG5's COLLIER installer inside the private installation. To choose an existing
+build, add `--collier-dir /path/to/collier` to `setup`; that directory must contain
+`libcollier.a` and `modules/collier.mod` (or `../include/collier.mod`). Ninja/OneLOop
+is discovered from the shared Herwig installation or selected with `--ninja-dir`.
+The libraries must use compatible Fortran compilers. Library hashes, generated
+cards and the resolved event budget are recorded with the campaign.
+
+For a fresh installation, first run a small execution check:
+
+```bash
+python3 run_pipeline.py run --workflow fourlepton-ho --preset minimal \
+  --energy-tev 13 --run-tag fourl13_minimal_check --jobs 40 --event-multiplier 0.0015
+```
+
+That check generates at most 30 events per sample and cannot establish physics
+precision. An existing completed pilot at the same energy also satisfies the
+managed pilot prerequisite. Then prepare and launch the nominal minimal set:
+
+```bash
+python3 run_pipeline.py prepare --workflow fourlepton-ho --preset minimal \
+  --energy-tev 13 --run-tag fourl13_minimal --jobs 40
+python3 run_pipeline.py run --workflow fourlepton-ho --preset minimal \
+  --energy-tev 13 --run-tag fourl13_minimal --jobs 40
+```
+
+For 40 TeV, use `--energy-tev 40` and a different tag, such as
+`fourl40_minimal`; that energy requires its own pilot. The `perfect` and `ssc`
+analyses share one shower output per sample, with separate detector analyses.
+Hard production uses up to 40 cores, one production group at a time. Afterwards,
+up to eight sample workers each receive five MadSpin cores; their showers and
+analyses run independently. With other `--jobs` values, the worker allocation
+is reduced automatically. Logs are in `runs/TAG/workers/PROFILE/SAMPLE.log`;
+only the coordinator updates the main manifest. On a worker failure, other
+active workers finish, queued work stops, and completed outputs are preserved.
+
+Increase **all** counts uniformly with a multiplier and a new tag:
+
+```bash
+python3 run_pipeline.py run --workflow fourlepton-ho --preset minimal \
+  --energy-tev 13 --run-tag fourl13_minimal_x2 --jobs 40 --event-multiplier 2
+```
+
+Multiplier 2 means 462,000 events; multiplier 10 means 2,310,000. Fractional
+counts round upwards per sample. `--nevents` and per-sample overrides cannot
+be combined with this preset. Repeat the original command to resume; changing
+the multiplier requires a new tag. New generated campaigns use tag-dependent
+seeds. They are complete replacement datasets, not automatic additions to old
+campaigns. Do not concatenate campaigns sharing an external LHE input. Integration
+grids are shared by the decay channels within a production group, but are not
+automatically transferred between campaign tags.
+
+The runtime settings use external loop libraries, COLLIER first for gg → 4ℓ
+(`7|6|1`) and Ninja first elsewhere (`6|7|1`). Loop-induced generation uses
+sampled helicities (`nhel=1`) and explicit survey splitting across the assigned
+cores. Loop survey accuracy
+is 5%; MC@NLO uses `req_acc=0.03`, independently of the event multiplier.
+Numerical-stability and pole-cancellation checks are unchanged. These integration
+targets are not uncertainties on final selected yields.
+
+Continuum generation uses **90 ≤ m4ℓ ≤ 180 GeV**, summing the four hard charged
+leptons and excluding QCD radiation. The usual off-shell amplitudes and
+same-flavour interference are included. This window needs a migration check
+against an independent campaign with `--wide-continuum`, particularly for the
+SSC response and QED radiation. That option removes only the m4ℓ generation
+window; the loose lepton generation cuts still apply. No numerical closure or
+LHC validation is claimed by selecting the preset.
+
+Run the usual `cuts`, `xgboost` and 13 TeV `validate` actions on the completed tag.
+The saved preset selects default background effective-count requirements of
+400 after cuts (about 5% MC precision) and 100 for the XGBoost test selection
+(about 10%). These use signed weights. The analysis suppresses a sensitivity
+claim below those thresholds; increase statistics if needed. An explicit
+`--config` uses that analysis card's own thresholds. Omitting `--preset minimal`
+for a new campaign keeps the original uniform-count workflow.
+
 ## Prepare and launch
 
 Run these commands from the repository root. `prepare` writes review cards
@@ -52,7 +161,8 @@ the original `run` command to resume completed stages. Existing mismatched or
 partial outputs cause an error rather than automatic replacement.
 
 If an older checkout failed at the first WH decay with
-`InvalidParamCard: parameter yukawa: 5 is not at zero`, update the repository.
+`InvalidParamCard: parameter yukawa: 5 is not at zero`, revision `31b4a30`
+corrected that failure.
 The old banner validator mistook the `loop_sm-no_b_mass` card for incomplete
 metadata and inserted massive-bottom parameters into a massless-bottom model.
 The corrected validator accepts the model's zero bottom mass and omitted
@@ -61,7 +171,10 @@ declared model's restriction card. This also covers W−H, qqZH, ggZH and ttH.
 
 For the affected 13 TeV pilot, with only the six ggF/VBF samples complete and
 the first WH decay failed, run the bounded recovery command using the original
-options (including any input overrides):
+options (including any input overrides) **from that audited revision**.
+The recovery deliberately rejects later source versions, including the minimal
+preset implementation. A completed pilot does not need this repair. Do not
+change its hash allowlist to bypass the version check.
 
 ```bash
 python3 run_pipeline.py repair-madspin --workflow fourlepton-ho \

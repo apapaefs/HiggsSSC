@@ -579,6 +579,46 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual((root / "source-packaging/create_release.py").read_text(),
                              "synthetic upstream release utility")
 
+    def test_minimal_setup_installs_missing_collier_privately_and_preserves_it(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            obj, _ = self.fixture(root)
+            obj.args.workflow, obj.args.preset, obj.args.collier_dir = "fourlepton-ho", "minimal", None
+            obj.env = {"LD_LIBRARY_PATH": "/shared/lib"}
+            obj.capture = mock.Mock(return_value="/shared/bin/tool")
+            (obj.mg5 / "bin").mkdir(parents=True)
+            (obj.mg5 / "bin/mg5_aMC").write_text("synthetic entrypoint")
+            (obj.mg5 / "input").mkdir()
+            ninja = obj.prefix / "opt/MG5-selected/HEPTools/ninja/lib"
+            collier = obj.mg5 / "HEPTools/lib"
+            for path in (ninja / "libninja.a", ninja / "libavh_olo.a", ninja.parent / "include/mninja.mod"):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("synthetic library")
+            calls = []
+            def call(label, command, cwd=None, **kwargs):
+                calls.append(label)
+                if label == "install-collier":
+                    for path in (collier / "libcollier.a", collier.parent / "include/collier.mod"):
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_text("synthetic library")
+                    with (obj.mg5 / "input/mg5_configuration.txt").open("a") as config:
+                        config.write(f"collier = {collier}\n")
+                elif label == "check-mg5-export":
+                    card = Path(cwd) / "process/Cards/run_card.dat"
+                    card.parent.mkdir(parents=True)
+                    card.write_text("synthetic export")
+                else:
+                    self.fail(f"unexpected command: {label}")
+            obj.call = call
+            with mock.patch.object(pipeline, "prepare_mg5_archive"), \
+                 mock.patch.object(pipeline, "REPO", root / "repo"), \
+                 mock.patch.object(pipeline.sys, "platform", "linux"):
+                obj.setup_mg5()
+                obj.setup_mg5()
+            self.assertEqual(calls.count("install-collier"), 1)
+            self.assertEqual(obj.components()["mg5"]["collier"], str(collier))
+            self.assertEqual(obj.env["LD_LIBRARY_PATH"].split(":")[:2], [str(ninja), str(collier)])
+
     def test_mg5_zero_exit_error_is_detected_without_poisoning_next_attempt(self):
         with TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()):
             obj = pipeline.Pipeline.__new__(pipeline.Pipeline)

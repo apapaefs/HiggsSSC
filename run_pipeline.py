@@ -17,6 +17,7 @@ import re
 import subprocess
 
 from hgammagamma import run_gammagamma_ho_pipeline as shared
+from hfourlepton import presets
 
 REPO = Path(__file__).resolve().parent
 WORKFLOWS = ("gammagamma-lo", "gammagamma-ho", "fourlepton-lo", "fourlepton-ho")
@@ -33,7 +34,12 @@ def parse_args(argv=None):
     p.add_argument("--workflow", required=True, choices=WORKFLOWS)
     p.add_argument("--work-dir", type=Path, default=REPO / "inputs/pipeline")
     p.add_argument("--run-tag", help="name of this campaign; required for run/status/report/cuts/xgboost")
-    p.add_argument("--nevents", type=int, default=30)
+    p.add_argument("--nevents", type=int, help="uniform events per sample (standard preset; default 30)")
+    p.add_argument("--preset", choices=("standard", "minimal"), default="standard",
+                   help="fourlepton-ho: minimal uses a process-dependent student event budget")
+    p.add_argument("--event-multiplier", default="1", help="scale every minimal-preset event count (default 1)")
+    p.add_argument("--wide-continuum", action="store_true",
+                   help="minimal preset: omit the 90–180 GeV generation window for migration checks")
     p.add_argument("--jobs", type=int, default=4)
     p.add_argument("--luminosity-fb", type=float, default=100.)
     p.add_argument("--energy-tev", type=int, choices=(13, 40), default=40,
@@ -44,6 +50,7 @@ def parse_args(argv=None):
     p.add_argument("--cxx", default=None)
     p.add_argument("--fc", default=None)
     p.add_argument("--ninja-dir", type=Path)
+    p.add_argument("--collier-dir", type=Path, help="setup: directory containing libcollier and its Fortran module")
     p.add_argument("--with-ml", action="store_true", help="include optional XGBoost dependencies during setup/check")
     p.add_argument("--signal-lhe", type=Path, help="HO only: reuse a compatible ggF signal LHE")
     p.add_argument("--vbf-lhe", type=Path, help="fourlepton-ho: reuse a compatible POWHEG VBF_H LHE")
@@ -51,6 +58,20 @@ def parse_args(argv=None):
     p.add_argument("--config", type=Path, help="optional cuts/XGBoost analysis card")
     p.add_argument("--dry-run", action="store_true", help="print the plan without installing or running programs")
     args = p.parse_args(argv)
+    try:
+        args.event_multiplier = str(presets.multiplier(args.event_multiplier).normalize())
+    except ValueError as exc:
+        p.error(str(exc))
+    if args.preset == "minimal":
+        if args.workflow != "fourlepton-ho":
+            p.error("--preset minimal applies only to fourlepton-ho")
+        if args.nevents is not None:
+            p.error("use --event-multiplier with --preset minimal, not --nevents")
+    elif args.event_multiplier != "1" or args.wide_continuum:
+        p.error("--event-multiplier and --wide-continuum require --preset minimal")
+    args.nevents = 30 if args.nevents is None else args.nevents
+    if args.collier_dir and args.action != "setup":
+        p.error("--collier-dir applies to setup; subsequent commands use the saved MG5 configuration")
     if args.action not in ("setup", "check") and not args.run_tag:
         p.error("--run-tag is required for this action")
     if args.run_tag and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", args.run_tag):
@@ -71,9 +92,11 @@ def parse_args(argv=None):
         p.error("LHC validation requires --energy-tev 13")
     if args.action == "repair-madspin" and (args.workflow != "fourlepton-ho" or args.energy_tev != 13):
         p.error("repair-madspin applies only to the known fourlepton-ho 13 TeV WH banner failure")
+    if args.action == "repair-madspin" and args.preset == "minimal":
+        p.error("the historical MadSpin repair does not apply to minimal campaigns")
     if args.config and args.action not in ("cuts", "xgboost"):
         p.error("--config applies to cuts/xgboost")
-    for key in ("work_dir", "herwig_env", "ninja_dir", "signal_lhe", "vbf_lhe", "signal_normalization", "config"):
+    for key in ("work_dir", "herwig_env", "ninja_dir", "collier_dir", "signal_lhe", "vbf_lhe", "signal_normalization", "config"):
         value = getattr(args, key)
         if value is not None:
             setattr(args, key, value.expanduser().resolve())
@@ -115,6 +138,8 @@ def identity(args, config):
     result = {"workflow": args.workflow, "run_tag": args.run_tag, "environment": config,
               "nevents": args.nevents, "jobs": args.jobs}
     if args.workflow == "fourlepton-ho":
+        if presets.description(args):
+            result["sampling"] = presets.description(args)
         result["energy_tev"] = args.energy_tev
         result['vbf_backend'] = 'POWHEG VBF_H'
         result['vbf_lhe'] = ({'path': str(args.vbf_lhe), 'sha256': shared.digest(args.vbf_lhe)}
@@ -164,6 +189,12 @@ def progress(args, **values):
 
 
 class StudentPipeline(shared.Pipeline):
+    def check(self):
+        super().check()
+        if self.args.preset == "minimal":
+            from hfourlepton.minimal_runtime import validate_libraries
+            validate_libraries(self.mg5)
+
     def __init__(self, args, config):
         super().__init__(args, config)
         # These legacy shell defaults must not change a saved student campaign.
@@ -176,6 +207,8 @@ class StudentPipeline(shared.Pipeline):
                     self.env.pop(key, None)
         self.env["PATH"] = str(self.python.parent) + ":" + self.env["PATH"]
         self.env["PYTHONNOUSERSITE"] = "1"
+        if args.preset == "minimal":
+            self.env["PYTHONUNBUFFERED"] = "1"
 
     def call(self, label, argv, cwd=None, extra_env=None, mg5=False):
         progress(self.args, state="running", stage=label, log=str(self.logs / (label + ".log")), error=None)
@@ -351,6 +384,12 @@ def downstream_analysis(pipeline):
                        "--manifest", directory / "manifest_perfect.json", "--output-dir", directory / "lhc_validation"]
         else:
             card = args.config or REPO / f"hfourlepton/analysis_cards/{tag}_{args.action}.json"
+            sampling = read_state(args)["identity"].get("sampling")
+            if args.config is None and sampling and sampling["preset"] == "minimal":
+                settings = json.loads(card.read_text())
+                settings["min_background_effective_events"] = 400. if args.action == "cuts" else 100.
+                card = directory / "analysis_cards" / (args.action + ".json")
+                shared.frozen(card, settings)
             command = [pipeline.python, REPO / "hfourlepton/analyze_fourlepton.py", args.action,
                        "--manifest", directory / f"manifest_{profile}.json", "--config", card,
                        "--output-dir", directory / args.action, "--luminosity-fb", args.luminosity_fb]
@@ -412,7 +451,8 @@ def run(pipeline, *, saved_artifacts_checked=False):
             pipeline.call(args.run_tag + "-campaign", campaign_command(pipeline, args.workflow))
         report(pipeline)
     artifacts = physics_artifacts(args)
-    if args.nevents <= 30:
+    from hfourlepton.presets import max_events
+    if max_events(args) <= 30:
         shared.save(pilot_path(args), {"environment": pipeline.config, "artifacts": artifacts})
     progress(args, state="complete", stage="complete", error=None, analysis_artifacts=artifacts)
     print(f"Pipeline complete: {locations(args)[1] / 'index.html'}")
@@ -421,6 +461,10 @@ def run(pipeline, *, saved_artifacts_checked=False):
 def status(args):
     state = read_state(args)
     print(f"{args.workflow}: {args.run_tag}\nState: {state['state']}\nLast recorded stage: {state['stage']}")
+    sampling = state["identity"].get("sampling")
+    if sampling:
+        print(f"Preset: {sampling['preset']}; multiplier: {sampling['event_multiplier']}; "
+              f"requested hard events: {sampling['total_events']:,}")
     if state.get("updated_at"):
         print("Updated:", state["updated_at"])
     log = Path(state["log"]) if state.get("log") else None
@@ -466,6 +510,7 @@ def main(argv=None):
                   "fourlepton-ho": ["energy-specific ihixs and HJMiNNLO", "27 samples / 13 production groups including VBF, VH, ttH", "matched showers and four-body decays", "CMS-like or SSC selection and report"]}
         print(json.dumps({"action": args.action, "workflow": args.workflow, "work_dir": str(args.work_dir),
                           "run_tag": args.run_tag, "nevents": args.nevents, "jobs": args.jobs,
+                          "sampling": presets.description(args),
                           "stages": stages[args.workflow] if args.action == "run" else [args.action],
                           "note": "Small samples still require generator integration; HO includes full normalization."}, indent=2))
         return 0
@@ -484,7 +529,8 @@ def main(argv=None):
     with installation_lock(args.work_dir):
         shared.frozen(args.work_dir / "environment.json", config)
         if args.action == "run":
-            if args.nevents > 30:
+            from hfourlepton.presets import max_events
+            if max_events(args) > 30:
                 verify_pilot(args, config)
             prepare_run(args, config)
             validate_saved_run_artifacts(args)

@@ -31,6 +31,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+from hfourlepton import presets
 DEFAULT_MG5_DIR = REPO_ROOT / "MG5_aMC_v3_5_15"
 DEFAULT_HERWIG_PREFIX = Path.home() / "Projects/Herwig/Herwig-REAL-stable-gcc-full"
 DEFAULT_LINUX_HERWIG_MODULE = "herwig/stable"
@@ -349,6 +350,11 @@ class Config:
     signal_lhe: Path | None = None
     vbf_lhe: Path | None = None
     signal_normalization: Path | None = None
+    preset: str = "standard"
+    event_multiplier: str = "1"
+    wide_continuum: bool = False
+    manifest_override: Path | None = None
+    postprocess_only: bool = False
 
     @property
     def template_in(self) -> Path:
@@ -360,7 +366,7 @@ class Config:
 
     @property
     def manifest_path(self) -> Path:
-        return self.run_dir / f"manifest_{self.detector_response}.json"
+        return self.manifest_override or self.run_dir / f"manifest_{self.detector_response}.json"
 
     @property
     def analysis_code_dir(self) -> Path:
@@ -512,6 +518,9 @@ def guess_collier_library(herwig_env: Path | None) -> Path | None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--preset", choices=("standard", "minimal"), default="standard")
+    parser.add_argument("--event-multiplier", default="1")
+    parser.add_argument("--wide-continuum", action="store_true")
     parser.add_argument("--nevents", type=int, default=env_int("NEVENTS", 10000))
     parser.add_argument(
         "--sample-nevents",
@@ -649,6 +658,26 @@ def parse_config(argv: Sequence[str]) -> Config:
         parser.error(str(error))
 
     sample_nevents = {name: int(value) for name, value in sample_nevents_raw.items()}
+    from hfourlepton import presets
+    try:
+        args.event_multiplier = str(presets.multiplier(args.event_multiplier).normalize())
+    except ValueError as exc:
+        parser.error(str(exc))
+    if args.nb_core < 1:
+        parser.error("--nb-core must be positive")
+    if args.preset == "minimal":
+        if args.order != "ho" or args.sample_set != "irreducible":
+            parser.error("minimal requires --order ho --sample-set irreducible")
+        if args.sample_nevents or any(x == "--nevents" or x.startswith("--nevents=") for x in argv):
+            parser.error("minimal event counts are controlled by --event-multiplier")
+        if args.force:
+            parser.error("minimal campaigns preserve existing work; use a new --run-tag instead of --force")
+        sample_nevents = presets.counts(args.event_multiplier)
+        args.nevents = max(sample_nevents.values())
+        args.seed_base = presets.seed_base(args.run_tag)
+        args.signal_modes = "all"
+    elif args.event_multiplier != "1" or args.wide_continuum:
+        parser.error("--event-multiplier and --wide-continuum require --preset minimal")
     known_names = set(SAMPLES_BY_NAME) | {
         f"{sample.name}_hfbiased" for sample in SAMPLES if sample.heavy_flavour_candidate
     }
@@ -755,6 +784,7 @@ def parse_config(argv: Sequence[str]) -> Config:
         signal_lhe=args.signal_lhe.resolve() if args.signal_lhe else None,
         vbf_lhe=args.vbf_lhe.resolve() if args.vbf_lhe else None,
         signal_normalization=args.signal_normalization.resolve() if args.signal_normalization else None,
+        preset=args.preset, event_multiplier=args.event_multiplier, wide_continuum=args.wide_continuum,
     )
 
 
@@ -1137,6 +1167,10 @@ def mg5_command(cfg: Config, *extra: object) -> list[object]:
 
 
 def madspin_command(cfg: Config, *extra: object) -> list[object]:
+    if cfg.preset == "minimal":
+        from hfourlepton.presets import description
+        return [cfg.mg5_python or sys.executable, SCRIPT_DIR / "madspin_worker.py",
+                "--mg5-dir", cfg.mg5_dir, "--cores", description(cfg)["cores_per_decay"], *extra]
     launcher = cfg.mg5_dir / "MadSpin" / "madspin"
     return [cfg.mg5_python, launcher, *extra] if cfg.mg5_python else [launcher, *extra]
 
@@ -1310,8 +1344,10 @@ def write_text(path: Path, text: str, cfg: Config, description: str) -> None:
         path.write_text(text)
 
 
-def process_card_text(sample: SampleSpec, output_dir: Path) -> str:
-    return f"""import model {sample.model}
+def process_card_text(sample: SampleSpec, output_dir: Path, cfg: Config | None = None) -> str:
+    options = ("set automatic_html_opening False --no_save\nset output_dependencies external --no_save\n"
+               if cfg is not None and cfg.preset == "minimal" else "")
+    return options + f"""import model {sample.model}
 define p = g u c d s b u~ c~ d~ s~ b~
 define j = g u c d s b u~ c~ d~ s~ b~
 define l+ = e+ mu+
@@ -1329,7 +1365,7 @@ def write_mg5_process_card(
     output_dir: Path,
     cfg: Config,
 ) -> None:
-    write_text(card, process_card_text(sample, output_dir), cfg, "MG5 process card")
+    write_text(card, process_card_text(sample, output_dir, cfg), cfg, "MG5 process card")
 
 
 def madspin_card_text(
@@ -1391,6 +1427,8 @@ def patch_run_card(
                 "drll": str(generation_cuts(cfg)["drll_min"]),
             }
         )
+    if cfg.preset == "minimal" and sample.perturbative_order == "LO_loop_induced":
+        updates.update(nhel="1", survey_splitting=str(cfg.nb_core))
     if cfg.dry_run:
         print(f"+ patch run card {card}: " + " ".join(f"{k}={v}" for k, v in updates.items()))
         return
@@ -1406,6 +1444,9 @@ def patch_run_card(
                 line = f"{indent}{updates[key]:>12}{separator}{key}{tail.rstrip()}{newline}"
                 found.add(key)
         output.append(line)
+    for key in ("nhel", "survey_splitting"):
+        if key in updates and key not in found:
+            output.append(f"\n {updates[key]} = {key}\n")
     card.write_text("".join(output))
     required = {"nevents", "ebeam1", "ebeam2", "iseed", "pdlabel", "lhaid"}
     if has_me_leptons:
@@ -3164,6 +3205,12 @@ def sample_work_dir(sample: SampleSpec, cfg: Config) -> Path:
     return cfg.run_dir / "samples" / cfg.detector_response / sample.name
 
 
+def shower_work_dir(sample: SampleSpec, cfg: Config) -> Path:
+    if cfg.preset == "minimal":
+        return cfg.run_dir / "samples" / "shared" / sample.name
+    return sample_work_dir(sample, cfg)
+
+
 def sample_decay_dir(sample: SampleSpec, cfg: Config) -> Path:
     """Profile-independent forced-decay products shared by perfect and SSC."""
 
@@ -3367,6 +3414,10 @@ def campaign_tracked_inputs(cfg: Config) -> dict[str, dict[str, object]]:
         paths["herwig_b_decays"] = cfg.herwig_b_decays
     if cfg.order == "ho":
         paths["higher_order_adapter"] = SCRIPT_DIR / "higher_order.py"
+        if cfg.preset == "minimal":
+            for name in ("presets", "minimal_runtime", "madspin_worker"):
+                paths[name] = SCRIPT_DIR / (name + ".py")
+            paths["mg5_configuration"] = cfg.mg5_dir / "input/mg5_configuration.txt"
         paths["mg5_guard"] = SCRIPT_DIR / "mg5_guard.py"
         paths["powheg_vbf"] = SCRIPT_DIR / "run_powheg_vbf.py"
         paths["matched_template"] = REPO_ROOT / "hgammagamma/HOAnalysis/HW-LHE.in"
@@ -3403,6 +3454,7 @@ def configuration_fingerprint(
     if software_versions is None:
         software_versions = campaign_software_versions(cfg)
     payload = {
+        "sampling": presets.description(cfg),
         "order": cfg.order,
         "selection_profile": cfg.selection_profile,
         "signal_modes": cfg.signal_modes,
@@ -3466,6 +3518,7 @@ def build_manifest(
     software_versions = campaign_software_versions(cfg)
     return {
         "schema_version": MANIFEST_SCHEMA_VERSION,
+        "sampling": presets.description(cfg),
         "analysis": "H_to_ZZstar_to_4l",
         "status": "planned",
         "run_tag": cfg.run_tag,
@@ -3708,6 +3761,8 @@ def run_generate_events(
         "-f",
         f"--nb_core={cfg.nb_core}",
     ]
+    if cfg.preset == "minimal":
+        command.append("--accuracy=0.05")
     run_runtime_command(
         command,
         cfg,
@@ -3723,7 +3778,8 @@ def production_stage_identity(
     process_dir: Path,
     cfg: Config,
 ) -> dict[str, object]:
-    process_card = process_card_text(representative, process_dir)
+    process_card = process_card_text(representative, process_dir, cfg)
+    from hfourlepton.minimal_runtime import production_settings
     return {
         "schema_version": 1,
         "production_group_id": sample.production_group_id,
@@ -3742,6 +3798,7 @@ def production_stage_identity(
         "higgs_mass_gev": cfg.higgs_mass,
         "pdf_lhaid": sample.lhaid,
         "generator_cuts": generation_cuts(cfg),
+        "runtime": production_settings(representative, cfg),
         "mg5_version": mg5_version(cfg.mg5_dir),
         "runner_sha256": sha256_file(Path(__file__).resolve()),
         "collier_library_sha256": (
@@ -3791,11 +3848,17 @@ def obtain_mg5_lhe(
             "use a new --run-tag (or explicitly --force to replace it)"
         )
 
+    if cfg.postprocess_only:
+        raise ValueError(f"production is not complete: {process_dir}")
     card_dir = group_dir / "cards"
     card = card_dir / "process_card.dat"
     ensure_dir(card_dir, cfg)
     write_mg5_process_card(card, representative, process_dir, cfg)
     run_runtime_command(mg5_command(cfg, card), cfg)
+
+    if cfg.preset == "minimal":
+        from hfourlepton.minimal_runtime import configure_export
+        configure_export(process_dir, representative, cfg)
 
     patch_mg5_toolchain(process_dir, cfg)
     patch_mg5_hidden_pdf_defaults(process_dir, cfg)
@@ -4859,7 +4922,7 @@ def run_sample(
     process_card = production_dir(sample, cfg) / "cards" / "process_card.dat"
     generated_process_dir = production_dir(sample, cfg) / "mg5_process"
     herwig_card = (
-        sample_work_dir(sample, cfg) / "herwig" / f"{sample.name}.in"
+        shower_work_dir(sample, cfg) / "herwig" / f"{sample.name}.in"
     )
     entry["cards"] = {
         "process": card_metadata(process_card, cfg),
@@ -4983,6 +5046,9 @@ def main(argv: Sequence[str]) -> int:
             f"run-samples={cfg.run_samples}"
         )
     require_inputs(cfg, samples)
+    if cfg.preset == "minimal" and not cfg.dry_run:
+        from hfourlepton.minimal_runtime import validate_libraries
+        validate_libraries(cfg.mg5_dir)
 
     planned = build_manifest(cfg, samples)
     existing = load_resumable_manifest(cfg)
@@ -5024,8 +5090,12 @@ def main(argv: Sequence[str]) -> int:
         )
     write_manifest(manifest, cfg)
 
-    for sample in samples:
-        run_sample(sample, samples, manifest, cfg)
+    if cfg.preset == "minimal" and not cfg.dry_run:
+        from hfourlepton.minimal_runtime import execute_campaign
+        execute_campaign(samples, manifest, cfg)
+    else:
+        for sample in samples:
+            run_sample(sample, samples, manifest, cfg)
 
     manifest["status"] = "planned" if cfg.dry_run else "complete"
     write_manifest(manifest, cfg)

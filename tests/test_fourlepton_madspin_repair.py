@@ -22,6 +22,10 @@ class MadSpinRepairTests(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
         patches = [
+            # The fixture synthesizes both sides of an allowed transition.
+            # Keep production's historical hash allowlist fixed; unrelated new
+            # runner features must not broaden the real migration's scope.
+            patch.object(repair, "FIXED_RUNNER", four.sha256_file(Path(four.__file__))),
             patch.object(four, "campaign_software_versions", return_value={"python": "3.9.25", "mg5": "3.5.15", "herwig": "7.3", "root": "6.40"}),
             patch.object(four, "run_runtime_command", side_effect=AssertionError("no generator may run")),
             patch.object(ho, "validate_nlo_pole_checks"),
