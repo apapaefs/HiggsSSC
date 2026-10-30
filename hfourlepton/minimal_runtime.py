@@ -101,16 +101,42 @@ c     HiggsSSC minimal continuum window; all four charged leptons.
 """
 
 
+def validate_export_libraries(process_dir, sample):
+    """Audit MG5 3.5.15's distinct NLO and loop-induced build layouts.
+
+    The FKS exporter writes its main-program link flags in Source/make_opts
+    and its virtual-amplitude flags/includes in SubProcesses/makefile_loop.
+    The loop-induced exporter puts both in MadLoop_makefile_definitions.
+    Read these files as text; evaluating a makefile could execute shell commands.
+    """
+    if sample.matching == "MC@NLO":
+        definitions = (("Source/make_opts", "libcuttools"),
+                       ("SubProcesses/makefile_loop", "LINKLIBS"))
+    elif sample.matching == "LO":
+        definitions = (("SubProcesses/MadLoop_makefile_definitions", "LINK_LOOP_LIBS"),)
+    else:
+        raise ValueError(f"no MG5 loop-export layout for {sample.matching}")
+    for relative, variable in definitions:
+        path = process_dir / relative
+        if not path.is_file():
+            raise ValueError(f"incomplete {sample.matching} MG5 export: missing {path}; inspect the export log")
+        active = "\n".join(line.split("#", 1)[0] for line in path.read_text().splitlines())
+        active = active.replace("\\\n", " ")
+        flags = re.findall(rf"(?m)^[ \t]*{variable}[ \t]*[:+?]?=[ \t]*([^\n]*)", active)
+        if "<Not_found_define_it_yourself>" in active:
+            raise ValueError(f"MG5 could not find a loop-library include directory in {path}; inspect the export log")
+        if not any(all(re.search(rf"(?:^|\s)-l{name}(?:\s|$)", value)
+                       for name in ("collier", "ninja")) for value in flags):
+            raise ValueError(f"MG5 did not enable both COLLIER and Ninja in {path} ({variable}); inspect the export log")
+
+
 def configure_export(process_dir, sample, cfg):
     if cfg.preset != "minimal":
         return
     if cfg.dry_run:
         print(f"+ configure minimal loop libraries and continuum cuts: {process_dir}")
         return
-    definitions = process_dir / "SubProcesses/MadLoop_makefile_definitions"
-    linked = definitions.read_text()
-    if "<Not_found_define_it_yourself>" in linked or not all(re.search(rf"-l{name}\b", linked) for name in ("collier", "ninja")):
-        raise ValueError(f"MG5 did not enable both COLLIER and Ninja in {definitions}; inspect the export log")
+    validate_export_libraries(process_dir, sample)
     card = process_dir / "Cards/MadLoopParams.dat"
     if not card.resolve().is_relative_to(process_dir.resolve()):
         raise ValueError(f"refusing to edit a shared MadLoop card: {card}")

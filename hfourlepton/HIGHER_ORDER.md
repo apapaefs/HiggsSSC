@@ -115,6 +115,32 @@ claim below those thresholds; increase statistics if needed. An explicit
 `--config` uses that analysis card's own thresholds. Omitting `--preset minimal`
 for a new campaign keeps the original uniform-count workflow.
 
+### Recover a run stopped after the W+H export
+
+The first minimal-preset release checked NLO exports using the loop-induced
+build layout. An error mentioning a missing
+`SubProcesses/MadLoop_makefile_definitions` immediately after W+H export came
+from this wrapper check. MG5 NLO exports instead put the link settings in
+`Source/make_opts` and `SubProcesses/makefile_loop`. The corrected check audits
+both NLO files, including their library and include settings.
+
+Keep the failed directory. Since its software fingerprint differs after the
+fix, use a new tag and supply the completed ggF and VBF files explicitly:
+
+```bash
+python3 run_pipeline.py run --workflow fourlepton-ho --preset minimal \
+  --energy-tev 13 --run-tag fourl13_minimal_nlofix --jobs 40 \
+  --signal-lhe hfourlepton/runs/fourl13_minimal/powheg/powheg-hjminnlo-merged.lhe \
+  --vbf-lhe hfourlepton/runs/fourl13_minimal/powheg-vbf/powheg-vbf-merged.lhe
+```
+
+This reuses both completed Higgs productions and the cached ihixs normalization;
+it exports W+H afresh and then continues the remaining steps. Use the new tag
+for analysis, and do not combine it with outputs from the failed campaign.
+For another original tag or event multiplier, adjust these options to match
+that campaign. Do not use `--force` or edit provenance records to bypass the
+saved configuration checks.
+
 ## Prepare and launch
 
 Run these commands from the repository root. `prepare` writes review cards

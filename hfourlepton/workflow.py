@@ -138,14 +138,6 @@ def run(pipeline):
         from hfourlepton.minimal_runtime import validate_libraries
         validate_libraries(pipeline.mg5)
         prepare(args)
-        for mode, source in (("ggf", args.signal_lhe), ("vbf", args.vbf_lhe)):
-            if source:
-                sample = next(s for s in samples if s.production_mode == mode)
-                info = higher_order.inspect_production(source, sample, replace(cfg, dry_run=False))
-                needed = four.group_event_count(sample.production_group_id, samples, cfg)
-                if info["events"] < needed:
-                    raise ValueError(f"{source} has {info['events']} events; minimal {mode} needs {needed} "
-                                     "across its decay channels. Omit this LHE override to generate a new file.")
     directory = REPO / "hfourlepton/runs" / args.run_tag
     directory.mkdir(parents=True, exist_ok=True)
     tag = "lhc13" if args.energy_tev == 13 else "ssc40"
@@ -167,6 +159,18 @@ def run(pipeline):
     checked = shared.norm.load_record(record)
     if checked["sqrt_s_gev"] != args.energy_tev * 1000.:
         raise ValueError("ihixs record has the wrong collider energy")
+    if cfg.preset == "minimal":
+        # External ggF inputs must be checked against the same normalization
+        # record as the downstream campaign, including the cached default.
+        runtime_cfg = replace(cfg, dry_run=False, signal_normalization=record)
+        for mode, source in (("ggf", args.signal_lhe), ("vbf", args.vbf_lhe)):
+            if source:
+                sample = next(s for s in samples if s.production_mode == mode)
+                info = higher_order.inspect_production(source, sample, runtime_cfg)
+                needed = four.group_event_count(sample.production_group_id, samples, cfg)
+                if info["events"] < needed:
+                    raise ValueError(f"{source} has {info['events']} events; minimal {mode} needs {needed} "
+                                     "across its decay channels. Omit this LHE override to generate a new file.")
     if not args.signal_lhe:
         pipeline.call(args.run_tag + "-powheg", [pipeline.python, REPO / "hgammagamma/run_powheg_hjminnlo.py",
             "--nevents", four.group_event_count("signal_gg_h_stable", samples, cfg), "--jobs", args.jobs, "--ebeam", args.energy_tev * 500,

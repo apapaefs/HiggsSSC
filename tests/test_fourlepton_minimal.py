@@ -29,6 +29,23 @@ def args(*extra):
                            "--preset", "minimal", "--energy-tev", "13", "--jobs", "40", *extra])
 
 
+def export_build_files(root, sample):
+    """Layouts checked against MG5 3.5.15 and Timur's failed WH export."""
+    if sample.matching == "MC@NLO":
+        files = {"Source/make_opts": "ifdef madloop\nlibcuttools=-lcts -lninja -lcollier\nelse\nlibcuttools=\nendif\n",
+                 "SubProcesses/makefile_loop": "include ../../../Source/make_opts\n"
+                     "LINKLIBS = -L$(LIBDIR) -lcts -lninja -lcollier\n"
+                     "%.o : %.f\n\t$(FC) $(FFLAGS) -c $< -I /example/include\n"}
+    else:
+        files = {"SubProcesses/MadLoop_makefile_definitions":
+                 "LINK_LOOP_LIBS = -L$(LIBDIR) -lcts -lninja -lcollier\nLOOP_INCLUDE = -I /example/include\n"}
+    for relative, text in files.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    return [root / name for name in files]
+
+
 class MinimalTests(unittest.TestCase):
     def test_counts_modes_group_sums_and_fractional_multiplier(self):
         samples = ho.all_samples()
@@ -108,14 +125,60 @@ class MinimalTests(unittest.TestCase):
             self.assertEqual(parsed.sample_nevents, presets.counts(2))
             self.assertEqual(parsed.seed_base, presets.seed_base(options.run_tag))
 
+    def test_managed_external_lhe_uses_normalization_and_checks_all_channels(self):
+        from types import SimpleNamespace
+        record_data = {"sqrt_s_gev": 13000., "higgs_mass_gev": 125., "native_parameters": {}}
+        for explicit_record in (False, True):
+            for short_mode in (None, "ggf", "vbf"):
+                with self.subTest(explicit_record=explicit_record, short_mode=short_mode), \
+                     tempfile.TemporaryDirectory() as tmp, patch.object(workflow, "REPO", Path(tmp)), \
+                     patch.object(workflow, "prepare"), patch.object(runtime, "validate_libraries"), \
+                     patch.object(workflow.shared.norm, "load_record", return_value=record_data) as load_record:
+                    root = Path(tmp).resolve()
+                    record = root / ("custom.json" if explicit_record else "normalization/ggf-lhc13-n3lo.json")
+                    record.parent.mkdir(parents=True, exist_ok=True)
+                    record.write_text("{}")
+                    options = args("--signal-lhe", str(root / "ggf.lhe"), "--vbf-lhe", str(root / "vbf.lhe"),
+                                   *(["--signal-normalization", str(record)] if explicit_record else []))
+                    calls, inspected = [], []
+                    pipe = SimpleNamespace(args=options, check=lambda: None, work=root, mg5=root / "mg5",
+                            python=sys.executable, call=lambda label, command: calls.append((label, command)))
+
+                    def inspect(source, sample, cfg):
+                        self.assertFalse(cfg.dry_run)
+                        self.assertEqual(cfg.signal_normalization, record)
+                        self.assertEqual(ho.load_signal_record(cfg), record_data)
+                        mode = sample.production_mode
+                        self.assertEqual(source, root / f"{mode}.lhe")
+                        inspected.append(mode)
+                        count = {"ggf": 60000, "vbf": 30000}[mode]
+                        return {"events": count - (mode == short_mode)}
+
+                    with patch.object(ho, "inspect_production", side_effect=inspect):
+                        if short_mode:
+                            with self.assertRaisesRegex(ValueError, "across its decay channels"):
+                                workflow.run(pipe)
+                            self.assertEqual(calls, [])
+                        else:
+                            workflow.run(pipe)
+                            self.assertEqual(inspected, ["ggf", "vbf"])
+                            self.assertEqual([label for label, _ in calls], [options.run_tag + "-fourlepton-perfect"])
+                            command = calls[0][1]
+                            self.assertEqual(command[command.index("--signal-normalization") + 1], record)
+                    self.assertTrue(load_record.called)
+                    self.assertTrue(all(call.args == (record,) for call in load_record.call_args_list))
+
     def test_loop_card_and_cut_patch_preserve_stability_and_other_hooks(self):
-        for name in ("bkg_gg_4e", "bkg_qq_4mu", "signal_gg_z_h_4e"):
+        for name in ("signal_wp_h_4e", "signal_wm_h_4e", "signal_z_h_4e", "signal_tt_h_4e",
+                     "bkg_qq_4mu", "bkg_gg_4e", "signal_gg_z_h_4e"):
             sample = next(s for s in ho.all_samples() if s.name == name)
             with tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
                 (root / "Cards").mkdir()
                 (root / "SubProcesses").mkdir()
-                (root / "SubProcesses/MadLoop_makefile_definitions").write_text("LINK_TIR = -lcollier -lninja\n")
+                export_build_files(root, sample)
+                if sample.matching == "MC@NLO":
+                    self.assertFalse((root / "SubProcesses/MadLoop_makefile_definitions").exists())
                 ml = root / "Cards/MadLoopParams.dat"
                 ml.write_text("#MLReductionLib\n! documentation\n6|1\n#CTModeRun\n-1\n#MLStabThres\n1.0d-3\n")
                 hook = root / "SubProcesses/dummy_fct.f"
@@ -126,6 +189,44 @@ class MinimalTests(unittest.TestCase):
                 self.assertIn("7|6|1" if name.startswith("bkg_gg") else "6|7|1", ml.read_text())
                 self.assertIn("      subroutine untouched\n      end", hook.read_text())
                 self.assertEqual(hook.read_text() == original, sample.is_signal)
+
+    def test_export_audit_rejects_missing_files_libraries_and_include_paths(self):
+        for name in ("signal_wp_h_4e", "bkg_gg_4e"):
+            sample = next(s for s in ho.all_samples() if s.name == name)
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                files = export_build_files(root, sample)
+                runtime.validate_export_libraries(root, sample)
+                for path in files:
+                    original = path.read_text()
+                    for provider in ("collier", "ninja"):
+                        path.write_text(original.replace("-l" + provider, "") + f"\n# -l{provider}\n")
+                        with self.assertRaisesRegex(ValueError, "did not enable both"):
+                            runtime.validate_export_libraries(root, sample)
+                    path.write_text(original + "\nLOOP_INCLUDE = -I <Not_found_define_it_yourself>\n")
+                    with self.assertRaisesRegex(ValueError, "include directory"):
+                        runtime.validate_export_libraries(root, sample)
+                    path.unlink()
+                    with self.assertRaisesRegex(ValueError, "incomplete.*MG5 export: missing"):
+                        runtime.validate_export_libraries(root, sample)
+                    path.write_text(original)
+
+    def test_nlo_export_does_not_accept_a_stale_lo_build_file(self):
+        sample = next(s for s in ho.all_samples() if s.name == "signal_wp_h_4e")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            export_build_files(root, next(s for s in ho.all_samples() if s.name == "bkg_gg_4e"))
+            with self.assertRaisesRegex(ValueError, "Source/make_opts"):
+                runtime.validate_export_libraries(root, sample)
+
+    def test_nlo_export_requires_flags_on_the_actual_link_assignment(self):
+        sample = next(s for s in ho.all_samples() if s.name == "signal_wp_h_4e")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            export_build_files(root, sample)
+            (root / "Source/make_opts").write_text("libcuttools=\nUNUSED = -lninja -lcollier\n")
+            with self.assertRaisesRegex(ValueError, "did not enable both"):
+                runtime.validate_export_libraries(root, sample)
 
     @unittest.skipUnless(shutil.which("gfortran"), "requires gfortran for the synthetic kinematic check")
     def test_compiled_mass_window_ignores_beams_radiation_and_zero_born_slot(self):
