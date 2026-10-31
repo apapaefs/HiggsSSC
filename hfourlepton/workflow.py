@@ -140,6 +140,9 @@ def run(pipeline):
         prepare(args)
     directory = REPO / "hfourlepton/runs" / args.run_tag
     directory.mkdir(parents=True, exist_ok=True)
+    if cfg.preset == "minimal":
+        from hfourlepton.mg5_loop_recovery import prepare_campaign
+        prepare_campaign(pipeline.mg5, directory)
     tag = "lhc13" if args.energy_tev == 13 else "ssc40"
     settings, card_text = rate_inputs(args)
     settings_path = directory / "ihixs-settings.json"

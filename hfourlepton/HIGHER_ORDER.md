@@ -141,6 +141,53 @@ For another original tag or event multiplier, adjust these options to match
 that campaign. Do not use `--force` or edit provenance records to bypass the
 saved configuration checks.
 
+### Recover the MG5 loop-combination failure
+
+An `incomplete production export` message on restart can follow a failed
+integration. Inspect the original log before changing tags or event counts.
+The observed `bkg_gg_4mu` failure in MG5 3.5.15 was an extreme-weight warning
+followed by `gen_ximprove_share.combine_iteration` failing to read
+`G*/results.dat`. Its unstable-job recovery deletes those files before a
+recursive call tries to read them again. The corresponding
+[upstream code](https://github.com/mg5amcnlo/mg5amcnlo/blob/3.x/madgraph/madevent/gen_ximprove.py)
+also needs consistent job indices and event-file selection after an exclusion.
+
+Managed minimal runs now install a checksum-checked fix in the private MG5
+installation. The original Python source and a patch receipt are saved there;
+`runs/TAG/mg5_loop_recovery.json` records the fix and any exports that already
+existed. Completed exports and LHE files are unchanged. The fix postpones
+cleanup until combination succeeds, tracks repeated exclusions by original
+job number, and excludes the same jobs from the integral and the event file.
+It preserves MG5's existing numerical thresholds, library order and outlier
+criterion. Software tests exercise the actual MG5 methods with synthetic
+results; a successful production rerun is a separate validation step.
+
+For this specific failure, audit the existing campaign first:
+
+```bash
+python3 hfourlepton/repair_loop_production.py \
+  --run-tag fourl13_minimal_nlofix --sample bkg_gg_4mu
+```
+
+The audit checks the original configuration, the failure evidence, and all
+preceding completed groups, including their hashes and event counts. To archive
+only the incomplete group and then continue using the original run command:
+
+```bash
+python3 hfourlepton/repair_loop_production.py \
+  --run-tag fourl13_minimal_nlofix --sample bkg_gg_4mu --apply
+bash hfourlepton/plans/fourl13_minimal_nlofix/run.sh
+```
+
+`--apply` runs no generators. It moves the failed group, including partial
+grids and logs, into `runs/TAG/recovery/higgsssc-loop-recovery-v1/SAMPLE/` and
+saves its audit and original metadata. The run then reuses the eleven completed
+groups, regenerates `gg → 4μ`, and continues with `gg → 2e2μ` and postprocessing.
+Some intermediate results were deleted before the crash, so the interrupted
+refinement cannot be resumed reliably. This repair refuses final LHE files,
+unrecognized failures, changed provenance, or campaigns that have begun
+postprocessing. Do not use `--force` or remove the completed production groups.
+
 ## Prepare and launch
 
 Run these commands from the repository root. `prepare` writes review cards

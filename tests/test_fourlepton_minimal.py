@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 import run_pipeline as cli
 from hfourlepton import presets, minimal_runtime as runtime, workflow, higher_order as ho
+from hfourlepton import mg5_loop_recovery
 from hfourlepton import run_four_lepton_campaign as four
 from hgammagamma import run_powheg_hjminnlo as powheg
 import test_ho_shower_completion as completion_fixtures
@@ -108,6 +109,7 @@ class MinimalTests(unittest.TestCase):
         from types import SimpleNamespace
         with tempfile.TemporaryDirectory() as tmp, patch.object(workflow, "REPO", Path(tmp)), \
              patch.object(workflow, "prepare"), patch.object(runtime, "validate_libraries"), \
+             patch.object(mg5_loop_recovery, "prepare_campaign"), \
              patch.object(workflow.shared.norm, "load_record", return_value={"sqrt_s_gev": 13000.}):
             options = args("--event-multiplier", "2")
             calls = []
@@ -133,6 +135,7 @@ class MinimalTests(unittest.TestCase):
                 with self.subTest(explicit_record=explicit_record, short_mode=short_mode), \
                      tempfile.TemporaryDirectory() as tmp, patch.object(workflow, "REPO", Path(tmp)), \
                      patch.object(workflow, "prepare"), patch.object(runtime, "validate_libraries"), \
+                     patch.object(mg5_loop_recovery, "prepare_campaign"), \
                      patch.object(workflow.shared.norm, "load_record", return_value=record_data) as load_record:
                     root = Path(tmp).resolve()
                     record = root / ("custom.json" if explicit_record else "normalization/ggf-lhc13-n3lo.json")
