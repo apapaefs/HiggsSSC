@@ -26,13 +26,19 @@ from hfourlepton.repair_loop_production import (
 
 RETRY = "loop-short-sample-v1"
 SETTINGS = {"sde_strategy": 2, "hard_survey": 1}
+CARD_RECOVERY = "hidden-survey-card-startup-v1"
+OLD_RETRY_SHA256 = "916826a949c0167a910d2f3f5119c596228fc98616b9f512b7ee62a26b1f1c01"
 
 
-def numerical_settings(text):
+def numerical_settings(text, *, fresh_card=False):
     values = {}
     for key in SETTINGS:
-        matches = re.findall(rf"(?mi)^\s*([0-9]+)\s*=\s*{key}\b", text)
-        if len(matches) != 1:
+        matches = re.findall(rf"(?mi)^[ \t]*([^\n=!#]+)=[ \t]*{key}\b", text)
+        if not matches and fresh_card and key == "hard_survey":
+            # MG5 3.5.15 RunCardLO declares this hidden parameter with default 0.
+            values[key] = 0
+            continue
+        if len(matches) != 1 or not re.fullmatch(r"[0-9]+", matches[0].strip()):
             raise ValueError(f"expected exactly one explicit {key} setting")
         values[key] = int(matches[0])
     return values
@@ -40,18 +46,23 @@ def numerical_settings(text):
 
 def patch_sampling(card):
     text = card.read_text()
-    before = numerical_settings(text)
+    before = numerical_settings(text, fresh_card=True)
     if before != {"sde_strategy": 1, "hard_survey": 0}:
         raise ValueError(f"unexpected original integration settings in {card}: {before}")
     for key, value in SETTINGS.items():
-        text, count = re.subn(rf"(?mi)^(\s*)[0-9]+(\s*=\s*{key}\b)",
+        text, count = re.subn(rf"(?mi)^([ \t]*)[0-9]+([ \t]*=[ \t]*{key}\b)",
                              lambda m: m[1] + str(value) + m[2], text)
+        if count == 0 and key == "hard_survey":
+            text = text.rstrip("\n") + f"\n {value} = {key} ! explicit numerical retry setting\n"
+            count = 1
         if count != 1:
             raise ValueError(f"ambiguous run-card setting {key}")
+    if numerical_settings(text) != SETTINGS:
+        raise ValueError(f"failed to make numerical retry settings explicit in {card}")
     card.write_text(text)
 
 
-def audit(saved, cfg, sample_name):
+def campaign_samples(saved, cfg):
     if (saved["state"] != "failed" or cfg.force or cfg.dry_run
             or cfg.preset != "minimal" or cfg.detector_response != "perfect"):
         raise ValueError("retry requires a failed minimal campaign with its original configuration")
@@ -72,6 +83,11 @@ def audit(saved, cfg, sample_name):
                 raise ValueError(f"postprocessing output exists: {path}")
         if (cfg.run_dir / "manifest_ssc.json").exists():
             raise ValueError("SSC postprocessing has started")
+    return samples
+
+
+def audit(saved, cfg, sample_name):
+    samples = campaign_samples(saved, cfg)
     groups = {}
     for sample in samples:
         groups.setdefault(sample.production_group_id, sample)
@@ -104,6 +120,70 @@ def audit(saved, cfg, sample_name):
                 previous_settings={"sde_strategy": 1, "hard_survey": 0}, retry_settings=SETTINGS,
                 retry_code=four.artifact_stage_record(Path(__file__).resolve()),
                 validation_code=four.artifact_stage_record(Path(checked_campaign.__file__).resolve()),
+                generators_launched=False)
+
+
+def same_content(path, record):
+    actual = four.artifact_stage_record(path)
+    return all(actual[key] == record[key] for key in ("sha256", "size"))
+
+
+def audit_card_startup(saved, cfg, sample, destination, report):
+    """Recognize only the old parser failure, before compilation/integration.
+
+    This permits one additional export attempt, archiving the unfinished export
+    alongside the original short sample. A numerical failure cannot use it.
+    """
+    samples = campaign_samples(saved, cfg)
+    group = four.production_dir(sample, cfg)
+    process = group / "mg5_process"
+    if (sample.name != "bkg_gg_4mu" or report["retry_code"]["sha256"] != OLD_RETRY_SHA256
+            or report["retry_settings"] != SETTINGS
+            or report["manifest"] != four.artifact_stage_record(cfg.manifest_path)):
+        raise ValueError("startup retry evidence or campaign metadata changed")
+    if (destination / CARD_RECOVERY).exists():
+        raise ValueError("the card-startup recovery was already attempted; preserve and inspect that attempt")
+    if group.is_symlink() or process.is_symlink():
+        raise ValueError("refusing to archive a shared production directory")
+    if ({p.name for p in group.iterdir()} != {"cards", "mg5_process"}
+            or (process / "Source/run_card.inc").exists()
+            or any(p.name != ".keep" for p in (process / "Events").iterdir())
+            or any(p.is_dir() for p in (process / "SubProcesses").glob("P*/G[0-9]*"))):
+        raise ValueError("retry progressed beyond the run-card startup failure; preserve its outputs")
+    card = process / "Cards/run_card.dat"
+    text = card.read_text()
+    if (numerical_settings(text, fresh_card=True) != {"sde_strategy": 1, "hard_survey": 0}
+            or re.search(r"(?mi)^[^!#\n]*=\s*hard_survey\b", text)):
+        raise ValueError("failed export is not the missing hidden hard_survey case")
+    if (group / "cards/process_card.dat").read_text() != four.process_card_text(sample, process, cfg):
+        raise ValueError("failed export process card changed")
+    log = Path(saved["identity"]["environment"]["work_dir"]) / "logs" / (cfg.run_tag + "-retry-gg4mu.log")
+    if "ERROR: expected exactly one explicit hard_survey setting" not in log.read_text().splitlines():
+        raise ValueError(f"unrecognized startup failure in {log}")
+    old = destination / "failed_production"
+    source = old / "mg5_process/Events" / cfg.run_tag / "unweighted_events.lhe.gz"
+    marker = old / "fourlepton_production_stage.json"
+    short = report["short_production"]
+    expected = four.production_stage_identity(sample, sample, samples, process, cfg)
+    archived_marker = json.loads(marker.read_text())
+    if (not same_content(source, short) or not same_content(marker, short["marker"])
+            or archived_marker["identity"] != expected
+            or archived_marker["artifact"] != {key: short[key] for key in ("path", "sha256", "size")}
+            or not 0 < checked_campaign.count_events(source) == short["events"] < expected["events"]):
+        raise ValueError("original short-sample archive changed")
+    groups = {s.production_group_id: s for s in reversed(samples)}
+    if set(report["completed_production"]) | set(report["queued_production"]) != set(groups) - {sample.production_group_id}:
+        raise ValueError("production inventory differs from the archived retry audit")
+    for name, previous in report["completed_production"].items():
+        if completed_production(groups[name], samples, cfg) != previous:
+            raise ValueError(f"previously completed production changed: {name}")
+    for name in report["queued_production"]:
+        if four.production_dir(groups[name], cfg).exists():
+            raise ValueError(f"unexpected new production in {name}")
+    return dict(report, retry_code=four.artifact_stage_record(Path(__file__).resolve()),
+                card_startup_recovery=dict(id=CARD_RECOVERY,
+                    original_retry_code=report["retry_code"],
+                    failed_card=four.artifact_stage_record(card), log=four.artifact_stage_record(log)),
                 generators_launched=False)
 
 
@@ -170,19 +250,26 @@ def main(argv=None):
         sample = next(s for s in samples if s.name == options.sample)
         group = four.production_dir(sample, cfg)
         destination = cfg.run_dir / "recovery" / RETRY / options.sample
+        card_recovery = False
         if destination.exists():
             report = json.loads((destination / "audit.json").read_text())
             if report.get("id") != RETRY or report.get("sample") != options.sample or not (destination / "failed_production").is_dir():
                 raise ValueError(f"incomplete retry archive: {destination}")
-            # Never overwrite a second failed attempt or launch automatically.
-            completed_production(sample, samples, cfg)
-            print("The replacement sample is complete; no simulation launched. Continue with the campaign recovery.")
-            return
-        report = audit(saved, cfg, options.sample)
+            if (group / "fourlepton_production_stage.json").exists():
+                completed_production(sample, samples, cfg)
+                print("The replacement sample is complete; no simulation launched. Continue with the campaign recovery.")
+                return
+            report = audit_card_startup(saved, cfg, sample, destination, report)
+            card_recovery = True
+        else:
+            report = audit(saved, cfg, options.sample)
         short = report["short_production"]
-        print(f"Verified {len(report['completed_production'])} complete groups; {options.sample} has "
-              f"{short['events']}/{short['required_events']} events. Retry settings: {SETTINGS}.", flush=True)
+        summary = (f"Verified {len(report['completed_production'])} complete groups; {options.sample} has "
+                   f"{short['events']}/{short['required_events']} events. Retry settings: {SETTINGS}.")
         if not options.run:
+            if card_recovery:
+                print("Verified the missing hidden run-card setting failure; integration has not started.")
+            print(summary)
             print("Audit passed. No campaign files changed or generators launched; add --run to regenerate only this group.")
             return report
         # Activate exactly the original managed runtime before archiving data.
@@ -192,7 +279,20 @@ def main(argv=None):
         from hfourlepton.mg5_loop_recovery import prepare_campaign
         validate_libraries(pipeline.mg5)
         prepare_campaign(pipeline.mg5, cfg.run_dir)
-        archive(group, destination, report, [cfg.manifest_path, state_path])
+        archive_destination = destination / CARD_RECOVERY if card_recovery else destination
+        metadata = [cfg.manifest_path, state_path]
+        if card_recovery:
+            evidence = report["card_startup_recovery"]["log"]
+            log = Path(evidence["path"])
+            if not same_content(log, evidence):
+                raise ValueError("startup log changed during the recovery audit")
+            metadata.append(log)
+        archive(group, archive_destination, report, metadata)
+        # The launcher tees stdout to the original log; copy its evidence
+        # before appending our own recovery messages.
+        print(summary, flush=True)
+        if card_recovery:
+            print(f"Archived the pre-integration export: {archive_destination}", flush=True)
         report = dict(report, archive=str(destination), generators_launched=True)
         # The lower runner receives the same environment as run_pipeline's child.
         previous = dict(os.environ)

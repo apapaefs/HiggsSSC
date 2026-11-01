@@ -260,6 +260,23 @@ the second attempt and refuses another automatic replacement. Do not use
 MadSpin startup migration above and repeat the original run command. The other
 twelve completed production groups are reused.
 
+The first retry helper required `hard_survey` to be present in a freshly
+exported run card, although MG5 3.5.15 defines it as a hidden parameter with
+default zero. The corrected helper inserts an explicit `hard_survey=1` when
+that entry is absent. It still rejects duplicate or malformed settings and
+requires both retry settings to be explicit in the output LHE banner.
+
+If the retry stopped with `expected exactly one explicit hard_survey setting`,
+repeat the same audit and `--run` commands above after updating the checkout.
+The helper recognizes this specific failure only before compilation or
+integration, checks the original archive and the other completed groups, and
+archives the unfinished export under
+`recovery/loop-short-sample-v1/bkg_gg_4mu/hidden-survey-card-startup-v1/` before
+making a fresh export. The original 19-event output remains in its first
+archive. This does not bypass a failed numerical attempt. On Timur, the existing
+`hfourlepton/plans/fourl13_minimal_nlofix/resume_madspin.sh` launcher performs
+these steps and continues with the MadSpin migration after successful generation.
+
 ## Prepare and launch
 
 Run these commands from the repository root. `prepare` writes review cards
