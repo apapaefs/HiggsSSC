@@ -190,4 +190,6 @@ def run(pipeline):
             '--seed', four.seed_for('signal_vbf_h_stable', cfg)])
     for profile in profiles(args):
         pipeline.call(args.run_tag + "-fourlepton-" + profile, [pipeline.python,
-            REPO / "hfourlepton/run_four_lepton_campaign.py", *campaign_arguments(pipeline, profile)])
+            REPO / "hfourlepton" / ("checked_campaign.py" if cfg.preset == "minimal"
+                                   else "run_four_lepton_campaign.py"),
+            *campaign_arguments(pipeline, profile)])

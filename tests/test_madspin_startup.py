@@ -136,7 +136,7 @@ class StartupRepairTests(unittest.TestCase):
         self.assertEqual(inputs, {path: path.read_bytes() for path in inputs})
         updated = json.loads(self.cfg.manifest_path.read_text())
         self.assertNotEqual(updated["configuration_fingerprint"], self.manifest["configuration_fingerprint"])
-        self.assertEqual(updated["samples"], self.manifest["samples"])
+        self.assertEqual(updated["samples"], [{"name": self.samples[0].name, "status": "planned"}])
         before = self.cfg.manifest_path.read_bytes()
         repair.repair({"state": "failed"}, self.state_path, self.cfg, apply=True)
         self.assertEqual(self.cfg.manifest_path.read_bytes(), before)

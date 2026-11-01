@@ -202,7 +202,10 @@ inputs/pipeline/venv/bin/python hfourlepton/madspin_worker.py \
 ```
 
 This check generates no events and does not save MG5 configuration changes.
-For the affected campaign, audit and apply the specific metadata migration:
+The migration below requires every hard-production group to have its full
+event count. The `fourl13_minimal_nlofix` campaign also contains an undersized
+`bkg_gg_4mu` result (19 of 2,000 events), which must be regenerated first using
+the next subsection. Then audit and apply the specific metadata migration:
 
 ```bash
 python3 hfourlepton/repair_madspin_startup.py --run-tag fourl13_minimal_nlofix
@@ -218,6 +221,44 @@ the original manifest and worker metadata/logs under
 fingerprint with an explicit migration record. All hard events, production
 markers, decay cards and staged LHE inputs are unchanged. `--apply` runs no
 simulation; the original run command resumes the same tag at postprocessing.
+
+### Recover an undersized loop-induced sample
+
+MG5 can exit successfully after reporting `fail to reach target`, leaving an
+unweighted LHE with far fewer events than requested. Managed minimal runs now
+use `checked_campaign.py` to verify native hard-production counts and provenance
+before starting any decay/shower workers. Each passing group gets a separate
+receipt in `runs/TAG/production_validation/`. Signal counts are checked on the
+full production group, before its disjoint decay-channel slices are compared.
+
+For the affected gg → 4μ sample, these commands first audit the saved campaign,
+then explicitly regenerate **only that group**:
+
+```bash
+python3 hfourlepton/retry_short_production.py \
+  --run-tag fourl13_minimal_nlofix --sample bkg_gg_4mu
+python3 hfourlepton/retry_short_production.py \
+  --run-tag fourl13_minimal_nlofix --sample bkg_gg_4mu --run
+```
+
+Without `--run`, no campaign files change and no generator starts. With `--run`,
+the original LHE, grids, export and metadata are archived under
+`runs/TAG/recovery/loop-short-sample-v1/bkg_gg_4mu/`. The replacement uses the
+original managed environment and 40-core allocation, with `sde_strategy=2`
+and `hard_survey=1`. These are documented MG5 controls for changing phase-space
+sampling and strengthening the initial survey; see Table 8 of
+[Speeding up MadGraph5_aMC@NLO](https://pmc.ncbi.nlm.nih.gov/articles/PMC8136271/).
+The process, PDF, cuts, seed, requested count and reduction-library order stay
+the same. The exact numerical changes and replacement artifact are recorded in
+`production/bkg_gg_4mu/numerical_retry.json` and linked from its production marker.
+
+This retry is a proposed numerical remedy, not a demonstrated speed or
+stability improvement. It must produce at least 2,000 events and record the
+requested settings in its LHE banner. If it fails again, the helper preserves
+the second attempt and refuses another automatic replacement. Do not use
+`--force` to bypass that failure. After the replacement passes, apply the
+MadSpin startup migration above and repeat the original run command. The other
+twelve completed production groups are reused.
 
 ## Prepare and launch
 

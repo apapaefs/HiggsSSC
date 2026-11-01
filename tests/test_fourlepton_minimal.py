@@ -125,6 +125,7 @@ class MinimalTests(unittest.TestCase):
                 command = commands[options.run_tag + suffix]
                 self.assertEqual(command[command.index("--nevents") + 1], count)
             command = commands[options.run_tag + "-fourlepton-perfect"]
+            self.assertEqual(command[1].name, "checked_campaign.py")
             parsed = four.parse_config([str(x) for x in command[2:]])
             self.assertEqual(parsed.sample_nevents, presets.counts(2))
             self.assertEqual(parsed.seed_base, presets.seed_base(options.run_tag))

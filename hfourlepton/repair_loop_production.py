@@ -20,7 +20,7 @@ from hfourlepton import run_four_lepton_campaign as four
 from hfourlepton import mg5_loop_recovery as fix
 
 
-def saved_configuration(work, tag):
+def saved_options(work, tag):
     state_path = work / "campaigns/fourlepton-ho" / (tag + ".json")
     saved = json.loads(state_path.read_text())
     identity = saved["identity"]
@@ -39,13 +39,18 @@ def saved_configuration(work, tag):
     environment = cli.shared.configuration(args)
     if cli.identity(args, environment) != identity:
         raise ValueError("saved campaign options, inputs or environment have changed")
+    return saved, state_path, args, environment
+
+
+def saved_configuration(work, tag):
+    saved, state_path, args, _environment = saved_options(work, tag)
     pipeline = SimpleNamespace(args=args, work=work, mg5=work / "MG5_aMC_v3_5_15",
                                python=work / "venv/bin/python")
     cfg = four.parse_config([str(x) for x in workflow.campaign_arguments(pipeline, "perfect")])
     return saved, state_path, cfg
 
 
-def completed_production(sample, samples, cfg):
+def completed_production(sample, samples, cfg, *, require_count=True):
     """Validate a completed group without invoking any producer or staging step."""
     needed = four.group_event_count(sample.production_group_id, samples, cfg)
     if sample.matching == "POWHEG":
@@ -53,7 +58,7 @@ def completed_production(sample, samples, cfg):
         info = ho.inspect_production(source, sample, cfg)
         if info["events"] < needed:
             raise ValueError(f"too few completed events in {source}")
-        return four.artifact_stage_record(source)
+        return dict(four.artifact_stage_record(source), events=info["events"], required_events=needed)
     group = four.production_dir(sample, cfg)
     process_dir = group / "mg5_process"
     marker = group / "fourlepton_production_stage.json"
@@ -71,12 +76,13 @@ def completed_production(sample, samples, cfg):
         source = process_dir / "Events" / cfg.run_tag / "unweighted_events.lhe.gz"
     if not source.is_file() or not four.artifact_stage_matches(marker, identity, source):
         raise ValueError(f"completed production provenance is missing or changed: {group}")
+    from hfourlepton.checked_campaign import count_events, validate_retry_receipt
+    validate_retry_receipt(marker)
     ho.inspect_production(source, sample, cfg)
-    with four.open_maybe_gzip(source) as stream:
-        count = sum(line.strip() == "<event>" or line.lstrip().startswith("<event ") for line in stream)
-    if count < needed:
+    count = count_events(source)
+    if require_count and count < needed:
         raise ValueError(f"{source} has {count} events, expected at least {needed}")
-    return dict(four.artifact_stage_record(source), events=count,
+    return dict(four.artifact_stage_record(source), events=count, required_events=needed,
                 marker=four.artifact_stage_record(marker))
 
 

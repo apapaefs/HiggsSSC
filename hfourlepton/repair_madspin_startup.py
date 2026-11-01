@@ -129,6 +129,11 @@ def repair(saved, state_path, cfg, *, apply=False):
         return audit
     updated["software_migrations"] = [*manifest.get("software_migrations", []), audit]
     updated["status"] = "ready_to_resume"
+    for entry in updated["samples"]:
+        if entry["name"] in failed:
+            entry["status"] = "planned"
+            entry.pop("error", None)
+            entry.pop("last_attempt_wall_seconds", None)
     backup.mkdir(parents=True, exist_ok=False)
     for source in (cfg.manifest_path, state_path):
         shutil.copy2(source, backup / source.name)
