@@ -188,6 +188,37 @@ refinement cannot be resumed reliably. This repair refuses final LHE files,
 unrecognized failures, changed provenance, or campaigns that have begun
 postprocessing. Do not use `--force` or remove the completed production groups.
 
+### Recover a MadSpin logging-startup failure
+
+The first bounded MadSpin launcher omitted MG5's formatter-registration import.
+If a worker log ends with `No module named 'logging.ColorFormatter'`, it failed
+before importing its event card or generating any decays. The corrected launcher
+uses the initialization from the stock MadSpin frontend. Managed minimal runs
+now check that startup and the private core allocation before hard production:
+
+```bash
+inputs/pipeline/venv/bin/python hfourlepton/madspin_worker.py \
+  --mg5-dir inputs/pipeline/MG5_aMC_v3_5_15 --cores 5 --check
+```
+
+This check generates no events and does not save MG5 configuration changes.
+For the affected campaign, audit and apply the specific metadata migration:
+
+```bash
+python3 hfourlepton/repair_madspin_startup.py --run-tag fourl13_minimal_nlofix
+python3 hfourlepton/repair_madspin_startup.py --run-tag fourl13_minimal_nlofix --apply
+bash hfourlepton/plans/fourl13_minimal_nlofix/run.sh
+```
+
+The migration accepts only the known old/new launcher hashes and this logging
+failure. It verifies every completed hard-production group, requires that no
+decays or showers have started, and checks the prepared decay inputs. It archives
+the original manifest and worker metadata/logs under
+`runs/TAG/recovery/madspin-logging-startup-v1/`, then updates the campaign
+fingerprint with an explicit migration record. All hard events, production
+markers, decay cards and staged LHE inputs are unchanged. `--apply` runs no
+simulation; the original run command resumes the same tag at postprocessing.
+
 ## Prepare and launch
 
 Run these commands from the repository root. `prepare` writes review cards

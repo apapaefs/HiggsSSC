@@ -119,6 +119,8 @@ class MinimalTests(unittest.TestCase):
                     call=lambda label, command: calls.append((label, command)))
             workflow.run(pipe)
             commands = dict(calls)
+            self.assertEqual(calls[0][0], options.run_tag + "-check-madspin")
+            self.assertIn("--check", calls[0][1])
             for suffix, count in (("-powheg", 120000), ("-powheg-vbf", 60000)):
                 command = commands[options.run_tag + suffix]
                 self.assertEqual(command[command.index("--nevents") + 1], count)
@@ -161,12 +163,13 @@ class MinimalTests(unittest.TestCase):
                         if short_mode:
                             with self.assertRaisesRegex(ValueError, "across its decay channels"):
                                 workflow.run(pipe)
-                            self.assertEqual(calls, [])
+                            self.assertEqual([label for label, _ in calls], [options.run_tag + "-check-madspin"])
                         else:
                             workflow.run(pipe)
                             self.assertEqual(inspected, ["ggf", "vbf"])
-                            self.assertEqual([label for label, _ in calls], [options.run_tag + "-fourlepton-perfect"])
-                            command = calls[0][1]
+                            self.assertEqual([label for label, _ in calls],
+                                             [options.run_tag + "-check-madspin", options.run_tag + "-fourlepton-perfect"])
+                            command = calls[-1][1]
                             self.assertEqual(command[command.index("--signal-normalization") + 1], record)
                     self.assertTrue(load_record.called)
                     self.assertTrue(all(call.args == (record,) for call in load_record.call_args_list))

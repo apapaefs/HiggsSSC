@@ -137,6 +137,9 @@ def run(pipeline):
     if cfg.preset == "minimal":
         from hfourlepton.minimal_runtime import validate_libraries
         validate_libraries(pipeline.mg5)
+        pipeline.call(args.run_tag + "-check-madspin", [pipeline.python,
+            REPO / "hfourlepton/madspin_worker.py", "--mg5-dir", pipeline.mg5,
+            "--cores", presets.description(cfg)["cores_per_decay"], "--check"])
         prepare(args)
     directory = REPO / "hfourlepton/runs" / args.run_tag
     directory.mkdir(parents=True, exist_ok=True)
