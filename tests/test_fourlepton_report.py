@@ -6,6 +6,9 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
+
+import test_ho_shower_completion as completion_fixtures
 
 from hfourlepton.make_fourlepton_report import (
     DEFAULT_CUT_STAGES,
@@ -301,6 +304,75 @@ class FourLeptonReportHelpersTest(unittest.TestCase):
 
 
 class FourLeptonReportOutputTest(unittest.TestCase):
+    def _matched_manifest(self, directory: Path, *, finite_guard: bool = False) -> Path:
+        path = self._manifest(directory)
+        raw = json.loads(path.read_text())
+        raw["samples"] = [raw["samples"][1]]
+        sample = raw["samples"][0]
+        helper = completion_fixtures.ShowerCompletionTests()
+        with patch.object(completion_fixtures, "SAMPLE", sample["name"]):
+            fixture = helper.fixture(directory / "shower", weights=(1., 1., 1.),
+                                     requested=3, saved=2, termination="source_exhausted")
+            if finite_guard:
+                plan = completion_fixtures.completion.finite_shower_plan(sample["name"], 3, 3)
+                (fixture[0] / "shower_execution.json").write_text(json.dumps(plan))
+            completed, native = helper.build(fixture)
+        sample.update(order="ho", nevents_requested=3, shower_completion=completed,
+                      input_lhe=native["lhe_file"], analysis_summary="background.summary.json")
+        sample["normalization"].update(denominator_sumw=3., denominator_sumw2=3.)
+        path.write_text(json.dumps(raw))
+        return path
+
+    def test_full_report_accepts_validated_shower_losses_and_keeps_source_normalization(self):
+        for finite_guard in (False, True):
+            with self.subTest(finite_guard=finite_guard), tempfile.TemporaryDirectory() as tmp:
+                directory = Path(tmp)
+                manifest = self._matched_manifest(directory, finite_guard=finite_guard)
+                result = generate_report([manifest], directory / "report", record_loader=self._strict_loader)
+                self.assertTrue(result["audit"]["ok"], result["audit"]["errors"])
+                sample = result["samples"][0]
+                events = sample["detector_audit"]["events"]
+                self.assertEqual(events["manifest_requested"], 3)
+                self.assertEqual(events["expected_read"], 2)
+                self.assertEqual(events["summary_read"], 2)
+                self.assertEqual(events["shower_attempted"], 3)
+                self.assertEqual(events["shower_discarded"], 1)
+                self.assertAlmostEqual(sample["selected"]["cross_section_pb"], 8. / 3.)
+
+    def test_matched_report_rejects_wrong_analyzed_count_and_invalid_completion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            manifest = self._matched_manifest(directory)
+
+            def wrong_summary(path):
+                records = self._strict_loader(path)
+                records.metadata["summary"]["events_read"] = 3
+                return records
+
+            result = generate_report([manifest], directory / "wrong-count", record_loader=wrong_summary)
+            self.assertTrue(any("completed shower saved_events disagrees" in e for e in result["audit"]["errors"]))
+            self.assertTrue(any("SourceEvents entries" in e for e in result["audit"]["errors"]))
+            raw = json.loads(manifest.read_text())
+            raw["samples"][0]["shower_completion"]["saved_events"] = 3
+            manifest.write_text(json.dumps(raw))
+            result = generate_report([manifest], directory / "invalid-proof", record_loader=self._strict_loader)
+            self.assertTrue(any("matched shower event count: HO shower completion fingerprint changed" in e
+                                for e in result["audit"]["errors"]))
+
+    def test_report_without_matched_proof_still_requires_requested_event_count(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            manifest = self._matched_manifest(directory)
+            raw = json.loads(manifest.read_text())
+            del raw["samples"][0]["shower_completion"]
+            manifest.write_text(json.dumps(raw))
+            result = generate_report([manifest], directory / "missing-proof", record_loader=self._strict_loader)
+            self.assertTrue(any("matched shower event count" in e for e in result["audit"]["errors"]))
+            del raw["samples"][0]["order"]
+            manifest.write_text(json.dumps(raw))
+            result = generate_report([manifest], directory / "lo", record_loader=self._strict_loader)
+            self.assertTrue(any("manifest nevents_requested disagrees" in e for e in result["audit"]["errors"]))
+
     def test_plot_modes_change_display_only(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)

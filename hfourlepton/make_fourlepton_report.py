@@ -1304,18 +1304,23 @@ def _final_stage(stages: Sequence[CutStage]) -> CutStage:
     return stages[-1]
 
 
+def _validated_shower_completion(sample: ManifestSample, *, verify_files: bool = False) -> dict[str, Any]:
+    from hgammagamma import ho_shower_completion as completion
+
+    saved = sample.raw["shower_completion"]
+    return completion.validate_completion(saved, {"sample": sample.name,
+        "nevents_requested": sample.raw["nevents_requested"],
+        "lhe_file": sample.raw["input_lhe"], "lhe": {"events": saved["lhe_events"]}},
+        directory=Path(saved["herwig_dir"]).parent if verify_files else None)
+
+
 def _normalization(
     sample: ManifestSample, generated: WeightStats, selected: WeightStats, audit: Audit
 ) -> dict[str, Any]:
     manifest_normalization = nested_mapping(sample.raw, "normalization")
     if sample.raw.get("order") == "ho":
         try:
-            from hgammagamma import ho_shower_completion as completion
-            saved = sample.raw["shower_completion"]
-            completion.validate_completion(saved, {"sample": sample.name,
-                "nevents_requested": sample.raw["nevents_requested"],
-                "lhe_file": sample.raw["input_lhe"], "lhe": {"events": saved["lhe_events"]}},
-                directory=Path(saved["herwig_dir"]).parent)
+            saved = _validated_shower_completion(sample, verify_files=True)
             if generated.entries != saved["saved_events"]:
                 raise ValueError("SourceEvents count differs from the completed shower")
             for observed, key in ((generated.sumw, "sum_weight"), (generated.sumw2, "sum_weight_squared"),
@@ -1788,12 +1793,26 @@ def detector_provenance_audit(
                     f"{source_name} lacks required manifest field {field!r}"
                 )
 
-    events_expected = sample.raw.get("nevents_requested")
+    events_requested = sample.raw.get("nevents_requested")
+    events_expected = events_requested
+    events_expected_source = "manifest nevents_requested"
+    shower = None
+    if sample.raw.get("order") == "ho":
+        try:
+            # A finite matched shower can discard events. Its validated saved
+            # population defines the analyzer input; signed source weights still
+            # define normalization, checked separately in _normalization.
+            shower = _validated_shower_completion(sample)
+            events_expected = shower["saved_events"]
+            events_expected_source = "completed shower saved_events"
+        except (ValueError, KeyError, TypeError) as error:
+            local_audit.errors.append(f"matched shower event count: {error}")
+            events_expected = None
     events_summary = summary.get("events_read")
     if events_expected is not None and events_summary is not None:
         if int(events_expected) != int(events_summary):
             local_audit.errors.append(
-                "manifest nevents_requested disagrees with analyzer summary "
+                f"{events_expected_source} disagrees with analyzer summary "
                 f"({events_expected!r} vs {events_summary!r})"
             )
     elif strict_contract and events_expected is not None:
@@ -1829,7 +1848,11 @@ def detector_provenance_audit(
             "analyzer_summary_present": bool(summary),
             "checks": checks,
             "events": {
-                "manifest_requested": events_expected,
+                "manifest_requested": events_requested,
+                "expected_read": events_expected,
+                "expected_read_source": events_expected_source,
+                "shower_attempted": shower["attempted_events"] if shower else None,
+                "shower_discarded": shower["discarded_events"] if shower else None,
                 "summary_read": events_summary,
                 "source_tree_entries": len(records.source_events),
                 "summary_four_lepton_rows": rows_summary,
