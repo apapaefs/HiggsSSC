@@ -279,6 +279,43 @@ these steps and continues with the MadSpin migration after successful generation
 
 ## Prepare and launch
 
+### Finite-LHE shower replay recovery
+
+ThePEG 2.3 can silently reopen an exhausted LHE file on the final requested
+event even when `AllowedToReOpen No` is set. In the November 2 minimal run,
+one discarded event led to one extra input attempt and a repeated first hard
+event at the end of each affected shower. The completion validator rejected
+these outputs with `inconsistent source/generated/saved shower counts`.
+
+New four-lepton HO showers request `N_LHE + 2` execution slots and require the
+first end-of-file exception with exactly `N_LHE` source attempts. The extra
+slots are an end-of-file guard, not additional generated events. One extra slot
+would still hit the bug when no event is discarded. The execution plan is saved
+as `herwig/shower_execution.json` and hashed into the completion record. All
+events in the finite source are processed, including a native producer's small
+surplus over the requested budget. Discarded shower events have zero response
+and their signed source weights still enter the normalization denominator.
+Existing valid completion records remain usable.
+
+For the affected managed minimal campaign, audit and then apply the narrow
+recovery before repeating its original launch command:
+
+```bash
+python3 hfourlepton/repair_shower_replay.py --run-tag fourl13_minimal_nlofix
+python3 hfourlepton/repair_shower_replay.py --run-tag fourl13_minimal_nlofix --apply
+bash hfourlepton/plans/fourl13_minimal_nlofix/run.sh
+```
+
+The first two commands start no simulations. The repair validates hard
+production, completed analyses, decay provenance and the specific failed
+showers. It archives the invalid showers, worker logs and original metadata
+under `runs/TAG/recovery/finite-lhe-shower-v1/`, and migrates only the known
+shower-launcher checksum change. Hard events, completed decays and successful
+analyses are unchanged. The final command repeats the affected showers and
+continues the unfinished samples. Do not use `--force` or delete the run.
+
+### Campaign commands
+
 Run these commands from the repository root. `prepare` writes review cards
 under `hfourlepton/plans/TAG/` and invokes no simulation programs. The managed
 `run` action generates its executable cards from the same configuration; editing

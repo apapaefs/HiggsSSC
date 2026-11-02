@@ -27,6 +27,24 @@ MOMENTS = ("sum_weight", "sum_abs_weight", "sum_weight_squared")
 REL_TOL = 1.e-7
 
 
+def finite_shower_plan(sample, requested, lhe_events):
+    """Consume a finite LHE once, stopping on EOF before ThePEG's last event.
+
+    ThePEG 2.3's reopen() checks AllowedToReOpen only when events remain in
+    the generator request. At its last requested event it can silently replay
+    the file. EOF occurs by source_count + 1, so source_count + 2 leaves a
+    strictly positive margin, including when there are no discarded events.
+    Native producers can supply a few extra events; all are accounted for.
+    """
+    _integer(requested, "requested_events", minimum=1)
+    _integer(lhe_events, "lhe_events", minimum=1)
+    if lhe_events < requested:
+        raise ValueError("finite shower input has fewer events than requested")
+    return {"schema_version": 1, "kind": "finite_lhe_shower", "sample": sample,
+            "requested_events": requested, "lhe_events": lhe_events,
+            "execution_events": lhe_events + 2}
+
+
 def completion_fingerprint(record):
     """Canonical digest; call again if adding source_weights to an existing record."""
     payload = {key: value for key, value in record.items() if key != "fingerprint"}
@@ -318,6 +336,10 @@ def build_completion(herwig_dir, sample_name, requested_events, lhe_events,
               "normalization_population": "consumed_signed_source_weights",
               "reader_lhe_path": reader_lhe_path,
               "failed_event_response": "zero_unsimulated_response", **parsed}
+    plan_path = herwig_dir / "shower_execution.json"
+    if plan_path.exists():
+        record["execution_plan"] = json.loads(plan_path.read_text())
+        record["artifacts"]["execution_plan"] = _artifact(plan_path)
     if source_weights is not None:
         record["source_weights"] = copy.deepcopy(source_weights)
     record["fingerprint"] = completion_fingerprint(record)
@@ -488,9 +510,15 @@ def validate_completion(record, manifest, directory=None, *, require_source=True
     for key in ("requested_events", "lhe_events", "attempted_events", "generated_events", "saved_events"):
         _integer(record.get(key), key, minimum=1)
     _integer(record.get("discarded_events"), "discarded_events")
+    plan = record.get("execution_plan")
+    if plan is not None:
+        if (plan != finite_shower_plan(record["sample"], record["requested_events"], record["lhe_events"])
+                or record["termination"] != "source_exhausted"):
+            raise ValueError("finite shower must stop at the first source EOF")
+    maximum_saved = record["lhe_events"] if plan is not None else record["requested_events"]
     if (record["saved_events"] != record["generated_events"]
             or record["attempted_events"] > record["lhe_events"]
-            or record["generated_events"] > record["requested_events"]
+            or record["generated_events"] > maximum_saved
             or record["discarded_events"] != record["attempted_events"] - record["generated_events"]):
         raise ValueError("inconsistent source/generated/saved shower counts")
     counts = record.get("exception_counts", {})
@@ -513,7 +541,7 @@ def validate_completion(record, manifest, directory=None, *, require_source=True
             or any(counts[key] for key in ("setuperror", "maybeabort", "abortnow", "unknown"))):
         raise ValueError("unaccounted discarded events or fatal shower exceptions")
     if record["termination"] == "source_exhausted":
-        if (record["generated_events"] >= record["requested_events"]
+        if ((plan is None and record["generated_events"] >= record["requested_events"])
                 or record["attempted_events"] != record["lhe_events"] or counts["runerror"] != 1):
             raise ValueError("source exhaustion counts/runerror do not close")
     elif record["generated_events"] != record["requested_events"] or counts["runerror"]:
@@ -528,6 +556,8 @@ def validate_completion(record, manifest, directory=None, *, require_source=True
     artifacts = record.get("artifacts", {})
     if not isinstance(artifacts, dict) or any(key not in artifacts for key in ("run_log", "herwig_out", "herwig_log", "roots")):
         raise ValueError("missing shower artifact provenance")
+    if (plan is not None) != ("execution_plan" in artifacts):
+        raise ValueError("missing or unexpected finite-shower execution evidence")
     root_artifacts = artifacts["roots"]
     if (not isinstance(root_artifacts, list) or not all(isinstance(entry, dict) for entry in root_artifacts)
             or len(root_artifacts) != len(record["root_metadata"])
@@ -565,6 +595,11 @@ def validate_completion(record, manifest, directory=None, *, require_source=True
         herwig_dir = Path(record.get("herwig_dir", "")).resolve()
         if herwig_dir != directory / "herwig" and herwig_dir != directory:
             raise ValueError("shower completion belongs to a different sample directory")
+        if plan is not None:
+            plan_path = herwig_dir / "shower_execution.json"
+            if (artifacts["execution_plan"]["path"] != str(plan_path)
+                    or json.loads(plan_path.read_text()) != plan):
+                raise ValueError("finite-shower execution plan changed")
         parsed = _parse_logs(herwig_dir, record["sample"], record["termination"])
         for key in ("generated_events", "attempted_events", "saved_events", "exception_counts", "exception_classes",
                     "max_momentum_violation_mev"):

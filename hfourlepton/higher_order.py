@@ -491,10 +491,21 @@ def run_shower(sample, lhe, cfg):
             "nevents_requested": cfg.events_for(sample), "lhe": {"events": saved["lhe_events"]}}, directory=work)
     else:
         if not cfg.dry_run and list((directory / "events").glob("*.root")):
-            raise ValueError("partial shower output exists; inspect logs and use a new run tag")
+            raise ValueError("partial shower output exists; inspect logs before restarting. "
+                             "For the finite-LHE replay failure, use repair_shower_replay.py")
+        # Run beyond the finite source boundary, then require its first EOF.
+        # ThePEG 2.3 can silently reopen on its last requested event even with
+        # AllowedToReOpen No. One spare slot is insufficient when no event fails.
+        lhe_count = cfg.events_for(sample)
+        if not cfg.dry_run:
+            with four.open_maybe_gzip(lhe) as stream:
+                lhe_count = sum(line.strip() == "</event>" for line in stream)
+        execution = completion.finite_shower_plan(sample.name, cfg.events_for(sample), lhe_count)
+        four.write_text(directory / "shower_execution.json", json.dumps(execution, indent=2) + "\n",
+                        cfg, "finite LHE shower execution")
         if logged_command([cfg.herwig, "read", card_path], cfg, directory, directory / "read.log"):
             raise ValueError(f"Herwig read failed: {directory / 'read.log'}")
-        code = logged_command([cfg.herwig, "run", f"{sample.name}.run", f"-N{cfg.events_for(sample)}"], cfg, directory, directory / "run.log")
+        code = logged_command([cfg.herwig, "run", f"{sample.name}.run", f"-N{execution['execution_events']}"], cfg, directory, directory / "run.log")
         if cfg.dry_run:
             return work / f"{sample.name}_hwsim_roots.input", metadata
         termination = "source_exhausted" if code else "requested_events"
@@ -503,8 +514,6 @@ def run_shower(sample, lhe, cfg):
             raise ValueError("cannot audit shower ROOT output")
         root_info = json.loads((directory / "root-metadata.log").read_text().splitlines()[-1])
         # source_weight_summary checks complete event syntax and scans the full LHE maximum.
-        with four.open_maybe_gzip(lhe) as stream:
-            lhe_count = sum(line.strip() == "</event>" for line in stream)
         saved = completion.build_completion(directory, sample.name, cfg.events_for(sample), lhe_count, root_info, termination)
         saved["source_weights"] = completion.source_weight_summary(lhe, saved["attempted_events"])
         if cfg.preset == "minimal":

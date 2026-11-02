@@ -2,6 +2,7 @@
 
 import copy
 import gzip
+import json
 import math
 from pathlib import Path
 from string import Template
@@ -95,6 +96,60 @@ class ShowerCompletionTests(unittest.TestCase):
             metadata, termination, source_weights=weights)
         manifest["shower_completion"] = record
         return record, manifest
+
+    def test_finite_source_eof_with_zero_one_or_several_discarded_events(self):
+        for discarded in (0, 1, 3):
+            with self.subTest(discarded=discarded), TemporaryDirectory() as tmp:
+                fixture = self.fixture(tmp, weights=(1.,) * 6, saved=6-discarded,
+                                       requested=6, termination="source_exhausted")
+                plan = completion.finite_shower_plan(SAMPLE, 6, 6)
+                self.assertEqual(plan["execution_events"], 8)
+                (fixture[0] / "shower_execution.json").write_text(json.dumps(plan))
+                record, manifest = self.build(fixture)
+                completion.validate_completion(record, manifest, directory=fixture[0])
+                self.assertEqual(record["attempted_events"], 6)
+                self.assertEqual(record["discarded_events"], discarded)
+                self.assertEqual(record["source_weights"]["sum_weight"], 6.)
+
+    def test_finite_source_processes_native_surplus_without_replay(self):
+        with TemporaryDirectory() as tmp:
+            fixture = self.fixture(tmp, weights=(1.,) * 7, requested=6, termination="source_exhausted")
+            plan = completion.finite_shower_plan(SAMPLE, 6, 7)
+            (fixture[0] / "shower_execution.json").write_text(json.dumps(plan))
+            record, manifest = self.build(fixture)
+            self.assertEqual(completion.expected_analysis_events(manifest), 7)
+            self.assertEqual(record["source_weights"]["sum_weight"], 7.)
+
+    def test_finite_source_rejects_replay_normal_exit_and_changed_execution_plan(self):
+        for saved, attempted, termination in ((6, 7, "requested_events"), (6, 6, "requested_events"),
+                                              (6, 7, "source_exhausted")):
+            with self.subTest(saved=saved, attempted=attempted, termination=termination), TemporaryDirectory() as tmp:
+                fixture = self.fixture(tmp, weights=(1.,) * 6, saved=saved, attempts=attempted,
+                                       requested=6, termination=termination)
+                (fixture[0] / "shower_execution.json").write_text(json.dumps(
+                    completion.finite_shower_plan(SAMPLE, 6, 6)))
+                with self.assertRaises(ValueError):
+                    completion.build_completion(fixture[0], SAMPLE, 6, 6, fixture[2], termination)
+        with TemporaryDirectory() as tmp:
+            fixture = self.fixture(tmp, weights=(1.,) * 6, requested=6, termination="source_exhausted")
+            plan = completion.finite_shower_plan(SAMPLE, 6, 6)
+            path = fixture[0] / "shower_execution.json"
+            path.write_text(json.dumps(plan))
+            record, manifest = self.build(fixture)
+            plan["execution_events"] -= 1
+            path.write_text(json.dumps(plan))
+            with self.assertRaisesRegex(ValueError, "artifact changed"):
+                completion.validate_completion(record, manifest, directory=fixture[0])
+            with self.assertRaisesRegex(ValueError, "first source EOF"):
+                self.build(fixture)
+
+    def test_finite_source_rejects_short_input_and_unguarded_full_eof(self):
+        with self.assertRaisesRegex(ValueError, "fewer events"):
+            completion.finite_shower_plan(SAMPLE, 6, 5)
+        with TemporaryDirectory() as tmp:
+            fixture = self.fixture(tmp, weights=(1.,) * 6, requested=6, termination="source_exhausted")
+            with self.assertRaisesRegex(ValueError, "source exhaustion counts"):
+                self.build(fixture)
 
     def rounded_count_fixture(self, directory):
         # Synthetic metadata represents a large finalized shower. The small

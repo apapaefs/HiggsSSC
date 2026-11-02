@@ -50,7 +50,7 @@ def saved_configuration(work, tag):
     return saved, state_path, cfg
 
 
-def completed_production(sample, samples, cfg, *, require_count=True):
+def completed_production(sample, samples, cfg, *, require_count=True, adapter_sha256=None):
     """Validate a completed group without invoking any producer or staging step."""
     needed = four.group_event_count(sample.production_group_id, samples, cfg)
     if sample.matching == "POWHEG":
@@ -66,7 +66,7 @@ def completed_production(sample, samples, cfg, *, require_count=True):
         from hfourlepton.minimal_runtime import production_settings
         process, launch = ho.nlo_cards(sample, cfg, process_dir, needed)
         identity = dict(process_card=process, compile_card=ho.nlo_compile_card(launch), launch_card=launch,
-                        adapter_sha256=four.sha256_file(Path(ho.__file__)),
+                        adapter_sha256=adapter_sha256 or four.sha256_file(Path(ho.__file__)),
                         guard_sha256=four.sha256_file(Path(ho.__file__).with_name("mg5_guard.py")),
                         runtime=production_settings(sample, cfg))
         source = process_dir / "Events" / cfg.run_tag / "events.lhe.gz"
