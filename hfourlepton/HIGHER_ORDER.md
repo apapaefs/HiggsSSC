@@ -314,6 +314,34 @@ shower-launcher checksum change. Hard events, completed decays and successful
 analyses are unchanged. The final command repeats the affected showers and
 continues the unfinished samples. Do not use `--force` or delete the run.
 
+### Completed-manifest checksum after a report retry
+
+Older managed launchers re-entered the campaign when only reporting remained.
+The minimal workers reused their outputs but overwrote timing fields in the
+completed manifest, so the subsequent frozen-artifact check rejected that
+manifest. The corrected launcher validates the frozen analysis inventory and
+resumes directly at reporting. It leaves completed manifests and worker
+metadata unchanged on repeated runs.
+
+If an earlier retry has already stopped with `completed analysis product
+changed: .../manifest_perfect.json`, use the narrow recovery tool:
+
+```bash
+python3 hfourlepton/repair_completed_manifest.py --run-tag fourl13_minimal_nlofix
+python3 hfourlepton/repair_completed_manifest.py --run-tag fourl13_minimal_nlofix --apply
+bash hfourlepton/plans/fourl13_minimal_nlofix/run.sh
+```
+
+The audit requires all 54 ROOT/summary hashes to match the original frozen
+inventory, all workers to have resumed already-complete samples, unchanged
+physics fields in their saved job manifests, and valid configuration, hard
+production, source and shower provenance. The original manifest bytes are not
+reconstructed from an old checksum. Instead, an explicit re-audit authorizes
+updating only its managed checksum. The old state, current manifest and worker
+evidence are copied to `runs/TAG/recovery/completed-manifest-resume-v1/`.
+No LHE, ROOT, analyzer summary, campaign manifest or report is rewritten by the
+repair. The last command rebuilds the report and marks the pipeline complete.
+
 ### Campaign commands
 
 Run these commands from the repository root. `prepare` writes review cards

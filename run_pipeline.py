@@ -435,7 +435,16 @@ def run(pipeline, *, saved_artifacts_checked=False):
     args = pipeline.args
     if not saved_artifacts_checked:
         validate_saved_run_artifacts(args)
-    if args.workflow == "gammagamma-ho":
+    saved = read_state(args) if state_path(args).is_file() else {}
+    if args.workflow.startswith("fourlepton-") and saved.get("analysis_artifacts") is not None:
+        # Completed manifests are part of the sealed analysis inventory. Calling
+        # the campaign again rewrites timing fields, invalidating that inventory
+        # even when every worker only reuses existing results.
+        artifacts = physics_artifacts(args)
+        print("Verified completed four-lepton analysis; resuming at the report.")
+        progress(args, state="running", stage="report", error=None, analysis_artifacts=artifacts)
+        report(pipeline)
+    elif args.workflow == "gammagamma-ho":
         pipeline.run()
     elif args.workflow == "fourlepton-ho":
         from hfourlepton.workflow import run as run_four_ho

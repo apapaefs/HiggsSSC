@@ -52,9 +52,11 @@ class StudentPipelineTests(unittest.TestCase):
 
     def fourlepton_artifacts(self, args):
         directory, report = cli.locations(args)
-        for profile in ("perfect", "ssc"):
+        from hfourlepton import workflow
+        profiles = workflow.profiles(args) if args.workflow == "fourlepton-ho" else ("perfect", "ssc")
+        for profile in profiles:
             samples = []
-            for index in range(9):
+            for index in range(27 if args.workflow == "fourlepton-ho" else 9):
                 folder = directory / "analysis" / profile / str(index)
                 folder.mkdir(parents=True)
                 root = folder / "analysis.root"
@@ -64,7 +66,8 @@ class StudentPipelineTests(unittest.TestCase):
                 samples.append({"name": str(index), "status": "complete", "root_file": str(root),
                                 "analysis_summary": str(summary), "output_root_sha256": cli.shared.digest(root),
                                 "analysis_summary_sha256": cli.shared.digest(summary)})
-            cli.shared.save(directory / f"manifest_{profile}.json", {"samples": samples})
+            cli.shared.save(directory / f"manifest_{profile}.json", {"samples": samples,
+                "collider": {"sqrt_s_tev": args.energy_tev}, "production_wall_seconds": {"sample": 123.}})
         report.mkdir(parents=True)
         (report / "index.html").write_text("synthetic report")
 
@@ -366,6 +369,56 @@ class StudentPipelineTests(unittest.TestCase):
             self.assertEqual(report_args.plot_mode, "both")
             self.assertTrue(report_args.strict)
             self.assertEqual(len(report_args.manifests), 2)
+
+    def test_completed_fourlepton_resume_only_reports_and_preserves_sealed_files(self):
+        from hfourlepton import workflow
+        for order in ("fourlepton-lo", "fourlepton-ho"):
+            for state in ("failed", "complete"):
+                with self.subTest(workflow=order, state=state), self.repository() as root:
+                    options = ["--workflow", order, "--nevents", "100"]
+                    if order == "fourlepton-ho":
+                        options.extend(["--energy-tev", "13"])
+                    args = self.args(root, *options)
+                    self.fourlepton_artifacts(args)
+                    original = cli.physics_artifacts(args)
+                    before = {p: (Path(p).read_bytes(), Path(p).stat().st_mtime_ns) for p in original}
+                    cli.shared.save(cli.state_path(args), {"state": state, "stage": "report",
+                        "analysis_artifacts": original, "error": "previous report failure"})
+                    calls = []
+                    def child_call(label, argv):
+                        self.assertTrue(str(argv[1]).endswith("make_fourlepton_report.py"))
+                        self.assertEqual(cli.physics_artifacts(args), original)
+                        calls.append(label)
+                        (cli.locations(args)[1] / "index.html").write_text("new presentation")
+                    pipeline = SimpleNamespace(args=args, python=Path("private-python"), config={}, call=child_call,
+                        check=mock.Mock(side_effect=AssertionError("campaign check must not run")),
+                        run=mock.Mock(side_effect=AssertionError("generator must not run")))
+                    with mock.patch.object(workflow, "run", side_effect=AssertionError("campaign must not run")), \
+                            contextlib.redirect_stdout(io.StringIO()):
+                        cli.run(pipeline)
+                        cli.run(pipeline)  # A second resume must also leave metadata unchanged.
+                    self.assertEqual(calls, ["pilot-report", "pilot-report"])
+                    self.assertEqual(before, {p: (Path(p).read_bytes(), Path(p).stat().st_mtime_ns) for p in original})
+                    saved = cli.read_state(args)
+                    self.assertEqual(saved["state"], "complete")
+                    self.assertIsNone(saved["error"])
+                    self.assertEqual(saved["analysis_artifacts"], original)
+
+    def test_report_resume_rejects_changed_manifest_even_if_preflight_was_called(self):
+        with self.repository() as root:
+            args = self.args(root, "--workflow", "fourlepton-ho", "--energy-tev", "13")
+            self.fourlepton_artifacts(args)
+            original = cli.physics_artifacts(args)
+            cli.shared.save(cli.state_path(args), {"state": "failed", "analysis_artifacts": original})
+            manifest = cli.locations(args)[0] / "manifest_perfect.json"
+            raw = json.loads(manifest.read_text())
+            raw["production_wall_seconds"]["sample"] = 0.01
+            cli.shared.save(manifest, raw)
+            pipeline = SimpleNamespace(args=args, call=mock.Mock())
+            with self.assertRaisesRegex(ValueError, "completed analysis product changed"):
+                cli.run(pipeline, saved_artifacts_checked=True)
+            pipeline.call.assert_not_called()
+            self.assertEqual(cli.read_state(args)["analysis_artifacts"], original)
 
     def test_ho_legacy_summary_contract_and_matching_pilot_snapshot(self):
         with self.repository() as root:
