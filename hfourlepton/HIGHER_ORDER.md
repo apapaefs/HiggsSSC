@@ -669,9 +669,10 @@ tolerance is a broad implementation check, not the CMS uncertainty. Too few
 events or a disagreement produces `not_validated` and exit status 2. No
 normalization is tuned to the published measurement.
 
-This is an approximate particle-level benchmark. The saved HwSim objects do
-not provide the full prompt/hadron/Higgs ancestry needed here, so dressing
-and associated-production combinatorics differ from the experiment. The
+This is an approximate particle-level benchmark. Legacy HwSim outputs lack
+prompt/hadron/Higgs ancestry; CMS v3 requires the optional ancestry plugin
+described below. Associated-production combinatorics can still differ from
+the experiment. The
 `objects` tree contains soft stable particles as well: `PTCutParticles=0.4`
 controls reconstructed jet/MET inputs, not the saved stable-particle list.
 CMS detector
@@ -781,6 +782,19 @@ The independent seed avoids repeating the earlier event population. Replace
 the old qq samples in a combined analysis manifest; do not add two copies of
 their physical cross sections. Thirty-two generation cores leave eight cores
 for the ancestry validation showers on a 40-core allocation.
+
+Once both campaigns are complete, assemble them and rerun the strict report,
+acceptance check, cuts and XGBoost without changing either input campaign:
+
+```bash
+PYTHONNOUSERSITE=1 inputs/pipeline/venv/bin/python hfourlepton/replace_qq_backgrounds.py \
+  --base-manifest hfourlepton/runs/YOUR_RUN/revisions/cms_v3/manifest_perfect.json \
+  --qq-manifest hfourlepton/runs/fourl13_qq200k_truth/manifest_perfect.json \
+  --output-dir hfourlepton/runs/YOUR_RUN/revisions/cms_v3_qq200k
+```
+
+This checks the physics settings and source checksums, replaces exactly the
+three qq channels, and keeps the cut/ML effective-count requirements at 400/100.
 
 ## Local implementation checks
 

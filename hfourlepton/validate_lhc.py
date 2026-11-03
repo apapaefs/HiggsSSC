@@ -22,6 +22,11 @@ REFERENCE = {"ggf": (.402, .001), "vbf": (.445, .002), "wh": (.329, .002),
 SOURCE = "https://arxiv.org/abs/2103.04956"
 
 
+def ancestry_aware(samples):
+    return bool(samples) and all(s.get("selection_version") == "cms_fiducial_v3"
+                                 and s.get("ancestry_schema_version") == 1 for s in samples)
+
+
 def compare(data, metadata, *, relative_tolerance=.10, min_effective_events=1000):
     rows = []
     for mode, (reference, ref_error) in REFERENCE.items():
@@ -57,13 +62,15 @@ def main(argv=None):
     card = read_card(REPO / "hfourlepton/analysis_cards/lhc13_cuts.json")
     data, metadata, _ = load_dataset(args.manifest, card, 1.)
     rows = compare(data, metadata)
+    truth = ancestry_aware(raw["samples"])
     output = {"status": "pass_approximate_acceptance_check" if all(r["status"] == "pass" for r in rows) else "not_validated",
         "selection_versions": sorted({s.get("selection_version", "legacy_unversioned") for s in raw["samples"]}),
         "reference": SOURCE, "reference_table": 8, "rows": rows,
         "relative_tolerance": .10, "minimum_selected_effective_events": 1000,
         "tolerance_meaning": "10% relative acceptance agreement is a broad implementation benchmark, not the CMS theory uncertainty",
-        "limitations": ["HwSim objects do not carry prompt/hadron ancestry; dressing and isolation use stable particles",
-                        "No CMS lepton ID, impact parameter, vertex or detector-resolution model",
+        "object_definition": "prompt_direct_emu_with_lineage_fsr" if truth else "legacy_stable_particle_proxy",
+        "limitations": ([] if truth else ["Legacy HwSim objects lack prompt/hadron ancestry; dressing and isolation use stable particles"]) +
+                       ["No CMS lepton ID, impact parameter, vertex or detector-resolution model",
                         "Associated-production combinatorial signal is not separately fitted",
                         "No ATLAS matrix-element pairing or lepton-jet overlap emulation",
                         "Native NLO rates for non-ggF modes; pure-HEFT ihixs normalization for ggF"],

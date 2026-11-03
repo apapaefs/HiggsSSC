@@ -7,6 +7,14 @@ from hfourlepton import ancestry_shower, reprocess
 
 
 class AncestryShowerTest(unittest.TestCase):
+    def test_validation_description_requires_both_version_and_schema(self):
+        from hfourlepton.validate_lhc import ancestry_aware
+        truth = dict(selection_version="cms_fiducial_v3", ancestry_schema_version=1)
+        self.assertTrue(ancestry_aware([truth]))
+        self.assertFalse(ancestry_aware([]))
+        self.assertFalse(ancestry_aware([truth, dict(selection_version="cms_fiducial_v2")]))
+        self.assertFalse(ancestry_aware([dict(selection_version="cms_fiducial_v3")]))
+
     def test_new_campaign_uses_private_binary_and_ancestry(self):
         from hfourlepton import run_four_lepton_campaign as four, higher_order
         cfg = four.parse_config(["--order", "ho", "--selection-profile", "cms", "--run-tag", "truth_test",

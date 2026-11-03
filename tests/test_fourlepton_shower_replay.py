@@ -70,6 +70,15 @@ class RecoveryTests(unittest.TestCase):
         self.tmp = TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
+        # This repair deliberately accepts one historical adapter revision.
+        # Use consistent synthetic on-disk evidence instead of requiring the
+        # current development checkout to still be that old revision.
+        self.adapter = self.root / "audited_adapter.py"
+        self.adapter.write_text("synthetic audited finite-source adapter\n")
+        for patcher in (patch.object(ho, "__file__", str(self.adapter)),
+                        patch.object(repair, "FIXED_ADAPTER", four.sha256_file(self.adapter))):
+            patcher.start()
+            self.addCleanup(patcher.stop)
         patcher = patch.object(four, "SCRIPT_DIR", self.root)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -141,6 +150,12 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "beyond the shower launcher"):
             repair.repair({"state": "failed"}, self.state, self.cfg, apply=True)
         self.assertTrue(self.shower.exists())
+
+    def test_second_apply_rejects_modified_adapter_evidence(self):
+        repair.repair({"state": "failed"}, self.state, self.cfg, apply=True)
+        self.adapter.write_text("modified adapter; historical repair must reject this\n")
+        with self.assertRaisesRegex(ValueError, "evidence is missing or changed"):
+            repair.repair({"state": "failed"}, self.state, self.cfg, apply=True)
 
     def test_failed_metadata_write_rolls_back_markers_shower_and_workers(self):
         original = self.cfg.manifest_path.read_bytes()
