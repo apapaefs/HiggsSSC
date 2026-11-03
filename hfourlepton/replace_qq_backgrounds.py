@@ -62,6 +62,17 @@ def assemble(base, replacement, provenance):
     return result
 
 
+def statistical_support(cuts, ml):
+    cut_totals = cuts["cuts_full_sample"]["totals"]
+    test = ml.get("xgboost_test")
+    ml_totals = test["totals"] if test else None
+    return {"cuts_supported": bool(cut_totals["statistically_supported"]),
+            "cuts_background_effective_events": cut_totals["background"]["effective_count"],
+            "ml_supported": bool(ml.get("threshold") is not None and ml_totals
+                                 and ml_totals["statistically_supported"]),
+            "ml_test_background_effective_events": ml_totals["background"]["effective_count"] if ml_totals else None}
+
+
 def execute(base_path, replacement_path, output, luminosity):
     base, _ = revision.audit_parent(base_path)
     replacement, _ = revision.audit_parent(replacement_path)
@@ -107,12 +118,17 @@ def execute(base_path, replacement_path, output, luminosity):
                 revision.save(path, card)
             revision.stage(output, name, stage_id, lambda work: [py, REPO / "hfourlepton/analyze_fourlepton.py", name,
                    "--manifest", manifest, "--config", path, "--output-dir", work, "--luminosity-fb", luminosity])
-        state.update(state="complete", validation_status=validation["result"])
+        support = statistical_support(json.loads((output / "cuts/summary.json").read_text()),
+                                      json.loads((output / "xgboost/summary.json").read_text()))
+        statistics = "supported" if support["cuts_supported"] and support["ml_supported"] else "more_statistics_needed"
+        state.update(state="complete", validation_status=validation["result"],
+                     statistical_support=support, statistics_status=statistics)
         revision.save(state_path, state)
         links = "".join(f'<li><a href="{name}/index.html">{name}</a></li>'
                         for name in ("report", "lhc_validation", "cuts", "xgboost"))
         (output / "index.html").write_text('<!doctype html><meta charset="utf-8"><title>CMS v3 validation</title>'
-            f'<h1>CMS v3 with independent qq statistics</h1><p>{validation["result"]}</p><ul>{links}</ul>')
+            f'<h1>CMS v3 with independent qq statistics</h1><p>{validation["result"]}</p>'
+            f'<p>Cut and ML statistical support: {statistics}</p><ul>{links}</ul>')
         print("Completed:", output / "index.html")
 
 

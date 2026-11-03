@@ -18,6 +18,16 @@ def fixtures():
 
 
 class BackgroundAssemblyTest(unittest.TestCase):
+    def test_finishing_training_does_not_imply_supported_statistics(self):
+        cuts = {"cuts_full_sample": {"totals": {"statistically_supported": True,
+                 "background": {"effective_count": 1000.}}}}
+        ml = {"threshold": {"threshold": .5}, "xgboost_test": {"totals": {
+              "statistically_supported": False, "background": {"effective_count": 90.}}}}
+        self.assertFalse(assembly.statistical_support(cuts, ml)["ml_supported"])
+        ml["xgboost_test"]["totals"]["statistically_supported"] = True
+        self.assertTrue(assembly.statistical_support(cuts, ml)["ml_supported"])
+        self.assertFalse(assembly.statistical_support(cuts, {"threshold": None})["ml_supported"])
+
     def test_replacement_does_not_double_count_rates_or_mutate_inputs(self):
         base, replacement = fixtures()
         original = copy.deepcopy((base, replacement))
