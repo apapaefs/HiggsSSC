@@ -687,7 +687,7 @@ not validate the historical SSC resolution or establish discovery reach.
 
 The `cms_fiducial_v2` selection corrects two differences found in the first
 13 TeV minimal campaign. Photon dressing uses ΔR < 0.3, following the
-fiducial definition in [CMS HIG-16-041, section 10.3](https://arxiv.org/pdf/1706.09936),
+fiducial definition in [CMS HIG-16-041, section 10.2](https://arxiv.org/pdf/1706.09936),
 which [CMS HIG-19-001](https://arxiv.org/pdf/2103.04956) also uses. For four
 same-flavour leptons, a candidate is rejected if an alternative pairing has
 a Z closer to its nominal mass and a companion pair below 12 GeV
@@ -738,6 +738,12 @@ these selection rules does not establish closure. Revisit ancestry and
 associated-production combinatorics before interpreting a remaining offset.
 The original background variance was dominated by qq→4ℓ. Use the corrected
 outputs to revise the event budget for those channels first.
+
+The [3 November CMS validation audit](../docs/FOURLEPTON_VALIDATION_AUDIT.md)
+identifies the remaining photon-ancestry and isolation mismatch, quantifies
+its effect with read-only variations, and projects the qq-background event
+budget. The v2 acceptance comparison remains provisional; counting all
+photons in isolation is a diagnostic variation, not a validated correction.
 
 ## Local implementation checks
 
