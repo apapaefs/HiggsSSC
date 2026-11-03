@@ -58,6 +58,7 @@ def main(argv=None):
     data, metadata, _ = load_dataset(args.manifest, card, 1.)
     rows = compare(data, metadata)
     output = {"status": "pass_approximate_acceptance_check" if all(r["status"] == "pass" for r in rows) else "not_validated",
+        "selection_versions": sorted({s.get("selection_version", "legacy_unversioned") for s in raw["samples"]}),
         "reference": SOURCE, "reference_table": 8, "rows": rows,
         "relative_tolerance": .10, "minimum_selected_effective_events": 1000,
         "tolerance_meaning": "10% relative acceptance agreement is a broad implementation benchmark, not the CMS theory uncertainty",

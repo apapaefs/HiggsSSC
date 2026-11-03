@@ -500,6 +500,16 @@ void test_cms_and_ssc_selection() {
   cms.selection_profile = "cms";
   Config ssc;
   ssc.selection_profile = "ssc";
+  const std::vector<Particle> with_photons{
+      test_particle(11, 25., 0., 0., 0),
+      test_particle(22, 3., 0., 0.2, 1),
+      test_particle(22, 2., 0., 0.300001, 2)};
+  Diagnostics dressing_diagnostics;
+  const auto cms_response = response_leptons(with_photons, cms, 0, dressing_diagnostics);
+  require(cms_response[0].dressed_photon_indices == std::vector<int>{1},
+          "CMS response dresses photons inside 0.3 and excludes those outside");
+  require(build_dressed_leptons(with_photons, ssc)[0].dressed_photon_indices.empty(),
+          "SSC dressing keeps its 0.1 cone");
   require(passes_baseline(test_lepton(11, 8., 1.08, 0., 0), cms),
           "CMS electrons have a 7 GeV threshold and no GEM crack");
   require(!passes_baseline(test_lepton(11, 8., 0., 0., 0), ssc),
@@ -528,6 +538,22 @@ void test_cms_and_ssc_selection() {
   leptons[2] = test_lepton(13, 20., 0., 0.01, 2);
   require(!lhc_topology_pass({{0, 1, 2, 3}}, leptons),
           "same-sign pairs also enter the angular separation cut");
+
+  // The closest Z accompanies an 8 GeV pair. A second pairing has both
+  // masses above 12 GeV and would incorrectly rescue these same four leptons.
+  leptons = {test_lepton(11, 0.5*kZMassGeV, 0., 0., 0),
+             test_lepton(-11, 0.5*kZMassGeV, 0., kPi, 1),
+             test_lepton(11, 20., 0., 2., 2),
+             test_lepton(-11, 20., 0., 2.4, 3)};
+  require((analyze_subset(leptons, subset, ssc).cut_mask & kSelectedMask) == kSelectedMask,
+          "veto fixture passes the original SSC selection");
+  require((analyze_subset(leptons, subset, cms).cut_mask & kSelectedMask) != kSelectedMask,
+          "CMS rejects the alternative low-mass resonance pairing");
+  leptons.push_back(test_lepton(13, 20., 0., 0.8, 4));
+  leptons.push_back(test_lepton(-13, 20., 0., 2.8, 5));
+  const auto rescued = analyze_subset(leptons, {0, 1, 2, 3, 4, 5}, cms);
+  require((rescued.cut_mask & kSelectedMask) == kSelectedMask && rescued.channel == 3,
+          "CMS still accepts a different valid quadruplet in a six-lepton event");
 }
 
 void test_resolution_widths() {

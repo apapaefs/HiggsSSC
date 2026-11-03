@@ -669,9 +669,12 @@ tolerance is a broad implementation check, not the CMS uncertainty. Too few
 events or a disagreement produces `not_validated` and exit status 2. No
 normalization is tuned to the published measurement.
 
-This is an approximate particle-level benchmark. HwSim lacks prompt/hadron
-ancestry and stores particles above 0.4 GeV, so dressing, isolation and
-associated-production combinatorics differ from the experiment. CMS detector
+This is an approximate particle-level benchmark. The saved HwSim objects do
+not provide the full prompt/hadron/Higgs ancestry needed here, so dressing
+and associated-production combinatorics differ from the experiment. The
+`objects` tree contains soft stable particles as well: `PTCutParticles=0.4`
+controls reconstructed jet/MET inputs, not the saved stable-particle list.
+CMS detector
 ID, impact-parameter and vertex selection are not emulated. An
 [ATLAS four-lepton measurement](https://arxiv.org/abs/2004.03969) also uses
 different kinematic thresholds, a matrix-element choice with extra leptons,
@@ -679,6 +682,62 @@ and lepton–jet overlap rules. No separate numerical ATLAS comparison or
 experimental likelihood is implemented. Agreement in this CMS benchmark
 would support the basic selection and acceptance implementation; it would
 not validate the historical SSC resolution or establish discovery reach.
+
+### Reprocess the CMS selection using saved showers
+
+The `cms_fiducial_v2` selection corrects two differences found in the first
+13 TeV minimal campaign. Photon dressing uses ΔR < 0.3, following the
+fiducial definition in [CMS HIG-16-041, section 10.3](https://arxiv.org/pdf/1706.09936),
+which [CMS HIG-19-001](https://arxiv.org/pdf/2103.04956) also uses. For four
+same-flavour leptons, a candidate is rejected if an alternative pairing has
+a Z closer to its nominal mass and a companion pair below 12 GeV
+(HIG-19-001, section 4). Other valid quadruplets in the event are still
+considered. GEM/SSC selection and detector response are unchanged.
+
+From the repository root on Timur, run:
+
+```bash
+python3 run_pipeline.py reprocess --workflow fourlepton-ho \
+  --energy-tev 13 --run-tag fourl13_minimal_nlofix \
+  --revision cms_v2 --jobs 4
+```
+
+This verifies the completed shower records and original analysis checksums,
+builds a private analyzer, and writes a separate reconstruction, strict report,
+acceptance comparison, cut analysis and XGBoost analysis. It does not generate
+events, run MadSpin, shower events, or replace the original campaign products.
+Seeds, signed source-weight normalization, optional weights and hard-event
+group identities are preserved. The new manifest and both analyzer metadata
+records identify the selection version and its dressing/veto settings.
+
+Results are under
+`hfourlepton/runs/fourl13_minimal_nlofix/revisions/cms_v2/index.html`.
+Use the same command to resume an interrupted revision; it verifies and skips
+completed outputs. Failed attempts are kept in separate directories. A changed
+analyzer, input, card or analysis setting requires a new revision name.
+
+```bash
+python3 run_pipeline.py status --workflow fourlepton-ho \
+  --energy-tev 13 --run-tag fourl13_minimal_nlofix --revision cms_v2
+```
+
+An acceptance result of `not_validated` is recorded separately from execution
+completion, and the cut/ML analyses still run. Statistical requirements stay
+at 400 effective background events for cuts and 100 for the minimal ML card.
+Missing sensitivity estimates or an unset classifier threshold still require
+more statistics; they are not converted into successful physics checks.
+
+For later custom cut/ML cards, invoke `analyze_fourlepton.py` with the revision's
+`manifest_perfect.json`, the chosen card, and a fresh output directory. Reuse
+the existing event groups for a consistent train/validation/test split.
+
+The November 2026 read-only ttH diagnostic gave 34.75% acceptance with the
+original selection and 35.92% with both corrections, compared with 31.50% in
+CMS Table 8. This is still an unresolved acceptance comparison. Correcting
+these selection rules does not establish closure. Revisit ancestry and
+associated-production combinatorics before interpreting a remaining offset.
+The original background variance was dominated by qq→4ℓ. Use the corrected
+outputs to revise the event budget for those channels first.
 
 ## Local implementation checks
 

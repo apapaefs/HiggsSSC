@@ -106,6 +106,9 @@ def load_dataset(manifest, card, luminosity, *, for_ml=False):
     if names - set(card["required_samples"]):
         raise ValueError("manifest contains samples outside this card's declared sample inventory")
     audit_disjoint_slices(bundle.samples)
+    versions = {s.raw.get("selection_version", "legacy_unversioned") for s in bundle.samples}
+    if len(versions) != 1:
+        raise ValueError("samples use different selection versions; reprocess them together")
     multiplicities = {}
     for sample in bundle.samples:
         group = sample.raw.get("analysis_source_group", sample.production_group_id) or sample.name

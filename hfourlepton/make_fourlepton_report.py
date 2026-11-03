@@ -701,6 +701,9 @@ METADATA_BRANCH_ALIASES: dict[str, tuple[str, ...]] = {
     "schema_version": ("schema_version",),
     "response_profile": ("response_profile", "detector_profile", "detector_response"),
     "selection_profile": ("selection_profile",),
+    "selection_version": ("selection_version",),
+    "photon_dressing_dr": ("photon_dressing_dr",),
+    "alternative_pair_veto": ("alternative_pair_veto",),
     "sample": ("sample", "sample_name"),
     "category": ("category",),
     "requested_channel": ("requested_channel", "channel"),
@@ -887,6 +890,7 @@ def _read_with_pyroot(path: Path) -> RootRecords:
                             in {
                                 "response_profile",
                                 "selection_profile",
+                                "selection_version",
                                 "sample",
                                 "category",
                                 "requested_channel",
@@ -1609,6 +1613,7 @@ def _runtime_values_equal(field: str, expected: Any, actual: Any) -> bool:
     if field in {
         "weight_scale",
         "muon_resolution_scale",
+        "photon_dressing_dr",
         "electron_efficiency",
         "muon_efficiency",
         "trigger_4e_efficiency",
@@ -1626,7 +1631,7 @@ def _runtime_values_equal(field: str, expected: Any, actual: Any) -> bool:
                 abs_tol=1.0e-15,
             )
         )
-    if field == "em_pileup_noise_enabled":
+    if field in {"em_pileup_noise_enabled", "alternative_pair_veto"}:
         return optional_bool(expected) is not None and optional_bool(expected) == optional_bool(
             actual
         )
@@ -1668,6 +1673,9 @@ def _expected_runtime_metadata(sample: ManifestSample) -> dict[str, Any]:
         "schema_version": 1,
         "response_profile": sample.detector_profile,
         "selection_profile": sample.raw.get("selection_profile"),
+        "selection_version": sample.raw.get("selection_version"),
+        "photon_dressing_dr": sample.raw.get("photon_dressing_dr"),
+        "alternative_pair_veto": sample.raw.get("alternative_pair_veto"),
         "sample": sample.name,
         "category": sample.category,
         "requested_channel": sample.channel,

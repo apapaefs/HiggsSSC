@@ -121,6 +121,11 @@ Add `--event-multiplier 2` with a new tag to double every sample; use
 `--energy-tev 40` and a separate tag for the SSC. The 1–2 day target on 40 cores
 still needs a full timing run. You launch all simulations yourself.
 
+For an existing 13 TeV HO campaign, `reprocess --revision NAME` rebuilds the
+CMS selection from saved showers and writes separate report, validation,
+cut and XGBoost results. It does not rerun event generation. See the
+[CMS reprocessing instructions](hfourlepton/HIGHER_ORDER.md#reprocess-the-cms-selection-using-saved-showers).
+
 ## Next steps and references
 
 - [Additional cuts and optional XGBoost](docs/ANALYSIS.md).

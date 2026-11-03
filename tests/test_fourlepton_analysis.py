@@ -119,12 +119,35 @@ class FourLeptonAnalyzerIntegrationTest(unittest.TestCase):
         records = report.load_root_records(output)
         self.assertFalse(records.audit.errors, records.audit.errors)
         self.assertEqual(records.metadata["selection_profile"], "cms")
+        self.assertEqual(records.metadata["selection_version"], "cms_fiducial_v2")
+        self.assertAlmostEqual(records.metadata["photon_dressing_dr"], .3)
+        self.assertTrue(records.metadata["alternative_pair_veto"])
         self.assertTrue(records.four_lepton)
         for row in records.four_lepton:
             self.assertEqual(len(row["lepton_pt"]), 4)
             self.assertTrue(all(math.isfinite(pt) for pt in row["lepton_pt"]))
         summary = json.loads(output.with_suffix(".summary.json").read_text())
         self.assertEqual(summary["selection_profile"], "cms")
+        self.assertEqual(summary["selection_version"], "cms_fiducial_v2")
+
+    def test_reprocess_saved_synthetic_shower_preserves_weights(self) -> None:
+        from hfourlepton import reprocess, make_fourlepton_report as report
+        inputs = self.work / "reprocess.input"
+        inputs.write_text(str(self.full_input) + "\n")
+        original = self.run_analyzer(inputs, profile="perfect", sample="reprocess_fixture",
+                                     extra_args=("--selection-profile", "cms", "--category", "signal", "--channel", "4e"))
+        before = json.loads(original.with_suffix(".summary.json").read_text())
+        original_hash = reprocess.digest(original)
+        sample = dict(name="reprocess_fixture", category="signal", channel="4e",
+                      normalization={"weight_scale": 1.}, optional_weight_names_file=None)
+        entry = reprocess.reconstruct(sample, before, {"run_tag": "revision"},
+                                      self.work / "revision", self.analyzer)
+        self.assertEqual(entry["normalization"], sample["normalization"])
+        self.assertEqual(reprocess.digest(original), original_hash)
+        records = report.load_root_records(Path(entry["output_root"]))
+        self.assertFalse(records.audit.errors, records.audit.errors)
+        self.assertEqual(records.metadata["selection_version"], "cms_fiducial_v2")
+        self.assertEqual(len(records.source_events), before["events_read"])
 
     def test_perfect_cut_masks_named_schema_and_signed_weights(self) -> None:
         output = self.run_analyzer(

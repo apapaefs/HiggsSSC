@@ -318,9 +318,10 @@ struct FourLeptonRecord {
 
 std::string cut_mask_definition(const Config& config = Config{}) {
   if (config.selection_profile != "gem") {
-    return "bit0:at_least_four_reconstructed;bit1:pt_eta_acceptance;"
+    return std::string("bit0:at_least_four_reconstructed;bit1:pt_eta_acceptance;"
            "bit2:electron_crack_acceptance;bit3:isolation;"
-           "bit4:disjoint_ossf_pairing;bit5:os_mass_pt_dr;"
+           "bit4:disjoint_ossf_pairing;bit5:os_mass_pt_dr") +
+           (config.selection_profile == "cms" ? "_alternative_pair_veto;" : ";") +
            "bit6:z1_40_120;bit7:z2_12_120;"
            "bit8:trigger_weight_applied;bit9:selected";
   }
@@ -861,7 +862,19 @@ bool is_ossf(const Lepton& first, const Lepton& second) {
   return first.flavour == second.flavour && first.charge * second.charge == -1;
 }
 
-std::vector<Lepton> build_dressed_leptons(const std::vector<Particle>& particles) {
+std::string selection_version(const Config& config) {
+  return config.selection_profile == "cms" ? "cms_fiducial_v2"
+                                          : config.selection_profile + "_v1";
+}
+
+double dressing_delta_r(const Config& config) {
+  // CMS HIG-19-001 uses the fiducial definition of arXiv:1706.09936,
+  // section 10.3. Keep the existing GEM/SSC definition independent.
+  return config.selection_profile == "cms" ? 0.3 : kDressingDeltaR;
+}
+
+std::vector<Lepton> build_dressed_leptons(const std::vector<Particle>& particles,
+                                         const Config& config = Config{}) {
   std::vector<Lepton> leptons;
   std::vector<const Particle*> photons;
   for (const Particle& particle : particles) {
@@ -883,7 +896,7 @@ std::vector<Lepton> build_dressed_leptons(const std::vector<Particle>& particles
 
   for (const Particle* photon : photons) {
     int nearest = -1;
-    double nearest_delta_r = kDressingDeltaR;
+    double nearest_delta_r = dressing_delta_r(config);
     for (std::size_t index = 0; index < leptons.size(); ++index) {
       const double distance = delta_r(leptons[index].bare, photon->p4);
       if (distance < nearest_delta_r ||
@@ -952,7 +965,7 @@ bool passes_baseline(const Lepton& lepton, const Config& config = Config{}) {
 std::vector<Lepton> response_leptons(const std::vector<Particle>& particles,
                                      const Config& config, Long64_t event_index,
                                      Diagnostics& diagnostics) {
-  std::vector<Lepton> leptons = build_dressed_leptons(particles);
+  std::vector<Lepton> leptons = build_dressed_leptons(particles, config);
   std::vector<Particle> isolation_particles = particles;
   if (config.selection_profile == "cms") {
     // Do not count a photon already assigned to any lepton as ambient activity.
@@ -1046,6 +1059,31 @@ bool lhc_topology_pass(const std::array<int, 4>& indices,
   return pts[0] > 20.0 && pts[1] > 10.0;
 }
 
+bool passes_cms_alternative_pair_veto(const PairingChoice& candidate,
+                                      const std::vector<Lepton>& leptons) {
+  const auto& indices = candidate.lepton_indices;
+  for (int i = 1; i < 4; ++i) {
+    if (leptons[indices[i]].flavour != leptons[indices[0]].flavour) return true;
+  }
+  // CMS HIG-19-001 section 4: reject this quadruplet when another pairing
+  // has a closer Z and a companion below 12 GeV. Other quadruplets in an
+  // event with extra leptons must still be considered.
+  for (const auto& pattern : {std::array<int, 4>{{0, 2, 1, 3}},
+                              std::array<int, 4>{{0, 3, 1, 2}}}) {
+    const auto& a = leptons[indices[pattern[0]]];
+    const auto& b = leptons[indices[pattern[1]]];
+    const auto& c = leptons[indices[pattern[2]]];
+    const auto& d = leptons[indices[pattern[3]]];
+    if (!is_ossf(a, b) || !is_ossf(c, d)) continue;
+    double ma = (a.reconstructed + b.reconstructed).mass();
+    double mb = (c.reconstructed + d.reconstructed).mass();
+    if (std::fabs(mb - kZMassGeV) < std::fabs(ma - kZMassGeV)) std::swap(ma, mb);
+    if (std::fabs(ma - kZMassGeV) < std::fabs(candidate.z1.mass() - kZMassGeV) &&
+        mb < 12.0) return false;
+  }
+  return true;
+}
+
 PairingChoice best_pairing(const std::vector<Lepton>& leptons,
                            const std::vector<int>& subset,
                            const Config& config = Config{}) {
@@ -1116,6 +1154,8 @@ PairingChoice best_pairing(const std::vector<Lepton>& leptons,
             }
             if (config.selection_profile != "gem" &&
                 lhc_topology_pass(candidate.lepton_indices, leptons) &&
+                (config.selection_profile != "cms" ||
+                 passes_cms_alternative_pair_veto(candidate, leptons)) &&
                 z_one.mass() > 40.0 && z_one.mass() < 120.0 &&
                 z_two.mass() > 12.0 && z_two.mass() < 120.0 &&
                 pairing_is_better(candidate, best_eligible)) {
@@ -1237,8 +1277,10 @@ SubsetResult analyze_subset(const std::vector<Lepton>& leptons,
                       leptons[result.output_indices[3]].reconstructed);
 
           const bool legacy = config.selection_profile == "gem";
-          if (legacy ? all_ossf_masses_pass(result.output_indices, leptons)
-                     : lhc_topology_pass(result.output_indices, leptons)) {
+          if ((legacy ? all_ossf_masses_pass(result.output_indices, leptons)
+                      : lhc_topology_pass(result.output_indices, leptons)) &&
+              (config.selection_profile != "cms" ||
+               passes_cms_alternative_pair_veto(pairing, leptons))) {
             result.cut_mask |= kAllOssfMasses;
             if (result.z1.mass() > (legacy ? kZ1MassMinGeV : 40.0) &&
                 result.z1.mass() < (legacy ? kZ1MassMaxGeV : 120.0)) {
@@ -1519,6 +1561,9 @@ void write_summary(const std::filesystem::path& path, const Config& config,
          << "  \"requested_channel\": \"" << json_escape(config.requested_channel)
          << "\",\n"
          << "  \"selection_profile\": \"" << config.selection_profile << "\",\n"
+         << "  \"selection_version\": \"" << selection_version(config) << "\",\n"
+         << "  \"photon_dressing_dr\": " << dressing_delta_r(config) << ",\n"
+         << "  \"alternative_pair_veto\": " << (config.selection_profile == "cms" ? "true" : "false") << ",\n"
          << "  \"events_read\": " << events_read << ",\n"
          << "  \"four_lepton_rows\": " << tree_rows << ",\n"
          << "  \"selected_rows\": " << selected_rows << ",\n"
@@ -1692,6 +1737,9 @@ int main(int argc, char* argv[]) {
     int metadata_schema_version = 1;
     std::string metadata_response_profile = config.response_profile_name;
     std::string metadata_selection_profile = config.selection_profile;
+    std::string metadata_selection_version = selection_version(config);
+    double metadata_dressing_dr = dressing_delta_r(config);
+    bool metadata_alternative_pair_veto = config.selection_profile == "cms";
     std::string metadata_sample = config.sample;
     std::string metadata_category = config.category;
     std::string metadata_requested_channel = config.requested_channel;
@@ -1726,6 +1774,9 @@ int main(int argc, char* argv[]) {
                          "schema_version/I");
     metadata_tree.Branch("response_profile", &metadata_response_profile);
     metadata_tree.Branch("selection_profile", &metadata_selection_profile);
+    metadata_tree.Branch("selection_version", &metadata_selection_version);
+    metadata_tree.Branch("photon_dressing_dr", &metadata_dressing_dr);
+    metadata_tree.Branch("alternative_pair_veto", &metadata_alternative_pair_veto);
     metadata_tree.Branch("sample", &metadata_sample);
     metadata_tree.Branch("category", &metadata_category);
     metadata_tree.Branch("requested_channel", &metadata_requested_channel);

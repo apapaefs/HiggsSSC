@@ -21,7 +21,7 @@ from hfourlepton import presets
 
 REPO = Path(__file__).resolve().parent
 WORKFLOWS = ("gammagamma-lo", "gammagamma-ho", "fourlepton-lo", "fourlepton-ho")
-ACTIONS = ("setup", "check", "prepare", "run", "status", "report", "cuts", "xgboost", "validate", "repair-madspin")
+ACTIONS = ("setup", "check", "prepare", "run", "status", "report", "cuts", "xgboost", "validate", "repair-madspin", "reprocess")
 
 
 def now():
@@ -34,6 +34,7 @@ def parse_args(argv=None):
     p.add_argument("--workflow", required=True, choices=WORKFLOWS)
     p.add_argument("--work-dir", type=Path, default=REPO / "inputs/pipeline")
     p.add_argument("--run-tag", help="name of this campaign; required for run/status/report/cuts/xgboost")
+    p.add_argument("--revision", help="13 TeV fourlepton-ho reprocess/status: independent analysis revision name")
     p.add_argument("--nevents", type=int, help="uniform events per sample (standard preset; default 30)")
     p.add_argument("--preset", choices=("standard", "minimal"), default="standard",
                    help="fourlepton-ho: minimal uses a process-dependent student event budget")
@@ -76,6 +77,12 @@ def parse_args(argv=None):
         p.error("--run-tag is required for this action")
     if args.run_tag and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", args.run_tag):
         p.error("run tag must contain only letters, digits, underscores and hyphens")
+    if args.action == "reprocess" and not args.revision:
+        p.error("reprocess requires --revision NAME")
+    if args.revision and (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", args.revision)
+                          or args.action not in ("reprocess", "status")
+                          or args.workflow != "fourlepton-ho" or args.energy_tev != 13):
+        p.error("--revision is a simple name for 13 TeV fourlepton-ho reprocess/status only")
     if args.nevents < 1 or args.jobs < 1 or not math.isfinite(args.luminosity_fb) or args.luminosity_fb <= 0:
         p.error("nevents, jobs and luminosity must be positive and finite")
     if args.herwig_env and args.herwig_module:
@@ -467,7 +474,32 @@ def run(pipeline, *, saved_artifacts_checked=False):
     print(f"Pipeline complete: {locations(args)[1] / 'index.html'}")
 
 
+def revision_directory(args):
+    return locations(args)[0] / "revisions" / args.revision
+
+
+def reprocess(pipeline):
+    args = pipeline.args
+    physics_artifacts(args)
+    directory = revision_directory(args)
+    command = [pipeline.python, REPO / "hfourlepton/reprocess.py", "--manifest",
+               locations(args)[0] / "manifest_perfect.json", "--output-dir", directory,
+               "--jobs", args.jobs, "--luminosity-fb", args.luminosity_fb]
+    # This revision has its own state. Do not change the original campaign's
+    # completion status, frozen artifact inventory, or previous validation result.
+    shared.Pipeline.call(pipeline, args.run_tag + "-reprocess-" + args.revision, command)
+    print("Revision results:", directory / "index.html")
+
+
 def status(args):
+    if args.revision:
+        directory = revision_directory(args)
+        state = json.loads((directory / "state.json").read_text())
+        print(f"Analysis revision: {args.revision}\nState: {state.get('state', 'incomplete')}")
+        print("Samples reconstructed:", len(state["samples"]))
+        print("Acceptance check:", state.get("validation_status", "not completed"))
+        print("Results:", directory / "index.html")
+        return 0
     state = read_state(args)
     print(f"{args.workflow}: {args.run_tag}\nState: {state['state']}\nLast recorded stage: {state['stage']}")
     sampling = state["identity"].get("sampling")
@@ -513,6 +545,13 @@ def status(args):
 def main(argv=None):
     args = parse_args(argv)
     if args.dry_run:
+        if args.action == "reprocess":
+            print(json.dumps({"action": "reprocess", "parent_run": args.run_tag,
+                "output": str(revision_directory(args)), "jobs": args.jobs,
+                "stages": ["verify saved showers", "build private analyzer", "reconstruct",
+                           "strict report", "CMS acceptance check", "cuts", "xgboost"],
+                "event_generation": False}, indent=2))
+            return 0
         stages = {"gammagamma-lo": ["MG5 signal and three backgrounds", "Herwig showers", "SSC analysis", "report"],
                   "gammagamma-ho": ["ihixs build/benchmark/109-point calculation", "POWHEG integration and signal", "MG5 backgrounds", "Herwig showers", "SSC analysis", "report"],
                   "fourlepton-lo": ["seven hard-process integrations / nine samples", "MadSpin signal decays", "perfect and SSC showers/analysis", "strict comparison report"],
@@ -537,6 +576,11 @@ def main(argv=None):
         raise ValueError("unmanaged nonempty installation; choose a new --work-dir")
     with installation_lock(args.work_dir):
         shared.frozen(args.work_dir / "environment.json", config)
+        if args.action == "reprocess":
+            if read_state(args)["identity"]["environment"] != config:
+                raise ValueError("campaign belongs to a different environment")
+            reprocess(StudentPipeline(args, config))
+            return 0
         if args.action == "run":
             from hfourlepton.presets import max_events
             if max_events(args) > 30:

@@ -108,13 +108,15 @@ def cut_stages(cfg):
         stages[7] = ("z2_window", "12 < mZ2 < 120 GeV", 7)
         if cfg.selection_profile == "cms":
             stages[2] = ("electron_crack", "No electron crack cut at particle level", 2)
+            stages[5] = ("topology", stages[5][1] + "; alternative-pair veto", 5)
     return stages
 
 
 def cut_mask_definition(cfg):
     if cfg.selection_profile == "gem":
         return CUT_MASK_DEFINITION
-    return CUT_MASK_DEFINITION.replace("all_ossf_masses_gt_4", "os_mass_pt_dr").replace("z1_70_100", "z1_40_120").replace("z2_10_100", "z2_12_120")
+    topology = "os_mass_pt_dr_alternative_pair_veto" if cfg.selection_profile == "cms" else "os_mass_pt_dr"
+    return CUT_MASK_DEFINITION.replace("all_ossf_masses_gt_4", topology).replace("z1_70_100", "z1_40_120").replace("z2_10_100", "z2_12_120")
 
 
 @dataclass(frozen=True)
@@ -4964,6 +4966,9 @@ def run_sample(
         None if cfg.dry_run else sha256_file(summary_path)
     )
     if analysis_summary is not None:
+        for key in ("selection_version", "photon_dressing_dr", "alternative_pair_veto"):
+            if key in analysis_summary:
+                entry[key] = analysis_summary[key]
         entry["weight_sums"] = {
             "generated_raw": analysis_summary["generated_raw"],
             "generated_scaled": analysis_summary["generated_scaled"],
