@@ -1,0 +1,2 @@
+# Unified-diff context must match the pinned external HwSim source verbatim.
+hfourlepton/hwsim/ancestry.patch -whitespace

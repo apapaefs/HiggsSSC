@@ -17,6 +17,8 @@
 #include <utility>
 #include <vector>
 
+#include "HwSimAncestry.h"
+
 #include <TBranch.h>
 #include <TChain.h>
 #include <TFile.h>
@@ -141,6 +143,9 @@ struct Particle {
   FourVector p4;
   int pdg_id = 0;
   int source_index = -1;
+  bool prompt = false;
+  int lineage = -1;
+  std::vector<int> photon_emitters;
 };
 
 struct Lepton {
@@ -151,6 +156,7 @@ struct Lepton {
   int flavour = 0;
   int charge = 0;
   int source_index = -1;
+  int lineage = -1;
   std::vector<int> dressed_photon_indices;
   double isolation_et = 0.0;
   double efficiency = 1.0;
@@ -208,6 +214,7 @@ struct Config {
   double four_electron_trigger_efficiency = kFourElectronTriggerEfficiency;
   double other_trigger_efficiency = kOtherFourLeptonTriggerEfficiency;
   bool include_pileup_noise = true;
+  bool cms_ancestry = false;
   long long first_event = 0;
   long long last_event = -1;
 };
@@ -364,6 +371,7 @@ void print_usage(std::ostream& output) {
       << "  --channel NAME                   Generated-channel metadata\n"
       << "  -n N | -nmin I -nmax J           Optional source-entry range\n"
       << "  --no-pileup-noise                Disable EM thermal/pileup noise term\n"
+      << "  --cms-ancestry                     Require ancestry and use CMS fiducial v3\n"
       << "  --help                            Show this message\n\n"
       << "With --output-dir/--sample/--tag, outputs are\n"
       << "  <output-dir>/<sample>_<tag>_<profile>.root\n"
@@ -434,6 +442,8 @@ Config parse_config(int argc, char* argv[]) {
       config.input_name = require_option_value(index, argc, argv, argument);
     } else if (argument == "--response-profile" || argument == "--detector-response") {
       config.response_profile_name = require_option_value(index, argc, argv, argument);
+    } else if (argument == "--cms-ancestry") {
+      config.cms_ancestry = true;
     } else if (argument == "--selection-profile") {
       config.selection_profile = require_option_value(index, argc, argv, argument);
     } else if (argument == "--seed") {
@@ -863,13 +873,13 @@ bool is_ossf(const Lepton& first, const Lepton& second) {
 }
 
 std::string selection_version(const Config& config) {
-  return config.selection_profile == "cms" ? "cms_fiducial_v2"
+  return config.selection_profile == "cms" ? (config.cms_ancestry ? "cms_fiducial_v3" : "cms_fiducial_v2")
                                           : config.selection_profile + "_v1";
 }
 
 double dressing_delta_r(const Config& config) {
   // CMS HIG-19-001 uses the fiducial definition of arXiv:1706.09936,
-  // section 10.3. Keep the existing GEM/SSC definition independent.
+  // section 10.2. Keep the existing GEM/SSC definition independent.
   return config.selection_profile == "cms" ? 0.3 : kDressingDeltaR;
 }
 
@@ -880,7 +890,9 @@ std::vector<Lepton> build_dressed_leptons(const std::vector<Particle>& particles
   for (const Particle& particle : particles) {
     const int absolute_id = std::abs(particle.pdg_id);
     if (absolute_id == 11 || absolute_id == 13) {
+      if (config.cms_ancestry && !particle.prompt) continue;
       Lepton lepton;
+      lepton.lineage = particle.lineage;
       lepton.bare = particle.p4;
       lepton.dressed = particle.p4;
       lepton.reconstructed = particle.p4;
@@ -898,6 +910,9 @@ std::vector<Lepton> build_dressed_leptons(const std::vector<Particle>& particles
     int nearest = -1;
     double nearest_delta_r = dressing_delta_r(config);
     for (std::size_t index = 0; index < leptons.size(); ++index) {
+      if (config.cms_ancestry &&
+          std::find(photon->photon_emitters.begin(), photon->photon_emitters.end(),
+                    leptons[index].lineage) == photon->photon_emitters.end()) continue;
       const double distance = delta_r(leptons[index].bare, photon->p4);
       if (distance < nearest_delta_r ||
           (distance == nearest_delta_r && nearest >= 0 &&
@@ -967,8 +982,8 @@ std::vector<Lepton> response_leptons(const std::vector<Particle>& particles,
                                      Diagnostics& diagnostics) {
   std::vector<Lepton> leptons = build_dressed_leptons(particles, config);
   std::vector<Particle> isolation_particles = particles;
-  if (config.selection_profile == "cms") {
-    // Do not count a photon already assigned to any lepton as ambient activity.
+  if (config.selection_profile == "cms" && !config.cms_ancestry) {
+    // Legacy v2 only: do not count a photon already assigned to any lepton as ambient activity.
     isolation_particles.erase(std::remove_if(isolation_particles.begin(), isolation_particles.end(),
         [&](const Particle& particle) {
           for (const auto& dressed : leptons) {
@@ -1562,6 +1577,7 @@ void write_summary(const std::filesystem::path& path, const Config& config,
          << "\",\n"
          << "  \"selection_profile\": \"" << config.selection_profile << "\",\n"
          << "  \"selection_version\": \"" << selection_version(config) << "\",\n"
+         << "  \"ancestry_schema_version\": " << (config.cms_ancestry ? 1 : 0) << ",\n"
          << "  \"photon_dressing_dr\": " << dressing_delta_r(config) << ",\n"
          << "  \"alternative_pair_veto\": " << (config.selection_profile == "cms" ? "true" : "false") << ",\n"
          << "  \"events_read\": " << events_read << ",\n"
@@ -1638,6 +1654,8 @@ int main(int argc, char* argv[]) {
       return 1;
     }
     const Config config = parse_config(argc, argv);
+    if (config.cms_ancestry && config.selection_profile != "cms")
+      throw std::runtime_error("--cms-ancestry requires --selection-profile cms");
     const OptionalWeightNames configured_optional_weight_mapping =
         load_optional_weight_names(config.optional_weight_names_file);
     const auto& configured_optional_weight_names = configured_optional_weight_mapping.canonical;
@@ -1680,6 +1698,22 @@ int main(int argc, char* argv[]) {
           "theOptWeightsNames exists without theOptWeights");
     }
 
+    int truth_schema = 0;
+    std::vector<int> *truth_object = nullptr, *truth_pdg = nullptr, *truth_parents = nullptr,
+                     *truth_offsets = nullptr, *truth_previous = nullptr, *truth_hard = nullptr;
+    if (config.cms_ancestry) {
+      for (const auto& name : {"truthSchemaVersion", "truthObject", "truthPdg", "truthParents",
+                               "truthParentOffsets", "truthPrevious", "truthHard"}) {
+        if (!chain.GetBranch(name)) throw std::runtime_error(std::string("CMS v3 requires HwSim SaveAncestry: missing ") + name);
+      }
+      chain.SetBranchAddress("truthSchemaVersion", &truth_schema);
+      chain.SetBranchAddress("truthObject", &truth_object);
+      chain.SetBranchAddress("truthPdg", &truth_pdg);
+      chain.SetBranchAddress("truthParents", &truth_parents);
+      chain.SetBranchAddress("truthParentOffsets", &truth_offsets);
+      chain.SetBranchAddress("truthPrevious", &truth_previous);
+      chain.SetBranchAddress("truthHard", &truth_hard);
+    }
     int num_particles = 0;
     double objects[8][kMaxParticles] = {};
     double input_event_weight = 0.0;
@@ -1738,6 +1772,7 @@ int main(int argc, char* argv[]) {
     std::string metadata_response_profile = config.response_profile_name;
     std::string metadata_selection_profile = config.selection_profile;
     std::string metadata_selection_version = selection_version(config);
+    int metadata_ancestry_schema = config.cms_ancestry ? 1 : 0;
     double metadata_dressing_dr = dressing_delta_r(config);
     bool metadata_alternative_pair_veto = config.selection_profile == "cms";
     std::string metadata_sample = config.sample;
@@ -1775,6 +1810,7 @@ int main(int argc, char* argv[]) {
     metadata_tree.Branch("response_profile", &metadata_response_profile);
     metadata_tree.Branch("selection_profile", &metadata_selection_profile);
     metadata_tree.Branch("selection_version", &metadata_selection_version);
+    metadata_tree.Branch("ancestry_schema_version", &metadata_ancestry_schema);
     metadata_tree.Branch("photon_dressing_dr", &metadata_dressing_dr);
     metadata_tree.Branch("alternative_pair_veto", &metadata_alternative_pair_veto);
     metadata_tree.Branch("sample", &metadata_sample);
@@ -1856,6 +1892,25 @@ int main(int argc, char* argv[]) {
         particles.push_back({vector, pdg_id, index});
       }
 
+      if (config.cms_ancestry) {
+        if (truth_schema != 1 || !truth_object || !truth_pdg || !truth_parents ||
+            !truth_offsets || !truth_previous || !truth_hard || truth_object->size() != static_cast<size_t>(num_particles))
+          throw std::runtime_error("invalid or missing HwSim ancestry schema at event " + std::to_string(event_index));
+        // TChain must not silently reuse values when a later file lacks a branch.
+        for (const auto& name : {"truthSchemaVersion", "truthObject", "truthPdg", "truthParents",
+                                 "truthParentOffsets", "truthPrevious", "truthHard"})
+          if (!chain.GetTree()->GetBranch(name)) throw std::runtime_error("mixed ancestry/legacy HwSim inputs");
+        hwsim::Ancestry truth(*truth_pdg, *truth_parents, *truth_offsets, *truth_previous, *truth_hard);
+        for (auto& particle : particles) {
+          const int id = std::abs(particle.pdg_id), node = truth_object->at(particle.source_index);
+          if (id != 11 && id != 13 && id != 22) continue;
+          if (node < 0 || node >= static_cast<int>(truth_pdg->size()) || truth_pdg->at(node) != particle.pdg_id)
+            throw std::runtime_error("HwSim ancestry object/PDG mismatch");
+          particle.prompt = truth.prompt(node);
+          particle.lineage = truth.lineage[node];
+          particle.photon_emitters = truth.emitters[particle.lineage];
+        }
+      }
       const RecoContext reco_context =
           reconstructed_context(has_jets, num_jets, jets, has_bjets, num_bjets,
                                 bjets, met_available, etmiss);

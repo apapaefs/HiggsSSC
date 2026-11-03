@@ -73,6 +73,40 @@ std::vector<Lepton> mixed_flavour_quadruplet(double electron_pair_mass,
   };
 }
 
+void test_ancestry_dressing() {
+  // H -> e, with a later copy and lepton-emitted photon; separate pi0 and tau.
+  hwsim::Ancestry graph({25,11,11,22,111,22,15,13},
+                        {0,1,1,4,0,6}, {0,0,1,2,3,3,4,5,6},
+                        {-1,-1,1,-1,-1,-1,-1,-1}, {1,0,0,0,0,0,0,0});
+  require(graph.prompt(2), "direct H lepton is prompt across copies");
+  require(graph.lineage[1] == graph.lineage[2], "copy lineage equality");
+  require(graph.emitters[graph.lineage[3]] == std::vector<int>{graph.lineage[2]},
+          "FSR photon has actual lepton emitter");
+  require(graph.emitters[graph.lineage[5]].empty(), "hadronic photon has no lepton emitter");
+  require(!graph.prompt(7), "tau daughter is outside direct e/mu fiducial definition");
+  hwsim::Ancestry continuum({2212,2,11,11}, {0,1,2}, {0,0,1,2,3},
+                            {-1,-1,-1,2}, {0,2,1,0});
+  require(continuum.prompt(3), "direct hard continuum lepton does not require an explicit Z");
+  bool invalid = false;
+  try { hwsim::Ancestry bad({11}, {9}, {0,1}, {-1}, {1}); }
+  catch (const std::runtime_error&) { invalid = true; }
+  require(invalid, "invalid graph indices are rejected");
+
+  Config config; config.selection_profile = "cms"; config.cms_ancestry = true;
+  auto electron = test_particle(11,40.,0.,0.,0); electron.prompt = true; electron.lineage = 10;
+  auto muon = test_particle(13,30.,0.,.1,1); muon.prompt = true; muon.lineage = 20;
+  auto hadronic = test_particle(22,5.,0.,.01,2);
+  auto fsr = test_particle(22,3.,0.,.02,3); fsr.photon_emitters = {20};
+  auto nonprompt = test_particle(11,10.,0.,1.,4);
+  Diagnostics d;
+  auto leptons = response_leptons({electron,muon,hadronic,fsr,nonprompt}, config,0,d);
+  require(leptons.size() == 2, "nonprompt leptons excluded from candidates");
+  require(leptons[0].dressed_photon_indices.empty(), "closer wrong-lineage lepton cannot take FSR");
+  require(leptons[1].dressed_photon_indices == std::vector<int>{3}, "FSR dresses its emitting lineage");
+  require_close(leptons[0].isolation_et,8.,1.e-12,"other lepton's FSR counts in isolation");
+  require_close(leptons[1].isolation_et,5.,1.e-12,"only own FSR removed; hadronic photon counts");
+}
+
 void test_muon_resolution_table() {
   Diagnostics diagnostics;
   require_close(muon_fractional_resolution(10.0, 0.1, diagnostics), 0.028,
@@ -584,6 +618,7 @@ void test_resolution_widths() {
 
 int main() {
   try {
+    test_ancestry_dressing();
     test_muon_resolution_table();
     test_deterministic_smearing();
     test_dressing_and_isolation();

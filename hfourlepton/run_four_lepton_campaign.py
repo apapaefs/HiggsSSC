@@ -357,6 +357,7 @@ class Config:
     wide_continuum: bool = False
     manifest_override: Path | None = None
     postprocess_only: bool = False
+    ancestry_plugin_dir: Path | None = None
 
     @property
     def template_in(self) -> Path:
@@ -380,7 +381,11 @@ class Config:
 
     @property
     def analysis_exe(self) -> Path:
-        return self.analysis_code_dir / self.analysis_target
+        return self.analysis_build_dir / self.analysis_target
+
+    @property
+    def analysis_build_dir(self) -> Path:
+        return self.run_dir / "code" if self.ancestry_plugin_dir else self.analysis_code_dir
 
     @property
     def analysis_source(self) -> Path:
@@ -533,6 +538,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--order", choices=("lo", "ho"), default="lo")
     parser.add_argument("--selection-profile", choices=("gem", "ssc", "cms"), default="gem")
+    parser.add_argument("--ancestry-plugin-dir", type=Path, help="private HwSim ancestry plugin for CMS v3 (HO/perfect only)")
     parser.add_argument("--signal-modes", default="ggf", help="comma-separated ggf,vbf,wh,zh,tth (HO), or all")
     parser.add_argument("--signal-lhe", type=Path, help="HO stable-H HJMiNNLO LHE")
     parser.add_argument("--vbf-lhe", type=Path, help="HO stable-H POWHEG VBF_H LHE from run_powheg_vbf.py")
@@ -700,6 +706,8 @@ def parse_config(argv: Sequence[str]) -> Config:
         parser.error("--bias-control-events must be positive")
     if args.order == "ho" and not any(x.startswith("--higgs-mass") for x in argv) and "HIGGS_MASS" not in os.environ:
         args.higgs_mass = 125.0
+    if args.ancestry_plugin_dir and (args.order != "ho" or args.selection_profile != "cms" or args.detector_response != "perfect"):
+        parser.error("--ancestry-plugin-dir requires HO with CMS/perfect selection")
     if args.selection_profile == "cms" and args.detector_response != "perfect":
         parser.error("cms comparison requires --detector-response perfect")
     if args.order == "ho" and args.higgs_mass != 125.0:
@@ -787,6 +795,7 @@ def parse_config(argv: Sequence[str]) -> Config:
         vbf_lhe=args.vbf_lhe.resolve() if args.vbf_lhe else None,
         signal_normalization=args.signal_normalization.resolve() if args.signal_normalization else None,
         preset=args.preset, event_multiplier=args.event_multiplier, wide_continuum=args.wide_continuum,
+        ancestry_plugin_dir=args.ancestry_plugin_dir.resolve() if args.ancestry_plugin_dir else None,
     )
 
 
@@ -1291,6 +1300,9 @@ def group_event_count(
 
 
 def require_inputs(cfg: Config, samples: Sequence[SampleSpec]) -> None:
+    if cfg.ancestry_plugin_dir and not cfg.dry_run:
+        from hfourlepton.ancestry_shower import plugin_artifacts
+        plugin_artifacts(cfg.ancestry_plugin_dir)
     if cfg.dry_run:
         return
     if cfg.order == "ho" and any(s.production_mode == "ggf" for s in samples):
@@ -3024,6 +3036,8 @@ def analysis_command(
         "--channel",
         sample.channel,
     ]
+    if cfg.ancestry_plugin_dir:
+        command.append("--cms-ancestry")
     if not cfg.pileup_noise:
         command.append("--no-pileup-noise")
     if optional_weight_names is not None:
@@ -3408,10 +3422,15 @@ def campaign_tracked_inputs(cfg: Config) -> dict[str, dict[str, object]]:
         "herwig_template": cfg.template_in,
         "analyzer_source": cfg.analysis_source,
         "analyzer_makefile": cfg.analysis_code_dir / "Makefile",
+        "analyzer_ancestry_header": cfg.analysis_code_dir / "HwSimAncestry.h",
         "decay_reweighter_source": cfg.decay_reweighter_source,
         "decay_reweighter_makefile": cfg.decay_reweighter_source.parent
         / "Makefile",
     }
+    if cfg.ancestry_plugin_dir:
+        paths["ancestry_plugin"] = cfg.ancestry_plugin_dir / "HwSimAncestry.so"
+        paths["ancestry_plugin_build"] = cfg.ancestry_plugin_dir / "build.json"
+        paths["ancestry_adapter"] = SCRIPT_DIR / "ancestry_shower.py"
     if cfg.herwig_b_decays is not None:
         paths["herwig_b_decays"] = cfg.herwig_b_decays
     if cfg.order == "ho":
@@ -3459,6 +3478,7 @@ def configuration_fingerprint(
         "sampling": presets.description(cfg),
         "order": cfg.order,
         "selection_profile": cfg.selection_profile,
+        "ancestry_plugin_dir": str(cfg.ancestry_plugin_dir) if cfg.ancestry_plugin_dir else None,
         "signal_modes": cfg.signal_modes,
         "signal_lhe": str(cfg.signal_lhe) if cfg.signal_lhe else None,
         "vbf_lhe": str(cfg.vbf_lhe) if cfg.vbf_lhe else None,
@@ -4671,6 +4691,9 @@ def run_sample(
     cfg: Config,
 ) -> None:
     entry = manifest_sample(manifest, sample.name)
+    if cfg.ancestry_plugin_dir and not cfg.dry_run:
+        from hfourlepton.ancestry_shower import plugin_artifacts
+        entry["ancestry_plugin"] = plugin_artifacts(cfg.ancestry_plugin_dir)
     output_root = expected_analysis_output(sample, cfg)
     summary_path = output_root.with_suffix(".summary.json")
     if (
@@ -4966,7 +4989,7 @@ def run_sample(
         None if cfg.dry_run else sha256_file(summary_path)
     )
     if analysis_summary is not None:
-        for key in ("selection_version", "photon_dressing_dr", "alternative_pair_veto"):
+        for key in ("selection_version", "photon_dressing_dr", "alternative_pair_veto", "ancestry_schema_version"):
             if key in analysis_summary:
                 entry[key] = analysis_summary[key]
         entry["weight_sums"] = {
@@ -5074,8 +5097,18 @@ def main(argv: Sequence[str]) -> int:
         f"Building four-lepton analyzer "
         f"(profile={cfg.detector_response}, target={cfg.analysis_target})"
     )
+    if cfg.ancestry_plugin_dir:
+        ensure_dir(cfg.analysis_build_dir, cfg)
+        for name in ("Makefile", "HwSimPostAnalysis_fourlepton.cc", "HwSimAncestry.h"):
+            source = cfg.analysis_code_dir / name
+            target = cfg.analysis_build_dir / name
+            if not cfg.dry_run:
+                if target.exists() and sha256_file(target) != sha256_file(source):
+                    die(f"private analyzer source changed: {target}; use a new run tag")
+                if not target.exists():
+                    shutil.copyfile(source, target)
     run_runtime_command(
-        ["make", "-C", cfg.analysis_code_dir, cfg.analysis_target],
+        ["make", "-C", cfg.analysis_build_dir, cfg.analysis_target],
         cfg,
     )
     software = manifest["software"]

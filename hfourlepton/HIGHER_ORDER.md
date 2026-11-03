@@ -745,6 +745,43 @@ its effect with read-only variations, and projects the qq-background event
 budget. The v2 acceptance comparison remains provisional; counting all
 photons in isolation is a diagnostic variation, not a validated correction.
 
+### CMS v3 with HwSim ancestry
+
+The [private HwSim ancestry plugin](hwsim/README.md) records particle history
+and enables prompt-lepton selection, dressing by the emitting lepton's lineage,
+and isolation with only that lepton's FSR removed. Use
+`--ancestry-plugin-dir PATH` when reprocessing a completed campaign or starting
+a new 13 TeV campaign. New campaigns using this option build their analyzer
+inside the run directory. The existing shared HwSim installation and analyzer
+binary are not replaced.
+
+The ancestry smoke test used 200 events each from ggF, qqZH, ttH and qq→4ℓ.
+All 800 events reproduced the original stable-particle momenta and weights
+exactly. This checks that recording ancestry does not alter the shower; the
+full CMS acceptance comparison is a separate test.
+
+For an independent background statistics campaign, the direct runner supports
+selecting only the qq channels and scaling their minimal budgets:
+
+```bash
+PYTHONNOUSERSITE=1 inputs/pipeline/venv/bin/python hfourlepton/checked_campaign.py \
+  --order ho --selection-profile cms --detector-response perfect \
+  --run-tag fourl13_qq200k_truth --run-samples bkg_qq \
+  --preset minimal --event-multiplier 10 --seed-base 20261103 \
+  --nb-core 32 --ebeam 6500 --higgs-mass 125 \
+  --mg5-dir inputs/pipeline/MG5_aMC_v3_5_15 \
+  --mg5-python "$PWD/inputs/pipeline/venv/bin/python" \
+  --no-herwig-env --no-herwig-module \
+  --ancestry-plugin-dir inputs/pipeline/hwsim-ancestry-v1
+```
+
+Run this inside the Herwig environment. The three qq channels receive 200,000
+events each, with the existing 90–180 GeV generation window and NLO matching.
+The independent seed avoids repeating the earlier event population. Replace
+the old qq samples in a combined analysis manifest; do not add two copies of
+their physical cross sections. Thirty-two generation cores leave eight cores
+for the ancestry validation showers on a 40-core allocation.
+
 ## Local implementation checks
 
 These commands use synthetic fixtures and do not generate physics samples

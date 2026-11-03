@@ -50,7 +50,7 @@ class FourLeptonAnalyzerIntegrationTest(unittest.TestCase):
         cls.work = Path(cls._temporary.name)
         cls.build = cls.work / "code"
         cls.build.mkdir()
-        for name in ("Makefile", "HwSimPostAnalysis_fourlepton.cc", "make_synthetic_hw_sim_fourlepton.cc"):
+        for name in ("Makefile", "HwSimPostAnalysis_fourlepton.cc", "HwSimAncestry.h", "make_synthetic_hw_sim_fourlepton.cc"):
             shutil.copy2(CODE_DIR / name, cls.build / name)
         cls.analyzer = cls.build / "HwSimPostAnalysis_fourlepton"
         cls.fixture = cls.build / "make_synthetic_hw_sim_fourlepton"
@@ -129,6 +129,14 @@ class FourLeptonAnalyzerIntegrationTest(unittest.TestCase):
         summary = json.loads(output.with_suffix(".summary.json").read_text())
         self.assertEqual(summary["selection_profile"], "cms")
         self.assertEqual(summary["selection_version"], "cms_fiducial_v2")
+
+    def test_cms_ancestry_rejects_legacy_showers(self) -> None:
+        result = subprocess.run([str(self.analyzer), str(self.full_input),
+                                 "--selection-profile", "cms", "--cms-ancestry",
+                                 "--output-dir", str(self.work / "missing_truth")],
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("requires HwSim SaveAncestry", result.stderr)
 
     def test_reprocess_saved_synthetic_shower_preserves_weights(self) -> None:
         from hfourlepton import reprocess, make_fourlepton_report as report

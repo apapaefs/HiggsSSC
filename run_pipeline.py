@@ -35,6 +35,7 @@ def parse_args(argv=None):
     p.add_argument("--work-dir", type=Path, default=REPO / "inputs/pipeline")
     p.add_argument("--run-tag", help="name of this campaign; required for run/status/report/cuts/xgboost")
     p.add_argument("--revision", help="13 TeV fourlepton-ho reprocess/status: independent analysis revision name")
+    p.add_argument("--ancestry-plugin-dir", type=Path, help="13 TeV fourlepton-ho: private HwSim ancestry plugin for CMS v3")
     p.add_argument("--nevents", type=int, help="uniform events per sample (standard preset; default 30)")
     p.add_argument("--preset", choices=("standard", "minimal"), default="standard",
                    help="fourlepton-ho: minimal uses a process-dependent student event budget")
@@ -77,6 +78,9 @@ def parse_args(argv=None):
         p.error("--run-tag is required for this action")
     if args.run_tag and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", args.run_tag):
         p.error("run tag must contain only letters, digits, underscores and hyphens")
+    if args.ancestry_plugin_dir and (args.action not in ("run", "prepare", "reprocess", "check")
+                                     or args.workflow != "fourlepton-ho" or args.energy_tev != 13):
+        p.error("--ancestry-plugin-dir applies to 13 TeV fourlepton-ho run/prepare/reprocess/check")
     if args.action == "reprocess" and not args.revision:
         p.error("reprocess requires --revision NAME")
     if args.revision and (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", args.revision)
@@ -103,11 +107,11 @@ def parse_args(argv=None):
         p.error("the historical MadSpin repair does not apply to minimal campaigns")
     if args.config and args.action not in ("cuts", "xgboost"):
         p.error("--config applies to cuts/xgboost")
-    for key in ("work_dir", "herwig_env", "ninja_dir", "collier_dir", "signal_lhe", "vbf_lhe", "signal_normalization", "config"):
+    for key in ("work_dir", "herwig_env", "ninja_dir", "collier_dir", "signal_lhe", "vbf_lhe", "signal_normalization", "config", "ancestry_plugin_dir"):
         value = getattr(args, key)
         if value is not None:
             setattr(args, key, value.expanduser().resolve())
-    for path in (REPO, args.work_dir, args.signal_lhe, args.vbf_lhe, args.signal_normalization):
+    for path in (REPO, args.work_dir, args.signal_lhe, args.vbf_lhe, args.signal_normalization, args.ancestry_plugin_dir):
         if path and re.search(r"\s|[;#\"']", str(path)):
             p.error("generator paths cannot contain whitespace or card metacharacters")
     return args
@@ -134,6 +138,9 @@ def read_state(args):
 
 
 def preflight_inputs(args):
+    if args.ancestry_plugin_dir:
+        from hfourlepton.ancestry_shower import plugin_artifacts
+        plugin_artifacts(args.ancestry_plugin_dir)
     for path in (args.signal_lhe, args.vbf_lhe, args.signal_normalization, args.config):
         if path and (not path.is_file() or not path.stat().st_size):
             raise ValueError(f"supplied input is missing or empty: {path}")
@@ -151,6 +158,9 @@ def identity(args, config):
         result['vbf_backend'] = 'POWHEG VBF_H'
         result['vbf_lhe'] = ({'path': str(args.vbf_lhe), 'sha256': shared.digest(args.vbf_lhe)}
                              if args.vbf_lhe else None)
+        if args.ancestry_plugin_dir:
+            from hfourlepton.ancestry_shower import plugin_artifacts
+            result['ancestry_plugin'] = plugin_artifacts(args.ancestry_plugin_dir)
     for key in ("signal_lhe", "signal_normalization"):
         path = getattr(args, key)
         result[key] = {"path": str(path), "sha256": shared.digest(path)} if path else None
@@ -485,6 +495,8 @@ def reprocess(pipeline):
     command = [pipeline.python, REPO / "hfourlepton/reprocess.py", "--manifest",
                locations(args)[0] / "manifest_perfect.json", "--output-dir", directory,
                "--jobs", args.jobs, "--luminosity-fb", args.luminosity_fb]
+    if args.ancestry_plugin_dir:
+        command += ["--ancestry-plugin-dir", args.ancestry_plugin_dir.resolve()]
     # This revision has its own state. Do not change the original campaign's
     # completion status, frozen artifact inventory, or previous validation result.
     shared.Pipeline.call(pipeline, args.run_tag + "-reprocess-" + args.revision, command)
@@ -550,7 +562,7 @@ def main(argv=None):
                 "output": str(revision_directory(args)), "jobs": args.jobs,
                 "stages": ["verify saved showers", "build private analyzer", "reconstruct",
                            "strict report", "CMS acceptance check", "cuts", "xgboost"],
-                "event_generation": False}, indent=2))
+                "event_generation": False, "repeat_showers_with_ancestry": bool(args.ancestry_plugin_dir)}, indent=2))
             return 0
         stages = {"gammagamma-lo": ["MG5 signal and three backgrounds", "Herwig showers", "SSC analysis", "report"],
                   "gammagamma-ho": ["ihixs build/benchmark/109-point calculation", "POWHEG integration and signal", "MG5 backgrounds", "Herwig showers", "SSC analysis", "report"],

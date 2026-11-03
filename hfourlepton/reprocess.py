@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Reconstruct saved CMS-profile showers in an independent, resumable revision.
 
-This command never invokes a generator, MadSpin, Herwig, or the campaign runner.
+By default this reads saved showers. With --ancestry-plugin-dir it repeats the
+same seeded Herwig showers in private directories; hard events and decays are
+unchanged. It never invokes MG5, MadSpin, or the campaign runner.
 The original manifest and all original physics products are read-only inputs.
 """
 from __future__ import annotations
@@ -132,15 +134,18 @@ def analysis_command(s, summary, raw, output, executable):
     return [str(v) for v in command]
 
 
-def updated_sample(s, before, summary_path, command):
+def updated_sample(s, before, summary_path, command, *, selection=SELECTION, input_path=None):
     after = json.loads(summary_path.read_text())
-    if (after.get("selection_version") != SELECTION or after.get("photon_dressing_dr") != .3
+    if (after.get("selection_version") != selection or after.get("photon_dressing_dr") != .3
             or after.get("alternative_pair_veto") is not True):
         raise ValueError("analyzer did not execute the corrected CMS selection")
+    if selection == "cms_fiducial_v3" and after.get("ancestry_schema_version") != 1:
+        raise ValueError("CMS v3 analysis did not verify ancestry schema 1")
     for key in ("events_read", "sample", "category", "requested_channel", "seed", "weight_scale",
                 "muon_resolution_scale", "response_profile", "selection_profile", "input",
                 "optional_weight_names_file"):
-        if after.get(key) != before.get(key):
+        expected = input_path if key == "input" and input_path is not None else before.get(key)
+        if after.get(key) != expected:
             raise ValueError(f"reprocessing changed {key} for {s['name']}")
     for key in ("generated_raw", "generated_scaled"):
         for field, value in before[key].items():
@@ -194,17 +199,24 @@ def stage(output, name, identity, command, *, validation=False):
     return proof
 
 
-def execute(parent, output, jobs, luminosity, *, check=False):
+def execute(parent, output, jobs, luminosity, *, check=False, ancestry_plugin_dir=None):
     raw, summaries = audit_parent(parent)
     if parent.is_relative_to(output):
         raise ValueError("revision directory must not contain the original manifest")
-    sources = [CODE / (TARGET + ".cc"), CODE / "Makefile", Path(__file__).resolve(),
+    sources = [CODE / (TARGET + ".cc"), CODE / "Makefile", CODE / "HwSimAncestry.h", Path(__file__).resolve(),
                REPO / "hfourlepton/make_fourlepton_report.py", REPO / "hfourlepton/validate_lhc.py",
                REPO / "hfourlepton/analyze_fourlepton.py", REPO / "ho_xgboost_core.py",
                *[REPO / f"hfourlepton/analysis_cards/lhc13_{name}.json" for name in ("cuts", "xgboost")]]
-    identity = {"parent": artifact(parent), "selection_version": SELECTION,
+    plugin = None
+    if ancestry_plugin_dir:
+        from hfourlepton import ancestry_shower
+        plugin = ancestry_shower.plugin_artifacts(ancestry_plugin_dir)
+        sources += [Path(ancestry_shower.__file__), REPO / "hgammagamma/ho_shower_completion.py"]
+    identity = {"parent": artifact(parent), "selection_version": "cms_fiducial_v3" if plugin else SELECTION,
                 "source_hashes": {str(p.relative_to(REPO)): digest(p) for p in sources},
                 "luminosity_fb": luminosity}
+    if plugin:
+        identity["ancestry_plugin"] = plugin
     if check:
         print(f"Verified {len(summaries)} samples and saved showers. Planned revision: {output}")
         return
@@ -225,7 +237,7 @@ def execute(parent, output, jobs, luminosity, *, check=False):
         save(state_path, state)
         code = output / "code"
         code.mkdir(exist_ok=True)
-        for src in sources[:2]:
+        for src in sources[:3]:
             target = code / src.name
             if target.exists():
                 verify(target, digest(src))
@@ -243,7 +255,8 @@ def execute(parent, output, jobs, luminosity, *, check=False):
             verify(s["output_root"], s["output_root_sha256"])
             verify(s["analysis_summary"], s["analysis_summary_sha256"])
         with ThreadPoolExecutor(max_workers=jobs) as pool:
-            futures = {pool.submit(reconstruct, s, summaries[s["name"]], raw, output, executable): s["name"]
+            futures = {pool.submit(ancestry_shower.reconstruct if plugin else reconstruct,
+                                   s, summaries[s["name"]], raw, output, executable, *([plugin] if plugin else [])): s["name"]
                        for s in raw["samples"] if s["name"] not in state["samples"]}
             failures = []
             for future in as_completed(futures):
@@ -270,7 +283,8 @@ def execute(parent, output, jobs, luminosity, *, check=False):
             revised["software"]["analyzer_executable"] = artifact(executable)
             revised["software"]["analysis_reprocessor"] = artifact(Path(__file__).resolve())
             revised["tracked_inputs"].update(analyzer_source=artifact(code / (TARGET + ".cc")),
-                                             analyzer_makefile=artifact(code / "Makefile"))
+                                             analyzer_makefile=artifact(code / "Makefile"),
+                                             analyzer_ancestry_header=artifact(code / "HwSimAncestry.h"))
             for cut in revised["cut_stages"]:
                 if cut["bit"] == 5:
                     cut["label"] += "; alternative-pair veto"
@@ -312,11 +326,13 @@ def main(argv=None):
     p.add_argument("--output-dir", type=Path, required=True)
     p.add_argument("--jobs", type=int, default=4)
     p.add_argument("--luminosity-fb", type=float, default=100.)
+    p.add_argument("--ancestry-plugin-dir", type=Path, help="repeat seeded showers using a private schema-1 HwSim plugin and apply CMS v3")
     p.add_argument("--check", action="store_true", help="audit saved inputs without writing files or executing analysis")
     args = p.parse_args(argv)
     if args.jobs < 1 or not math.isfinite(args.luminosity_fb) or args.luminosity_fb <= 0:
         p.error("jobs and luminosity must be positive and finite")
-    execute(args.manifest.resolve(), args.output_dir.resolve(), args.jobs, args.luminosity_fb, check=args.check)
+    execute(args.manifest.resolve(), args.output_dir.resolve(), args.jobs, args.luminosity_fb, check=args.check,
+            ancestry_plugin_dir=args.ancestry_plugin_dir)
     return 0
 
 

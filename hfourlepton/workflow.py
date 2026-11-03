@@ -29,7 +29,8 @@ def planning_config(args):
     return four.parse_config(["--order", "ho", "--signal-modes", "all", "--run-tag", args.run_tag,
         *event_options, "--nb-core", str(args.jobs), "--ebeam", str(500 * args.energy_tev),
         "--higgs-mass", "125", "--seed-base", "31122002", "--detector-response", "perfect",
-        "--selection-profile", selection(args), "--dry-run"])
+        "--selection-profile", selection(args), "--dry-run",
+        *(["--ancestry-plugin-dir", str(args.ancestry_plugin_dir)] if getattr(args, "ancestry_plugin_dir", None) else [])])
 
 
 def prepare(args):
@@ -113,7 +114,8 @@ def campaign_arguments(pipeline, profile):
     args = pipeline.args
     directory = REPO / "hfourlepton/runs" / args.run_tag
     tag = "lhc13" if args.energy_tev == 13 else "ssc40"
-    return ["--order", "ho", "--signal-modes", "all",
+    return [*(["--ancestry-plugin-dir", args.ancestry_plugin_dir] if getattr(args, "ancestry_plugin_dir", None) else []),
+            "--order", "ho", "--signal-modes", "all",
             "--selection-profile", selection(args), "--detector-response", profile,
             "--run-tag", args.run_tag, *(presets.arguments(args) or ["--nevents", args.nevents]), "--nb-core", args.jobs,
             "--ebeam", args.energy_tev * 500, "--mg5-dir", pipeline.mg5, "--mg5-python", pipeline.python,

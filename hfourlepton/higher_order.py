@@ -444,6 +444,9 @@ def herwig_card(sample, lhe, seed, count, cfg):
     text = text.replace("set /Herwig/Analysis/HwSim:SavePartons Yes", "set /Herwig/Analysis/HwSim:SavePartons Yes\nset /Herwig/Analysis/HwSim:SaveOptionalWeights Yes")
     for species in ("Electron", "Muon", "Photon"):
         text = text.replace(f"PTCut{species} 10.0", f"PTCut{species} 0.4")
+    if cfg.ancestry_plugin_dir:
+        from hfourlepton.ancestry_shower import ancestry_card
+        text = ancestry_card(text, cfg.ancestry_plugin_dir / "HwSimAncestry.so")
     return text
 
 
@@ -503,9 +506,10 @@ def run_shower(sample, lhe, cfg):
         execution = completion.finite_shower_plan(sample.name, cfg.events_for(sample), lhe_count)
         four.write_text(directory / "shower_execution.json", json.dumps(execution, indent=2) + "\n",
                         cfg, "finite LHE shower execution")
-        if logged_command([cfg.herwig, "read", card_path], cfg, directory, directory / "read.log"):
+        library_options = ["-L", cfg.ancestry_plugin_dir] if cfg.ancestry_plugin_dir else []
+        if logged_command([cfg.herwig, "read", card_path, *library_options], cfg, directory, directory / "read.log"):
             raise ValueError(f"Herwig read failed: {directory / 'read.log'}")
-        code = logged_command([cfg.herwig, "run", f"{sample.name}.run", f"-N{execution['execution_events']}"], cfg, directory, directory / "run.log")
+        code = logged_command([cfg.herwig, "run", f"{sample.name}.run", f"-N{execution['execution_events']}", *library_options], cfg, directory, directory / "run.log")
         if cfg.dry_run:
             return work / f"{sample.name}_hwsim_roots.input", metadata
         termination = "source_exhausted" if code else "requested_events"

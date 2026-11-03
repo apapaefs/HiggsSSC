@@ -19,7 +19,7 @@ CORE_TEST := test_fourlepton_core
 
 all: $(TARGET)
 
-$(TARGET): $(SOURCE)
+$(TARGET): $(SOURCE) HwSimAncestry.h
 	$(CXX) $(CXXFLAGS) $(ROOT_CFLAGS) -o $@ $< $(ROOT_LIBS)
 
 fixture: $(FIXTURE)
@@ -30,7 +30,7 @@ $(FIXTURE): $(FIXTURE).cc
 check: $(TARGET) $(CORE_TEST)
 	./$(CORE_TEST)
 
-$(CORE_TEST): $(CORE_TEST).cc $(SOURCE)
+$(CORE_TEST): $(CORE_TEST).cc $(SOURCE) HwSimAncestry.h
 	$(CXX) $(CXXFLAGS) $(ROOT_CFLAGS) -o $@ $< $(ROOT_LIBS)
 
 clean:

@@ -1,0 +1,153 @@
+--- a/HwSim.h
++++ b/HwSim.h
+@@ -240,6 +240,15 @@
+    **/
+   double objects[8][10000];
+ 
++  // Optional ancestry graph for stable e/mu/photons, aligned with objects.
++  // Parent links and ThePEG previous-copy links are stored separately.
++  bool saveAncestry_;
++  int truthSchemaVersion;
++  std::vector<int> truthObject, truthPdg, truthParents, truthParentOffsets;
++  std::vector<int> truthPrevious, truthHard;
++  void fillAncestry(tEventPtr event);
++
++
+   /* parton-level particle information (final state)
+    * 4 momenta (E,x,y,z), id 
+    */
+@@ -641,12 +650,12 @@
+   : public ClassTraitsBase<Herwig::HwSim> {
+   /** Return a platform-independent class name */
+   static string className() { return "Herwig::HwSim"; }
+-  /** Persistent-data version. Version 1 adds SavePseudoJets. */
+-  static int version() { return 1; }
++  /** Persistent-data version. Version 1 adds SavePseudoJets; version 2 adds SaveAncestry. */
++  static int version() { return 2; }
+   /** Return the name(s) of the shared library (or libraries) be loaded to get
+    *  access to the HwSim class and any other class on which it depends
+    *  (except the base class). */
+-  static string library() { return "HwSim.so"; }
++  static string library() { return "HwSimAncestry.so"; }
+ };
+ 
+ /** @endcond */
+--- a/HwSim.cc
++++ b/HwSim.cc
+@@ -53,6 +53,7 @@
+ //costum headers
+ #include "complex_d.h"
+ #include <algorithm>
++#include <map>
+ 
+ 
+ using namespace std;
+@@ -63,6 +64,7 @@
+ HwSim::HwSim()
+   :jetAlgorithm_(-1), cut_eta_(5.0), cut_pt_part_(0.1), cut_pt_jet_(20.0), cut_eta_jet_(5.0), cut_eta_electron_(3.0),cut_pt_electron_(10.0), cut_eta_muon_(3.0), cut_pt_muon_(10.0), cut_pt_photon_(20.0),cut_eta_photon_(5.0), R_(0.4), saveObjects_(0), saveReconstructed_(0), savePseudoJets_(0), ctagging_(0), fl_DeltaR_(0.4), fl_PartonPTMin_(1.), fl_PartonEtaMax_(6), onfly_(0), saveoptionalweights_(0), electronisolation_(0), muonisolation_(0), muonIsoFrac_(0.1), muonIsoR_(0.2), electronIsoFrac_(0.1), electronIsoR_(0.2), btaggingmethod_(2), rootoutlocation_(""), savePartons_(false), topdecayprods_(0), ctaggingmethod_(0)
+ {
++  saveAncestry_ = false;
+   resetPseudoJetBuffers();
+ }
+ 
+@@ -75,7 +77,7 @@
+ }
+ 
+ void HwSim::persistentOutput(PersistentOStream & os) const {
+-  os  << jetAlgorithm_ << cut_eta_ << cut_pt_part_ << cut_pt_jet_ << cut_eta_jet_ << cut_eta_electron_ << cut_pt_electron_ << cut_eta_muon_ << cut_pt_muon_ << cut_pt_photon_ << cut_eta_photon_ << R_ << saveReconstructed_ << saveObjects_ << ctagging_ << onfly_ << saveoptionalweights_ << electronisolation_ << muonisolation_ << muonIsoFrac_ << muonIsoR_ << electronIsoFrac_ << electronIsoR_ << btaggingmethod_ << rootoutlocation_ << savePartons_ << topdecayprods_ << ctaggingmethod_ << savePseudoJets_;
++  os  << jetAlgorithm_ << cut_eta_ << cut_pt_part_ << cut_pt_jet_ << cut_eta_jet_ << cut_eta_electron_ << cut_pt_electron_ << cut_eta_muon_ << cut_pt_muon_ << cut_pt_photon_ << cut_eta_photon_ << R_ << saveReconstructed_ << saveObjects_ << ctagging_ << onfly_ << saveoptionalweights_ << electronisolation_ << muonisolation_ << muonIsoFrac_ << muonIsoR_ << electronIsoFrac_ << electronIsoR_ << btaggingmethod_ << rootoutlocation_ << savePartons_ << topdecayprods_ << ctaggingmethod_ << savePseudoJets_ << saveAncestry_;
+ 
+ }
+ 
+@@ -86,6 +88,47 @@
+   } else {
+     savePseudoJets_ = false;
+   }
++  if(version > 1) is >> saveAncestry_;
++  else saveAncestry_ = false;
++}
++
++
++void HwSim::fillAncestry(tEventPtr event) {
++  truthSchemaVersion = 1;
++  truthObject.assign(numparticles, -1);
++  truthPdg.clear(); truthParents.clear(); truthParentOffsets.clear();
++  truthPrevious.clear(); truthHard.clear();
++  std::vector<tcPPtr> nodes;
++  std::map<tcPPtr, int> indices;
++  const auto add = [&](tcPPtr p) -> int {
++    if(!p) return -1;
++    const auto found = indices.find(p);
++    if(found != indices.end()) return found->second;
++    int index = nodes.size();
++    indices[p] = index;
++    nodes.push_back(p);
++    return index;
++  };
++  std::map<tcPPtr, int> hard;
++  if(event->primarySubProcess()) {
++    for(const auto &p : event->primarySubProcess()->outgoing()) hard[p] = 1;
++    hard[event->primarySubProcess()->incoming().first] = 2;
++    hard[event->primarySubProcess()->incoming().second] = 2;
++  }
++  for(int i = 0; i < numparticles; ++i) {
++    const int id = std::abs(particlesToCluster_[i]->id());
++    if(id == 11 || id == 13 || id == 22) truthObject[i] = add(particlesToCluster_[i]);
++  }
++  // Iterative traversal handles shared ancestors and cycles without recursion.
++  for(size_t i = 0; i < nodes.size(); ++i) {
++    const tcPPtr p = nodes[i]; // add() can reallocate nodes
++    truthPdg.push_back(p->id());
++    truthHard.push_back(hard.count(p) ? hard[p] : 0);
++    truthPrevious.push_back(add(p->previous()));
++    truthParentOffsets.push_back(truthParents.size());
++    for(const auto &parent : p->parents()) truthParents.push_back(add(parent));
++  }
++  truthParentOffsets.push_back(truthParents.size());
+ }
+ 
+ void HwSim::resetPseudoJetBuffers() {
+@@ -232,7 +275,10 @@
+    * GET THE FINAL-STATE PARTICLES
+    */
+   event->getFinalState( particlesToCluster_ );
+-  numparticles = std::min<int>(particlesToCluster_.size(), MAXOBJ); //get the total number of particles
++  if(particlesToCluster_.size() > MAXOBJ)
++    throw std::runtime_error("HwSim: more than 10000 stable particles; refusing array overflow");
++  numparticles = particlesToCluster_.size();
++  if(saveAncestry_) fillAncestry(event);
+ 
+   /*
+    * GET THE INCOMING PARTICLES:
+@@ -935,6 +981,12 @@
+      "The Kt jet algorithm.",
+      1);
+ 
++  static Switch<HwSim,bool> interfaceSaveAncestry
++    ("SaveAncestry", "Save stable electron, muon and photon ancestry (requires SaveObjects).",
++     &HwSim::saveAncestry_, false, false, false);
++  static SwitchOption SaveAncestryNo(interfaceSaveAncestry, "No", "Do not save ancestry.", false);
++  static SwitchOption SaveAncestryYes(interfaceSaveAncestry, "Yes", "Save ancestry graph schema 1.", true);
++
+     static Switch<HwSim,bool> interfaceSaveObjects
+     ("SaveObjects",
+      "Determines whether to save all objects to root file or not",
+@@ -1297,6 +1349,18 @@
+   }
+   
+ 
++  if(saveAncestry_ && !saveObjects_)
++    throw std::runtime_error("HwSim SaveAncestry requires SaveObjects Yes");
++  if(saveAncestry_) {
++    cout << "Saving HwSim lepton/photon ancestry graph schema 1" << endl;
++    Data->Branch("truthSchemaVersion", &truthSchemaVersion, "truthSchemaVersion/I");
++    Data->Branch("truthObject", &truthObject);
++    Data->Branch("truthPdg", &truthPdg);
++    Data->Branch("truthParents", &truthParents);
++    Data->Branch("truthParentOffsets", &truthParentOffsets);
++    Data->Branch("truthPrevious", &truthPrevious);
++    Data->Branch("truthHard", &truthHard);
++  }
+   if(saveObjects_ == true) {
+ 	cout << "Saving object 4-momenta" << endl;
+ 	cout << "WARNING: This will crash if there are over 10k final-state particles in an event" << endl; 
