@@ -91,6 +91,34 @@ campaigns. Do not concatenate campaigns sharing an external LHE input. Integrati
 grids are shared by the decay channels within a production group, but are not
 automatically transferred between campaign tags.
 
+To increase just the three qq continuum backgrounds, use
+`--qq-event-multiplier`. A factor of 10 gives 200,000 events per qq channel
+and keeps the other minimal counts in the table above: **771,000 hard events**
+in total. After the 40 TeV pilot has passed, launch this campaign on Timur with:
+
+```bash
+python3 run_pipeline.py run --workflow fourlepton-ho \
+  --energy-tev 40 --run-tag fourl40_minimal_qq200k \
+  --preset minimal --qq-event-multiplier 10 --jobs 80
+```
+
+This produces both perfect and SSC detector analyses. The existing 40 TeV ihixs
+normalization is reused; the new campaign generates its own hard events.
+The global `--event-multiplier` also scales the boosted qq counts: adding
+`--event-multiplier 2` doubles the whole 771,000-event set. The two factors
+are multiplied before event counts are rounded upwards. Their values are
+recorded in the plan and campaign identity; repeat the same options to resume
+and use a new tag to change either factor. The default qq factor is 1.
+
+After production and the strict report finish, run the two analyses:
+
+```bash
+python3 run_pipeline.py cuts --workflow fourlepton-ho \
+  --energy-tev 40 --run-tag fourl40_minimal_qq200k --luminosity-fb 100
+python3 run_pipeline.py xgboost --workflow fourlepton-ho \
+  --energy-tev 40 --run-tag fourl40_minimal_qq200k --luminosity-fb 100
+```
+
 The runtime settings use external loop libraries, COLLIER first for gg → 4ℓ
 (`7|6|1`) and Ninja first elsewhere (`6|7|1`). Loop-induced generation uses
 sampled helicities (`nhel=1`) and explicit survey splitting across the assigned

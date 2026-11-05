@@ -40,6 +40,8 @@ def parse_args(argv=None):
     p.add_argument("--preset", choices=("standard", "minimal"), default="standard",
                    help="fourlepton-ho: minimal uses a process-dependent student event budget")
     p.add_argument("--event-multiplier", default="1", help="scale every minimal-preset event count (default 1)")
+    p.add_argument("--qq-event-multiplier", default="1",
+                   help="additional minimal-preset multiplier for the three qq backgrounds (default 1)")
     p.add_argument("--wide-continuum", action="store_true",
                    help="minimal preset: omit the 90–180 GeV generation window for migration checks")
     p.add_argument("--jobs", type=int, default=4)
@@ -62,6 +64,8 @@ def parse_args(argv=None):
     args = p.parse_args(argv)
     try:
         args.event_multiplier = str(presets.multiplier(args.event_multiplier).normalize())
+        args.qq_event_multiplier = str(presets.multiplier(args.qq_event_multiplier, "--qq-event-multiplier").normalize())
+        presets.counts(args.event_multiplier, args.qq_event_multiplier)
     except ValueError as exc:
         p.error(str(exc))
     if args.preset == "minimal":
@@ -69,8 +73,8 @@ def parse_args(argv=None):
             p.error("--preset minimal applies only to fourlepton-ho")
         if args.nevents is not None:
             p.error("use --event-multiplier with --preset minimal, not --nevents")
-    elif args.event_multiplier != "1" or args.wide_continuum:
-        p.error("--event-multiplier and --wide-continuum require --preset minimal")
+    elif args.event_multiplier != "1" or args.qq_event_multiplier != "1" or args.wide_continuum:
+        p.error("--event-multiplier, --qq-event-multiplier and --wide-continuum require --preset minimal")
     args.nevents = 30 if args.nevents is None else args.nevents
     if args.collier_dir and args.action != "setup":
         p.error("--collier-dir applies to setup; subsequent commands use the saved MG5 configuration")

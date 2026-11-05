@@ -120,6 +120,9 @@ First complete setup and the energy-specific pilot described in the
 Add `--event-multiplier 2` with a new tag to double every sample; use
 `--energy-tev 40` and a separate tag for the SSC. The 1–2 day target on 40 cores
 still needs a full timing run. You launch all simulations yourself.
+For 200,000 events in each qq-background channel with the other minimal counts
+unchanged, add `--qq-event-multiplier 10` (771,000 events total). The global
+event multiplier can still scale this entire set uniformly.
 
 For an existing 13 TeV HO campaign, `reprocess --revision NAME` rebuilds the
 CMS selection from saved showers and writes separate report, validation,

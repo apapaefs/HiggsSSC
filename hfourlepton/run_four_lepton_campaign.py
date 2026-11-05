@@ -354,6 +354,7 @@ class Config:
     signal_normalization: Path | None = None
     preset: str = "standard"
     event_multiplier: str = "1"
+    qq_event_multiplier: str = "1"
     wide_continuum: bool = False
     manifest_override: Path | None = None
     postprocess_only: bool = False
@@ -527,6 +528,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--preset", choices=("standard", "minimal"), default="standard")
     parser.add_argument("--event-multiplier", default="1")
+    parser.add_argument("--qq-event-multiplier", default="1",
+                        help="additional minimal-preset multiplier for qq backgrounds")
     parser.add_argument("--wide-continuum", action="store_true")
     parser.add_argument("--nevents", type=int, default=env_int("NEVENTS", 10000))
     parser.add_argument(
@@ -669,6 +672,8 @@ def parse_config(argv: Sequence[str]) -> Config:
     from hfourlepton import presets
     try:
         args.event_multiplier = str(presets.multiplier(args.event_multiplier).normalize())
+        args.qq_event_multiplier = str(presets.multiplier(args.qq_event_multiplier, "--qq-event-multiplier").normalize())
+        minimal_counts = presets.counts(args.event_multiplier, args.qq_event_multiplier)
     except ValueError as exc:
         parser.error(str(exc))
     if args.nb_core < 1:
@@ -677,15 +682,15 @@ def parse_config(argv: Sequence[str]) -> Config:
         if args.order != "ho" or args.sample_set != "irreducible":
             parser.error("minimal requires --order ho --sample-set irreducible")
         if args.sample_nevents or any(x == "--nevents" or x.startswith("--nevents=") for x in argv):
-            parser.error("minimal event counts are controlled by --event-multiplier")
+            parser.error("minimal event counts are controlled by --event-multiplier and --qq-event-multiplier")
         if args.force:
             parser.error("minimal campaigns preserve existing work; use a new --run-tag instead of --force")
-        sample_nevents = presets.counts(args.event_multiplier)
+        sample_nevents = minimal_counts
         args.nevents = max(sample_nevents.values())
         args.seed_base = presets.seed_base(args.run_tag)
         args.signal_modes = "all"
-    elif args.event_multiplier != "1" or args.wide_continuum:
-        parser.error("--event-multiplier and --wide-continuum require --preset minimal")
+    elif args.event_multiplier != "1" or args.qq_event_multiplier != "1" or args.wide_continuum:
+        parser.error("--event-multiplier, --qq-event-multiplier and --wide-continuum require --preset minimal")
     known_names = set(SAMPLES_BY_NAME) | {
         f"{sample.name}_hfbiased" for sample in SAMPLES if sample.heavy_flavour_candidate
     }
@@ -795,6 +800,7 @@ def parse_config(argv: Sequence[str]) -> Config:
         vbf_lhe=args.vbf_lhe.resolve() if args.vbf_lhe else None,
         signal_normalization=args.signal_normalization.resolve() if args.signal_normalization else None,
         preset=args.preset, event_multiplier=args.event_multiplier, wide_continuum=args.wide_continuum,
+        qq_event_multiplier=args.qq_event_multiplier,
         ancestry_plugin_dir=args.ancestry_plugin_dir.resolve() if args.ancestry_plugin_dir else None,
     )
 

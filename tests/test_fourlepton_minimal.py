@@ -48,6 +48,72 @@ def export_build_files(root, sample):
 
 
 class MinimalTests(unittest.TestCase):
+    def test_qq_budget_scales_only_continuum_and_combines_before_rounding(self):
+        samples = ho.all_samples()
+        nominal = config()
+        boosted = config("--qq-event-multiplier", "10")
+        self.assertEqual(sum(boosted.events_for(s) for s in samples), 771000)
+        for sample in samples:
+            expected = 200000 if sample.name.startswith("bkg_qq_") else nominal.events_for(sample)
+            self.assertEqual(boosted.events_for(sample), expected)
+        doubled = config("--qq-event-multiplier", "10", "--event-multiplier", "2")
+        self.assertEqual(sum(doubled.events_for(s) for s in samples), 1542000)
+        self.assertEqual(presets.counts("0.000051", "10")["bkg_qq_4e"], 11)
+        # A small global multiplier must not bypass the pilot gate when qq is boosted.
+        self.assertEqual(presets.max_events(args("--event-multiplier", "0.0015",
+                                                 "--qq-event-multiplier", "10")), 300)
+        self.assertEqual(cli.identity(args(), {}), cli.identity(args("--qq-event-multiplier", "1.00"), {}))
+        self.assertNotIn("qq_event_multiplier", presets.description(args()))
+        self.assertNotEqual(cli.identity(args(), {}), cli.identity(args("--qq-event-multiplier", "10"), {}))
+
+    def test_qq_budget_rejects_invalid_overflow_and_nonminimal_options(self):
+        options = [("--qq-event-multiplier", value) for value in ("0", "-1", "nan", "inf", "invalid", "100000")]
+        options += [("--event-multiplier", "500", "--qq-event-multiplier", "500"),
+                    ("--preset", "standard", "--qq-event-multiplier", "10")]
+        for extra in options:
+            for parse in (args, config):
+                with self.subTest(options=extra, parse=parse.__name__), contextlib.redirect_stderr(io.StringIO()), \
+                     self.assertRaises(SystemExit):
+                    parse(*extra)
+        with tempfile.TemporaryDirectory() as tmp, patch.object(cli, "REPO", Path(tmp)):
+            common = ("--work-dir", str(Path(tmp) / "work"))
+            cli.prepare_run(args(*common, "--qq-event-multiplier", "10"), {})
+            with self.assertRaisesRegex(ValueError, "configuration changed"):
+                cli.prepare_run(args(*common), {})
+
+    def test_qq_budget_reaches_both_ssc_profiles_and_production_cards(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as tmp, patch.object(workflow, "REPO", Path(tmp)), \
+             patch.object(workflow, "configuration", return_value={}), \
+             patch.object(runtime, "validate_libraries"), \
+             patch.object(mg5_loop_recovery, "prepare_campaign"), \
+             patch.object(workflow.shared.norm, "load_record", return_value={"sqrt_s_gev": 40000.}):
+            options = args("--energy-tev", "40", "--jobs", "80", "--qq-event-multiplier", "10")
+            calls = []
+            pipe = SimpleNamespace(args=options, check=lambda: None, work=Path(tmp), mg5=Path(tmp) / "mg5",
+                    python=sys.executable, prefix=Path(tmp), cuba=Path(tmp), boost=Path(tmp),
+                    powheg=Path(tmp) / "powheg", config={"cc": "cc", "cxx": "c++"},
+                    call=lambda label, command: calls.append((label, command)))
+            workflow.run(pipe)
+            commands = dict(calls)
+            for suffix, count in (("-powheg", 60000), ("-powheg-vbf", 30000)):
+                command = commands[options.run_tag + suffix]
+                self.assertEqual(command[command.index("--nevents") + 1], count)
+            for profile in ("perfect", "ssc"):
+                command = commands[options.run_tag + "-fourlepton-" + profile]
+                parsed = four.parse_config([str(x) for x in command[2:]])
+                worker = four.Config(**asdict(parsed))
+                self.assertEqual(worker.detector_response, profile)
+                self.assertEqual(worker.ebeam, 20000)
+                self.assertEqual(worker.nb_core, 80)
+                self.assertEqual(sum(worker.events_for(s) for s in ho.all_samples()), 771000)
+                self.assertEqual(presets.description(worker), presets.description(options))
+            plan_dir = Path(tmp) / "hfourlepton/plans" / options.run_tag
+            plan = json.loads((plan_dir / "plan.json").read_text())
+            self.assertEqual(sum(s["nevents"] for s in plan["samples"]), 771000)
+            for channel in ("4e", "4mu", "2e2mu"):
+                self.assertIn("set nevents 200000\n", (plan_dir / f"bkg_qq_{channel}/launch.mg5").read_text())
+
     def test_counts_modes_group_sums_and_fractional_multiplier(self):
         samples = ho.all_samples()
         cfg = config("--nb-core", "40")
