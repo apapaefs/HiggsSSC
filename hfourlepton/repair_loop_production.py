@@ -30,6 +30,8 @@ def saved_options(work, tag):
     options = ["run", "--workflow", "fourlepton-ho", "--work-dir", str(work), "--run-tag", tag,
                "--preset", "minimal", "--energy-tev", str(identity["energy_tev"]),
                "--jobs", str(identity["jobs"]), "--event-multiplier", sampling["event_multiplier"]]
+    if "qq_event_multiplier" in sampling:
+        options.extend(["--qq-event-multiplier", sampling["qq_event_multiplier"]])
     if sampling["continuum_m4l_gev"] is None:
         options.append("--wide-continuum")
     for name in ("signal_lhe", "vbf_lhe", "signal_normalization"):

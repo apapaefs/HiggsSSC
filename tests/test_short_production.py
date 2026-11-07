@@ -15,6 +15,7 @@ from unittest.mock import patch
 from hfourlepton import checked_campaign as checked
 from hfourlepton import retry_short_production as retry
 from hfourlepton import minimal_runtime, higher_order
+from hfourlepton import repair_loop_production as repair
 from hfourlepton import run_four_lepton_campaign as four
 from hfourlepton.repair_loop_production import completed_production
 
@@ -33,6 +34,43 @@ def card_text(*, expanded=False):
             'lhapdf = pdlabel\n335900 = lhaid\n3 = ptl\n3 = etal\n4 = mmll\n'
             '0.02 = drll\n1 = sde_strategy ! strategy\n' +
             ('0 = hard_survey ! survey\n' if expanded else ''))
+
+
+class ManagedRecoveryOptions(unittest.TestCase):
+    def test_saved_event_budgets_round_trip_into_recovery_configuration(self):
+        for energy, jobs, qq_factor, factor in ((13, 40, "1", "1"),
+                                               (40, 80, "10", "1"),
+                                               (40, 80, "10", "2")):
+            with self.subTest(energy=energy, qq=qq_factor, factor=factor), \
+                 tempfile.TemporaryDirectory() as tmp:
+                work = Path(tmp).resolve()
+                args = repair.cli.parse_args(["run", "--workflow", "fourlepton-ho", "--preset", "minimal",
+                    "--run-tag", "recovery_test", "--work-dir", str(work), "--energy-tev", str(energy),
+                    "--jobs", str(jobs), "--qq-event-multiplier", qq_factor, "--event-multiplier", factor])
+                environment = repair.cli.shared.configuration(args)
+                identity = repair.cli.identity(args, environment)
+                state = repair.cli.state_path(args)
+                state.parent.mkdir(parents=True)
+                state.write_text(json.dumps(dict(state="failed", identity=identity)))
+                before = state.read_bytes()
+                if qq_factor == "1":
+                    self.assertNotIn("qq_event_multiplier", identity["sampling"])
+                saved, path, restored, actual_environment = repair.saved_options(work, args.run_tag)
+                self.assertEqual(repair.cli.identity(restored, actual_environment), identity)
+                self.assertEqual(path, state)
+                self.assertEqual(saved["state"], "failed")
+                _, _, cfg = repair.saved_configuration(work, args.run_tag)
+                self.assertEqual(cfg.nb_core, jobs)
+                self.assertEqual(cfg.ebeam, energy * 500)
+                self.assertEqual(cfg.selection_profile, "cms" if energy == 13 else "ssc")
+                self.assertEqual({s.name: cfg.events_for(s) for s in four.selected_samples(cfg)},
+                                 identity["sampling"]["sample_nevents"])
+                self.assertEqual(state.read_bytes(), before)
+                # Restoring the multiplier must not bypass the saved count check.
+                identity["sampling"]["sample_nevents"]["bkg_qq_4mu"] += 1
+                state.write_text(json.dumps(dict(state="failed", identity=identity)))
+                with self.assertRaisesRegex(ValueError, "options, inputs or environment have changed"):
+                    repair.saved_options(work, args.run_tag)
 
 
 class ProductionChecks(unittest.TestCase):

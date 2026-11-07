@@ -269,10 +269,15 @@ python3 hfourlepton/retry_short_production.py \
   --run-tag fourl13_minimal_nlofix --sample bkg_gg_4mu --run
 ```
 
+Use the affected campaign's tag, for example `fourl40_minimal_qq200k` for
+the 40 TeV campaign. The helper restores its saved energy, job allocation,
+global event multiplier and qq-background multiplier, and verifies the
+complete configuration before changing any files.
+
 Without `--run`, no campaign files change and no generator starts. With `--run`,
 the original LHE, grids, export and metadata are archived under
 `runs/TAG/recovery/loop-short-sample-v1/bkg_gg_4mu/`. The replacement uses the
-original managed environment and 40-core allocation, with `sde_strategy=2`
+original managed environment and job allocation, with `sde_strategy=2`
 and `hard_survey=1`. These are documented MG5 controls for changing phase-space
 sampling and strengthening the initial survey; see Table 8 of
 [Speeding up MadGraph5_aMC@NLO](https://pmc.ncbi.nlm.nih.gov/articles/PMC8136271/).
@@ -280,13 +285,16 @@ The process, PDF, cuts, seed, requested count and reduction-library order stay
 the same. The exact numerical changes and replacement artifact are recorded in
 `production/bkg_gg_4mu/numerical_retry.json` and linked from its production marker.
 
-This retry is a proposed numerical remedy, not a demonstrated speed or
-stability improvement. It must produce at least 2,000 events and record the
-requested settings in its LHE banner. If it fails again, the helper preserves
+This retry is a numerical remedy whose speed and stability must be checked
+for the affected campaign. It must produce the requested event count
+(2,000 at the default minimal multiplier) and record the requested settings
+in its LHE banner. Inspect numerical warnings as well as the final count.
+If it fails again, the helper preserves
 the second attempt and refuses another automatic replacement. Do not use
-`--force` to bypass that failure. After the replacement passes, apply the
-MadSpin startup migration above and repeat the original run command. The other
-twelve completed production groups are reused.
+`--force` to bypass that failure. After the replacement passes, repeat the
+original run command to reuse completed groups and finish any queued groups.
+The historical 13 TeV campaign also needs the MadSpin startup migration above;
+that migration does not apply to the 40 TeV campaign.
 
 The first retry helper required `hard_survey` to be present in a freshly
 exported run card, although MG5 3.5.15 defines it as a hidden parameter with
