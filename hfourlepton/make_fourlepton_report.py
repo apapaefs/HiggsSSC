@@ -208,6 +208,11 @@ class RootRecords:
     four_lepton: list[dict[str, Any]]
     audit: Audit = field(default_factory=Audit)
     metadata: dict[str, Any] = field(default_factory=dict)
+    four_lepton_entries: int | None = None
+
+    @property
+    def original_four_lepton_entries(self) -> int:
+        return len(self.four_lepton) if self.four_lepton_entries is None else self.four_lepton_entries
 
 
 @dataclass
@@ -1834,10 +1839,10 @@ def detector_provenance_audit(
         )
 
     rows_summary = summary.get("four_lepton_rows")
-    if rows_summary is not None and int(rows_summary) != len(records.four_lepton):
+    if rows_summary is not None and int(rows_summary) != records.original_four_lepton_entries:
         local_audit.errors.append(
             "analyzer summary four_lepton_rows disagrees with FourLepton entries "
-            f"({rows_summary!r} vs {len(records.four_lepton)})"
+            f"({rows_summary!r} vs {records.original_four_lepton_entries})"
         )
 
     summary_output = summary.get("output_root")
@@ -1866,7 +1871,7 @@ def detector_provenance_audit(
                 "summary_read": events_summary,
                 "source_tree_entries": len(records.source_events),
                 "summary_four_lepton_rows": rows_summary,
-                "four_lepton_tree_entries": len(records.four_lepton),
+                "four_lepton_tree_entries": records.original_four_lepton_entries,
             },
             "summary_path": records.metadata.get("summary_path"),
             "ok": not local_audit.errors,
@@ -3164,7 +3169,7 @@ def generate_report(
     mass_bin_width_gev: float = DEFAULT_MASS_BIN_WIDTH_GEV,
     title: str = "H -> ZZ* -> 4l analysis",
     closure_tolerance: float = 1.0e-9,
-    record_loader: Callable[[Path], RootRecords] = load_root_records,
+    record_loader: Callable[[Path], RootRecords] | None = None,
     allow_unvalidated_bias: bool = False,
     plot_mode: str = "both",
 ) -> dict[str, Any]:
@@ -3198,8 +3203,13 @@ def generate_report(
         if bundle.cut_stages != stages:
             global_audit.errors.append(f"{bundle.path}: cut-stage definition differs")
         for sample in bundle.samples:
+            print(f"Reporting {sample.detector_profile}/{sample.name}", flush=True)
             if sample.output_root is None:
                 records = RootRecords([], [], Audit(errors=["ROOT path unavailable"]))
+            elif record_loader is None:
+                from hfourlepton.report_reader import load_report_records
+                records = load_report_records(sample.output_root,
+                    selected_mask=_final_stage(stages).required_mask, progress=True)
             else:
                 records = record_loader(sample.output_root)
             result = analyze_sample(
@@ -3213,6 +3223,9 @@ def generate_report(
                 mass_range_gev,
                 mass_bin_width_gev,
             )
+            # Do not hold the previous sample's event records while reading
+            # the next file (the right-hand side of an assignment runs first).
+            del records
             sample_reports.append(result)
             for message in result["audit"]["errors"]:
                 global_audit.errors.append(f"{sample.name}: {message}")

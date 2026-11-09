@@ -210,8 +210,32 @@ def progress(args, **values):
 
 
 class StudentPipeline(shared.Pipeline):
+    def setup_python(self):
+        super().setup_python()
+        if self.args.workflow.startswith("fourlepton-"):
+            ready = self.capture([self.python, "-c", "import importlib.util; "
+                "print(int(all(importlib.util.find_spec(name) is not None for name in ('uproot','awkward'))))"])
+            if ready.strip() != "1":
+                versions = json.loads(self.capture([self.python, "-c",
+                    "import importlib.metadata,json; print(json.dumps({name: importlib.metadata.version(name) "
+                    f"for name in {shared.CORE_PACKAGES!r}}}))"]))
+                constraints = self.work / "report-core-constraints.txt"
+                constraints.write_text("".join(f"{name}=={version}\n" for name, version in versions.items()))
+                self.call("python-fourlepton-io", [self.python, "-m", "pip", "install", "--constraint", constraints,
+                    "--requirement", REPO / "hfourlepton/requirements-report.txt"])
+            self.check_fourlepton_io()
+
+    def check_fourlepton_io(self):
+        try:
+            self.call("check-fourlepton-io", [self.python, "-c", "import uproot,awkward"])
+        except RuntimeError as exc:
+            raise ValueError(f"chunked ROOT-reading dependencies are unavailable; "
+                             f"run setup --workflow {self.args.workflow}") from exc
+
     def check(self):
         super().check()
+        if self.args.workflow.startswith("fourlepton-"):
+            self.check_fourlepton_io()
         if self.args.preset == "minimal":
             from hfourlepton.minimal_runtime import validate_libraries
             validate_libraries(self.mg5)

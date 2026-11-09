@@ -16,6 +16,29 @@ from hfourlepton import make_fourlepton_report as fourlepton_report
 
 
 class StudentPipelineTests(unittest.TestCase):
+    def test_fourlepton_reader_setup_pins_existing_core_packages(self):
+        with TemporaryDirectory() as tmp:
+            pipeline = object.__new__(cli.StudentPipeline)
+            pipeline.args = cli.parse_args(["setup", "--workflow", "fourlepton-ho"])
+            pipeline.work = Path(tmp)
+            pipeline.python = pipeline.work / "venv/bin/python"
+            versions = {name: "1.2.3" for name in cli.shared.CORE_PACKAGES}
+            pipeline.capture = mock.Mock(side_effect=["0", json.dumps(versions)])
+            pipeline.call = mock.Mock()
+            with mock.patch.object(cli.shared.Pipeline, "setup_python") as original:
+                pipeline.setup_python()
+            original.assert_called_once()
+            command = pipeline.call.call_args_list[0].args[1]
+            self.assertIn("--constraint", command)
+            constraints = command[command.index("--constraint") + 1]
+            self.assertEqual(constraints.read_text(), "".join(f"{name}==1.2.3\n" for name in versions))
+            pipeline.capture = mock.Mock(return_value="1")
+            pipeline.call.reset_mock()
+            with mock.patch.object(cli.shared.Pipeline, "setup_python"):
+                pipeline.setup_python()
+            self.assertEqual(pipeline.call.call_count, 1)
+            self.assertEqual(pipeline.call.call_args.args[0], "check-fourlepton-io")
+
     def args(self, root, *extra):
         return cli.parse_args(["run", "--workflow", "gammagamma-lo", "--run-tag", "pilot",
                                "--work-dir", str(root / "work"), *extra])

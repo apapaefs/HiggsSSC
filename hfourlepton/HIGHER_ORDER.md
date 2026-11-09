@@ -250,6 +250,27 @@ fingerprint with an explicit migration record. All hard events, production
 markers, decay cards and staged LHE inputs are unchanged. `--apply` runs no
 simulation; the original run command resumes the same tag at postprocessing.
 
+### Large SSC reports and analysis memory
+
+SSC efficiency enumeration can produce tens of millions of detector hypotheses
+from 200,000 source events. Reporting reads ROOT files in 32 MB chunks using
+Uproot, combines rejected hypotheses with the same source, channel and cut mask,
+and keeps each selected hypothesis separately. This preserves the cutflows,
+source-grouped statistical uncertainties, probability closure and optional-weight
+audits. Checks against the analyzer summary use the original tree entry count.
+The log shows each sample and progress through its hypothesis tree.
+
+Cuts and XGBoost use the same reader. A zero-weight row for every source event
+keeps the full source population in train/validation/test fractions; only selected
+hypotheses need additional analysis rows. Generated ROOT files are unchanged.
+
+`setup --workflow fourlepton-ho` (or `fourlepton-lo`) installs the reader in the
+private environment without upgrading the existing core packages. After an
+interrupted report, repeat the original `run` command: the pipeline verifies the
+completed analysis inventory and resumes at reporting, then the usual `cuts` and
+`xgboost` commands can run. No event generation or detector reconstruction is
+needed. Preserve the interrupted log before restarting.
+
 ### Recover an undersized loop-induced sample
 
 MG5 can exit successfully after reporting `fail to reach target`, leaving an

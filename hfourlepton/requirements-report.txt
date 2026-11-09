@@ -1,0 +1,2 @@
+# Chunked ROOT input; NumPy comes from the existing private pipeline environment.
+uproot>=5,<6

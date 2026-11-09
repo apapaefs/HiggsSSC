@@ -122,7 +122,10 @@ def load_dataset(manifest, card, luminosity, *, for_ml=False):
                           ("analysis_summary_sha256", Path(sample.raw["analysis_summary"]))):
             if not path or not path.is_file() or digest(path) != sample.raw.get(key):
                 raise ValueError(f"missing or changed analysis product for {sample.name}: {key}")
-        records = report.load_root_records(sample.output_root)
+        from hfourlepton.report_reader import load_report_records
+        print(f"Auditing {sample.name}", flush=True)
+        records = load_report_records(sample.output_root,
+            selected_mask=report._final_stage(bundle.cut_stages).required_mask, progress=True)
         result = report.analyze_sample(sample, records, bundle.cut_stages, luminosity,
                                       (120., 130.), 1.e-9)
         errors.extend(f"{sample.name}: {e}" for e in result["audit"]["errors"])
@@ -153,6 +156,10 @@ def load_dataset(manifest, card, luminosity, *, for_ml=False):
             if int(row["source_index"]) not in sources:
                 raise ValueError("hypothesis has no SourceEvents entry")
             selected = report.passes_stage(row, bundle.cut_stages[-1])
+            if not selected:
+                # The zero-weight source row above already accounts for this
+                # event in independent train/validation/test populations.
+                continue
             pts = sorted((float(v) for v in row.get("lepton_pt", [])), reverse=True)
             if selected and len(pts) != 4:
                 raise ValueError("lepton_pt[4] is required; rerun the four-lepton analyzer")
@@ -164,6 +171,7 @@ def load_dataset(manifest, card, luminosity, *, for_ml=False):
             rows.append(dict(sample=sample.name, group=group, source=int(row["source_index"]),
                 label=int(sample.category == "signal"), weight=float(row["event_weight"]) * scale * luminosity * 1000.,
                 selected=selected, **values))
+        del records
     if errors:
         raise ValueError("four-lepton audit failed:\n" + "\n".join(errors))
     data = {key: np.array([row[key] for row in rows]) for key in rows[0]}
