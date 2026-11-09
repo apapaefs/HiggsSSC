@@ -168,6 +168,22 @@ The example uses the completed `fourl40_minimal_qq200k` campaign as its base:
   python3 run_pipeline.py check --workflow fourlepton-ho --preset minimal --with-ml
 
   for profile in perfect ssc; do
+    # Do not rewrite completed manifests when resuming the assembly stages.
+    if "$py" -c '
+import json, sys
+from pathlib import Path
+p = Path(sys.argv[1])
+m = json.loads(p.read_text()) if p.is_file() else {}
+names = {"bkg_qq_4e", "bkg_qq_4mu", "bkg_qq_2e2mu"}
+samples = m.get("samples", [])
+complete = (m.get("status") == "complete" and len(samples) == 3
+            and {s["name"] for s in samples} == names
+            and all(s.get("status") == "complete" and s["nevents_requested"] == 1000000 for s in samples))
+sys.exit(0 if complete else 1)
+' "hfourlepton/runs/$qq_run/manifest_$profile.json"; then
+      echo "Using completed $profile analysis"
+      continue
+    fi
     "$py" hfourlepton/checked_campaign.py \
       --order ho --selection-profile ssc --detector-response "$profile" \
       --run-tag "$qq_run" --run-samples bkg_qq \
