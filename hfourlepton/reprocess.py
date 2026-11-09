@@ -69,6 +69,15 @@ def audit_parent(path):
             or raw.get("detector_profile") != "perfect"
             or raw.get("collider", {}).get("sqrt_s_tev") != 13.):
         raise ValueError("reprocessing currently supports completed 13 TeV HO CMS/perfect manifests")
+    return audit_completed_manifest(path)
+
+
+def audit_completed_manifest(path):
+    """Verify completed analysis and shower artifacts without choosing a profile.
+
+    Reprocessing and assembly callers apply their own physics/profile gates.
+    """
+    raw = json.loads(path.read_text())
     bundle = report.load_manifest(path)
     if bundle.audit.errors:
         raise ValueError("; ".join(bundle.audit.errors))

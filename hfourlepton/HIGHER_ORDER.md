@@ -143,6 +143,66 @@ claim below those thresholds; increase statistics if needed. An explicit
 `--config` uses that analysis card's own thresholds. Omitting `--preset minimal`
 for a new campaign keeps the original uniform-count workflow.
 
+### Increase only qq statistics in a completed 40 TeV campaign
+
+The direct runner can generate only `bkg_qq_4e`, `bkg_qq_4mu` and
+`bkg_qq_2e2mu`. A fresh tag with `--qq-event-multiplier 50` requests
+**1,000,000 new events per channel (3,000,000 total)**. This is a replacement
+dataset: it does not append to the old 200,000-event samples. Completed Higgs
+and gg-continuum analysis products are reused, with one physical cross section
+per sample in the assembled result.
+
+On Timur, run this from the repository root in a persistent terminal session.
+The example uses the completed `fourl40_minimal_qq200k` campaign as its base:
+
+```bash
+(
+  set -eo pipefail
+  source /etc/profile.d/modules.sh
+  module load herwig/stable
+  set -u
+  export PYTHONNOUSERSITE=1 OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
+  py="$PWD/inputs/pipeline/venv/bin/python"
+  qq_run=fourl40_qq1m
+
+  python3 run_pipeline.py check --workflow fourlepton-ho --preset minimal --with-ml
+
+  for profile in perfect ssc; do
+    "$py" hfourlepton/checked_campaign.py \
+      --order ho --selection-profile ssc --detector-response "$profile" \
+      --run-tag "$qq_run" --run-samples bkg_qq \
+      --preset minimal --qq-event-multiplier 50 \
+      --nb-core 80 --ebeam 20000 --higgs-mass 125 --luminosity-fb 100 \
+      --mg5-dir inputs/pipeline/MG5_aMC_v3_5_15 --mg5-python "$py" \
+      --no-herwig-env --no-herwig-module
+  done
+
+  "$py" hfourlepton/replace_qq_backgrounds.py \
+    --base-manifest hfourlepton/runs/fourl40_minimal_qq200k/manifest_ssc.json \
+    --qq-manifest "hfourlepton/runs/$qq_run/manifest_ssc.json" \
+    --output-dir hfourlepton/runs/fourl40_minimal_qq200k/revisions/ssc_qq1m \
+    --paired-perfect --luminosity-fb 100
+)
+```
+
+The two response profiles share the new shower events. The assembly verifies
+the original and new analysis artifacts, checks matching physics and detector
+settings, and requires an independent production seed. `--paired-perfect`
+includes the sibling `manifest_perfect.json` from each input directory and
+checks that both profiles use the same hard events and shower outputs.
+The combined report compares both profiles; cuts and XGBoost use SSC response.
+No 13 TeV LHC acceptance test is applied to this 40 TeV result. The cut and
+ML statistical thresholds remain 400 and 100 effective background events.
+
+Repeat the same block to resume after a failure; it stops at the first failed
+stage. Do not change the event count under the same tag or use `--force`.
+Completed input campaigns are unchanged. Generation logs are under
+`runs/fourl40_qq1m/production/SAMPLE/logs/`, and sample workers log under
+`runs/fourl40_qq1m/workers/PROFILE/`. This direct campaign is not registered by
+`run_pipeline.py status`. Assembly progress and stage logs are in
+`runs/fourl40_minimal_qq200k/revisions/ssc_qq1m/state.json` and `attempts/`;
+the final report, cut analysis and ML links are in that directory's `index.html`.
+
 ### Recover a run stopped after the W+H export
 
 The first minimal-preset release checked NLO exports using the loop-induced

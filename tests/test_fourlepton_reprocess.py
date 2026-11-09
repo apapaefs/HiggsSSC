@@ -162,6 +162,13 @@ class ReprocessTest(unittest.TestCase):
              mock.patch.object(revision.report, "_expected_runtime_metadata", return_value={}), \
              mock.patch.object(revision.report, "_validated_shower_completion", side_effect=completed):
             revision.audit_parent(self.parent)
+            ssc = copy.deepcopy(self.raw)
+            ssc.update(selection_profile="ssc", detector_profile="ssc", collider={"sqrt_s_tev": 40.})
+            ssc_path = self.root / "manifest_ssc.json"
+            revision.save(ssc_path, ssc)
+            self.assertEqual(revision.audit_completed_manifest(ssc_path)[0], ssc)
+            with self.assertRaisesRegex(ValueError, "13 TeV"):
+                revision.audit_parent(ssc_path)
             (self.root / "first.input").write_text(str(self.root / "second_shower.root") + "\n")
             with self.assertRaisesRegex(ValueError, "inventory differs"):
                 revision.audit_parent(self.parent)
