@@ -944,3 +944,36 @@ python3 -m unittest discover -s tests -p test_fourlepton_report.py
 python3 -m unittest discover -s tests -p test_ihixs_normalization.py
 python3 -m unittest discover -s tests -p test_student_pipeline.py
 ```
+# Recovering an error-limited qq shower
+
+For a minimal SSC campaign containing only `bkg_qq_4e`, `bkg_qq_4mu` and
+`bkg_qq_2e2mu`, a finalized partial shower that stopped at `MaxErrors` can be
+recovered without changing its completed hard production. From the repository
+root, in the original Herwig environment:
+
+```bash
+py=inputs/pipeline/venv/bin/python
+"$py" hfourlepton/recover_shower_errors.py prepare \
+  --run-dir hfourlepton/runs/fourl40_qq1m --max-errors 1000
+"$py" hfourlepton/recover_shower_errors.py run \
+  --run-dir hfourlepton/runs/fourl40_qq1m
+```
+
+`audit` accepts the same options as `prepare` for an inspection without moving
+outputs. Preparation verifies all three failures, the original configuration,
+hard-event counts/checksums, source weights, and finalized ROOT counts. It then
+archives the failed showers and copies their manifests and worker evidence into
+`shower-recovery/`. It does not accept partial showers as completed samples.
+The `run` command reuses the saved worker configuration, changes only the recorded
+Herwig error limit, and blocks every hard-production call. It runs both perfect
+and SSC analyses, sharing the new showers between the profiles. Resume with this
+recovery command so that the recorded budget is applied in every worker.
+
+The standard finite-source and signed-weight checks still apply: rejected source
+events contribute zero detector response and remain in the normalization
+denominator. The larger budget is an operational allowance, not a validation of
+the affected events; the completion record includes exception counts and
+momentum-consistency diagnostics. The default budget and other campaigns are
+unchanged. Assemble the completed replacement manifests with
+`replace_qq_backgrounds.py --paired-perfect` as described below.
+
