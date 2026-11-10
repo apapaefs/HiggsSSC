@@ -3097,6 +3097,7 @@ Samples with unvalidated decay-bias closure are visibly excluded from combined t
 <tbody>{resolution_rows or '<tr><td colspan="6">No signal mass entries</td></tr>'}</tbody></table>
 
 <h2>Full selected m<sub>4l</sub> spectra</h2>
+{'<p><a href="observables/index.html">All four-lepton observables: paired shapes and physical yields, with PDF/SVG/CSV exports</a></p>' if report.get('observables', {}).get('status') == 'complete' else ''}
 <p class="note">Shapes and physical yields are calculated separately for each detector profile,
 final-state channel and process category. Signed bins can be negative.</p>
 {''.join(spectrum_sections) or '<p>No normalized spectra are available.</p>'}
@@ -3172,6 +3173,7 @@ def generate_report(
     record_loader: Callable[[Path], RootRecords] | None = None,
     allow_unvalidated_bias: bool = False,
     plot_mode: str = "both",
+    observables: bool = False,
 ) -> dict[str, Any]:
     if plot_mode not in PLOT_MODES:
         raise ValueError(f"unknown plot mode {plot_mode!r}; choose from {', '.join(PLOT_MODES)}")
@@ -3223,6 +3225,11 @@ def generate_report(
                 mass_range_gev,
                 mass_bin_width_gev,
             )
+            if observables:
+                from hfourlepton.observables import sample_observables
+                selected_rows = [row for row in records.four_lepton if passes_stage(row, _final_stage(stages))]
+                result["observables"] = sample_observables(selected_rows, result["normalization"], signal_region_gev)
+                del selected_rows
             # Do not hold the previous sample's event records while reading
             # the next file (the right-hand side of an assignment runs first).
             del records
@@ -3309,6 +3316,9 @@ def generate_report(
     }
     report = _json_safe(report)
     output_dir.mkdir(parents=True, exist_ok=True)
+    if observables:
+        from hfourlepton.observables import render
+        report["observables"] = render(report, output_dir / "observables")
     (output_dir / "report.json").write_text(
         json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n"
     )
@@ -3325,6 +3335,8 @@ def positive_float(value: str) -> float:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--observables", action="store_true",
+                        help="Export paired shape/yield plots and PDF/SVG/CSV for 17 selected-lepton observables.")
     parser.add_argument(
         "manifests",
         nargs="+",
@@ -3405,6 +3417,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         closure_tolerance=args.closure_tolerance,
         allow_unvalidated_bias=args.allow_unvalidated_bias,
         plot_mode=args.plot_mode,
+        observables=args.observables,
     )
     print(f"Report JSON: {args.output_dir / 'report.json'}")
     print(f"Report HTML: {args.output_dir / 'index.html'}")

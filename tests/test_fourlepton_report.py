@@ -415,6 +415,25 @@ class FourLeptonReportOutputTest(unittest.TestCase):
                 generate_report([], output, plot_mode="invalid")
             self.assertFalse(output.exists())
 
+    def test_observables_reuse_records_without_changing_report_yields(self) -> None:
+        from hfourlepton import observables
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            manifest = self._manifest(directory)
+            plain = generate_report([manifest], directory / "plain", record_loader=self._loader)
+            mass = next(s for s in observables.OBSERVABLES if s.name == "m4l")
+            with patch.object(observables, "OBSERVABLES", (mass,)):
+                plotted = generate_report([manifest], directory / "plotted",
+                                          record_loader=self._loader, observables=True)
+            self.assertEqual(plotted["summary"], plain["summary"])
+            self.assertEqual(plotted["audit"], plain["audit"])
+            for before, after in zip(plain["samples"], plotted["samples"]):
+                h = after["observables"]["selected"]["inclusive"]["m4l"]
+                self.assertAlmostEqual(sum(h["cross_section_pb"]), before["selected"]["cross_section_pb"])
+                self.assertEqual(after["normalization"], before["normalization"])
+            self.assertEqual(plotted["observables"]["status"], "complete")
+            self.assertIn("observables/index.html", (directory / "plotted/index.html").read_text())
+
     def test_empty_populated_mapping_rejects_root_variations(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)

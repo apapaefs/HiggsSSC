@@ -977,3 +977,34 @@ momentum-consistency diagnostics. The default budget and other campaigns are
 unchanged. Assemble the completed replacement manifests with
 `replace_qq_backgrounds.py --paired-perfect` as described below.
 
+## Four-lepton observable plots
+
+The report can export the same paired shape/rate presentation as the HO diphoton
+analysis, using saved four-lepton analysis ROOT files:
+
+```bash
+inputs/pipeline/venv/bin/python hfourlepton/make_fourlepton_report.py \
+  hfourlepton/runs/RUN_TAG/manifest_perfect.json \
+  hfourlepton/runs/RUN_TAG/manifest_ssc.json \
+  --output-dir hfourlepton/runs/RUN_TAG/revisions/observables/report \
+  --luminosity-fb 100 --strict --observables
+```
+
+Use a fresh output directory to preserve existing completed reports. The
+observable page is `report/observables/index.html`. It includes `m4l`, `mZ1`,
+`mZ2`, `pt4l`, `y4l`, `abs_y4l`, the four ordered lepton transverse momenta and
+pseudorapidities, `min_delta_r`, `z1_delta_r` and `z2_delta_r`. The plots compare
+all three decay channels combined; CSV/JSON also provide each channel separately.
+Both final fiducial selection and the report's Higgs-mass window are shown, with
+separate perfect/SSC views. Lepton ordering is by transverse momentum.
+
+Each plot has unit-area shapes beside physical expected events at the specified
+luminosity. Signal production modes and continuum backgrounds are shown with
+their campaign normalization, including ihixs for ggF. PDF, SVG, PNG, CSV and JSON
+are exported. Signed weights and flow bins are preserved; errors group detector
+hypotheses by source event, including bin/total covariance in normalized shapes.
+The bands represent MC statistics, not scale/PDF/detector systematics. Shape
+normalization uses the displayed range. The continuum generation window still
+applies. No event generation or detector reconstruction is required for these
+plots. New `replace_qq_backgrounds.py` assemblies include them automatically.
+

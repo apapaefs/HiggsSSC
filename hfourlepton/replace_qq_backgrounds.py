@@ -135,7 +135,7 @@ def execute(base_path, replacement_path, output, luminosity, *, paired_perfect=F
         raise ValueError("assembly directory must not contain an input campaign")
     sources = [Path(__file__).resolve(), REPO / "hfourlepton/reprocess.py",
                REPO / "hfourlepton/make_fourlepton_report.py", REPO / "hfourlepton/validate_lhc.py",
-               REPO / "hfourlepton/report_reader.py", REPO / "hfourlepton/analyze_fourlepton.py",
+               REPO / "hfourlepton/report_reader.py", REPO / "hfourlepton/observables.py", REPO / "hfourlepton/analyze_fourlepton.py",
                REPO / "ho_xgboost_core.py",
                *[REPO / f"hfourlepton/analysis_cards/{card_prefix}_{k}.json" for k in ("cuts", "xgboost")]]
     identity = {**{key: revision.artifact(path) for key, path in input_paths.items()},
@@ -174,7 +174,7 @@ def execute(base_path, replacement_path, output, luminosity, *, paired_perfect=F
                                          "perfect_manifest": state.get("perfect_manifest_sha256")})
         py = sys.executable
         revision.stage(output, "report", stage_id, lambda work: [py, REPO / "hfourlepton/make_fourlepton_report.py",
-                       *manifests, "--output-dir", work, "--luminosity-fb", luminosity, "--strict"])
+                       *manifests, "--output-dir", work, "--luminosity-fb", luminosity, "--strict", "--observables"])
         validation = {"result": "not_applicable_ssc"}
         stage_names = ["report", "cuts", "xgboost"]
         if card_prefix == "lhc13":
