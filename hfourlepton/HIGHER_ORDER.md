@@ -1008,3 +1008,34 @@ normalization uses the displayed range. The continuum generation window still
 applies. No event generation or detector reconstruction is required for these
 plots. New `replace_qq_backgrounds.py` assemblies include them automatically.
 
+## Extend the test statistics of a frozen classifier
+
+When a larger independent qq campaign replaces the original samples, the earlier
+qq samples are absent from that classifier's training and validation. They can
+provide an additional test of the fixed model and validation-selected score cut.
+Their earlier use in development should be recorded; they are not newly generated
+or previously unseen project data. This extension never retrains or changes the
+score cut, and preserves the original test result.
+
+```bash
+py=inputs/pipeline/venv/bin/python
+base=hfourlepton/runs/fourl40_minimal_qq200k
+"$py" hfourlepton/extend_xgboost_test.py prepare \
+  --base-analysis "$base/revisions/ssc_qq1m/xgboost" \
+  --additional-manifest "$base/manifest_ssc.json" \
+  --output-dir "$base/revisions/ssc_qq1m_extended_test"
+"$py" hfourlepton/extend_xgboost_test.py evaluate \
+  --output-dir "$base/revisions/ssc_qq1m_extended_test"
+```
+
+Preparation freezes the model, threshold, assignments, input checksums and
+combination coefficients. It requires different production seeds and hard-event
+checksums, matching process/detector/generation settings, and complete analysis
+products. Evaluation audits the additional samples before applying the model.
+For each qq channel, the original projected test rate and the additional rate
+are averaged according to their hard-event exposure. They are not summed as two
+different backgrounds. Source identifiers have separate namespaces, and signed
+weights and source-grouped MC variances are preserved. Signal and gg test samples
+are unchanged. The result reports its statistical support even if it still falls
+short; no threshold rescan or split reshuffle is performed.
+
