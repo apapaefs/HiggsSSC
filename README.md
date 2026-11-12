@@ -46,8 +46,9 @@ Results go to `hfourlepton/student_runs/ssc40/results/baseline/`, in
 machine-readable results; its log and command record are alongside it.
 These commands read existing analysis ROOT trees and preserve the signed
 weights, source-event grouping, higher-order normalization and detector
-response. They cannot launch generation or showering. Reading and auditing
-the full samples takes time; `attach` itself does not run an analysis.
+response. They cannot launch generation or showering. For this release, a
+full SSC analysis reads over 600 million detector-response records; allow
+tens of minutes on Timur. `attach` itself does not run an analysis.
 
 Edit your private `cards/cuts_ssc.json` or `cards/xgboost_ssc.json` to change
 the cuts or classifier settings. Use a new result name for each variation:
