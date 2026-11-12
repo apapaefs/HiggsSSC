@@ -1,5 +1,11 @@
 # Higgs to four leptons at the 40 TeV SSC
 
+For the completed instructor dataset on Timur, start with
+[`student_events.py attach`](../README.md#analyze-the-prepared-four-lepton-events-on-timur).
+Students can run plots, cuts and XGBoost from the shared events with no event
+generation. See [shared data and publication](SHARED_EVENTS.md) for the file
+layout and provenance.
+
 This directory contains LO and higher-order workflows for
 
 ```text

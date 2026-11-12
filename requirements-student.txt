@@ -1,0 +1,4 @@
+# Analysis only: no event generators or private instructor environment.
+-r requirements-ml.txt
+uproot>=5,<6
+awkward>=2,<3

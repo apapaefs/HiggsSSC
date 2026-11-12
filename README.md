@@ -5,6 +5,102 @@ MadGraph, Herwig/HwSim and a simplified SSC/GEM detector response.
 Start with a small leading-order (LO) sample, inspect it, then move to
 higher order (HO) or the four-lepton channel.
 
+## Analyze the prepared four-lepton events on Timur
+
+Students can use the completed **40 TeV HO four-lepton dataset** without
+generating events, running MadSpin, or repeating the showers. The instructor
+publishes the shared release once using the guide below; `attach` checks that
+it is complete and readable before connecting it. From your own
+Timur account, clone the repository (or `git pull --ff-only` in an existing
+clone), then run:
+
+```bash
+git clone https://github.com/apapaefs/HiggsSSC.git
+cd HiggsSSC
+python3 student_events.py attach
+python3 student_events.py setup
+python3 student_events.py check
+```
+
+`attach` connects your workspace to
+`/home/shared/HiggsSSC/fourlepton/ssc40-20261112`. It copies only small, editable
+analysis cards into `hfourlepton/student_runs/ssc40/cards/`; the event files
+stay in the shared directory. `setup` installs the Python analysis packages in
+that workspace's `.venv`. This route needs neither a generator installation
+nor access to the instructor's home directory. Do **not** run
+`run_pipeline.py setup` or `run_pipeline.py run` for this exercise.
+
+Run the analyses in a [screen session](docs/TERMINAL.md):
+
+```bash
+# Cutflow and all 17 observables, comparing perfect and SSC responses.
+python3 student_events.py report
+
+# Cut-based analysis and classifier training/evaluation with SSC response.
+python3 student_events.py cuts
+python3 student_events.py xgboost
+```
+
+Results go to `hfourlepton/student_runs/ssc40/results/baseline/`, in
+`report_both/`, `cuts_ssc/` and `xgboost_ssc/`. Each contains `index.html` and
+machine-readable results; its log and command record are alongside it.
+These commands read existing analysis ROOT trees and preserve the signed
+weights, source-event grouping, higher-order normalization and detector
+response. They cannot launch generation or showering. Reading and auditing
+the full samples takes time; `attach` itself does not run an analysis.
+
+Edit your private `cards/cuts_ssc.json` or `cards/xgboost_ssc.json` to change
+the cuts or classifier settings. Use a new result name for each variation:
+
+```bash
+python3 student_events.py cuts --name tighter_cuts
+python3 student_events.py xgboost --name classifier_v2
+python3 student_events.py cuts --profile perfect --name perfect_comparison
+```
+
+Existing result directories are never overwritten. `--luminosity-fb 100`
+is the default. For another private workspace, pass
+`--workspace /path/in/your/account` to **every** command. Repeating `attach`
+preserves your edited cards. `check --full` additionally hashes every large
+event file; normal analysis also applies the existing physics and file audits.
+
+The shared release contains the following nominal samples in each of the
+`4e`, `4mu` and `2e2mu` channels:
+
+| Process | Hard events per channel |
+| --- | ---: |
+| ggF Higgs | 20,000 |
+| VBF Higgs | 10,000 |
+| W+H, W−H, qqZH, ggZH, ttH (each) | 5,000 |
+| qq → 4ℓ continuum | 1,000,000 |
+| gg → 4ℓ continuum | 2,000 |
+
+There are **27 samples and 3,171,000 requested hard events**, with both
+`perfect` and `ssc` analysis trees. `perfect` means ideal detector response;
+`ssc` includes the implemented SSC/GEM resolutions and efficiencies. The
+continuum samples cover the 90–180 GeV generation window. Reducible-background
+control samples are not part of this nominal set. Shower losses and their
+normalization denominators are recorded in the manifests.
+
+The release also provides the LHE inputs and HwSim shower ROOT files under
+`nominal/events/` for advanced reconstruction work, original provenance under
+`provenance/`, and the instructor's completed plots, cuts and classifier under
+`reference/`. The default student commands use the saved reconstruction;
+changing an analysis card does not change the detector simulation or its
+baseline object selection.
+
+An additional 200,000 qq events per channel are supplied separately through
+`supplemental/manifest_ssc.json`. They were used to extend the **frozen**
+classifier's test, with results under `reference/extended_test/`. Do not add
+them to the nominal samples as another background rate or mix them into
+training when reproducing that test. The nominal classifier test alone had
+88.8 effective background events; the independent extension reached 160.7.
+New student training runs evaluate their own split and statistical adequacy;
+they do not automatically reproduce the extended test.
+
+For instructors publishing a new release, see the
+[shared-event publication guide](hfourlepton/SHARED_EVENTS.md).
+
 ## 1. Clone and install on Timur
 
 Log in to your own Timur account. Run all commands from the repository root:
