@@ -123,6 +123,25 @@ class SharedEventsTest(unittest.TestCase):
             self.assertNotIn("run_pipeline.py", " ".join(cmd))
             self.assertNotIn("Herwig", " ".join(cmd))
 
+    def test_setup_repairs_an_interrupted_pip_bootstrap_without_generators(self):
+        dataset, _ = self.simple_dataset()
+        workspace = self.root / "student"
+        student.attach(dataset, workspace)
+        python = workspace / ".venv/bin/python"
+        python.parent.mkdir(parents=True)
+        python.write_bytes(b"existing Python, interrupted pip bootstrap")
+        commands = []
+
+        def run(cmd, **kwargs):
+            commands.append(cmd)
+            return SimpleNamespace(returncode=int(cmd[-2:] == ["pip", "--version"]))
+
+        with mock.patch.object(student.subprocess, "run", side_effect=run):
+            student.setup(workspace)
+        self.assertIn([str(python), "-m", "ensurepip", "--upgrade"], commands)
+        self.assertTrue(all(cmd[0] == str(python) for cmd in commands))
+        self.assertFalse(any("run_pipeline.py" in arg for cmd in commands for arg in cmd))
+
     def test_publication_resume_refuses_changed_sources_and_never_hardlinks(self):
         source = self.private / "data"
         source.write_bytes(b"original")

@@ -69,6 +69,10 @@ def setup(workspace):
     env = environment(workspace)
     if not python.is_file():
         subprocess.run([sys.executable, "-m", "venv", str(Path(workspace) / ".venv")], check=True, env=env)
+    # An interrupted venv bootstrap can leave Python present but pip absent.
+    pip = subprocess.run([str(python), "-m", "pip", "--version"], capture_output=True, env=env)
+    if pip.returncode:
+        subprocess.run([str(python), "-m", "ensurepip", "--upgrade"], check=True, env=env)
     subprocess.run([str(python), "-m", "pip", "install", "-r", str(REPO / "requirements-student.txt")],
                    check=True, env=env)
     subprocess.run([str(python), "-c", "import numpy,matplotlib,yaml,uproot,awkward,xgboost,sklearn; "
