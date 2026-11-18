@@ -645,6 +645,8 @@ void order_selected_pair(SelectedHypothesis& hypothesis) {
   }
 }
 
+#include "DijetFakeBound.hh"
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
@@ -660,6 +662,7 @@ int main(int argc, char* argv[]) {
   }
 
   try {
+    if (std::string(argv[1]) == "--dijet-bound") return write_dijet_bound(argc, argv);
     const std::string input_name = argv[1];
     const Config config = parse_config(argc, argv);
 

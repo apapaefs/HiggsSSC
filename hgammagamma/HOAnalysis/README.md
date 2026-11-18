@@ -41,10 +41,125 @@ Drell–Yan uses `pT(l)>10 GeV` and `m(ll)>30 GeV`.
 
 Check generation-cut and isolation dependence before a physics result. The
 smooth-cone definition differs from the detector's jet-based isolation proxy;
-photon fragmentation is absent. Separate loop-induced `gg -> gamma gamma`,
-dijet double fakes and signal–background interference are omitted. Gamma+jet
+photon fragmentation is absent. For the default 40 TeV SSC plots, the four
+generator samples above are combined with the published loop-induced
+gg → γγ continuum and dijet double-fake event tables. The dijet distribution
+uses the upper independent-fake scenario. See the
+[student inputs and normalizations](student_backgrounds/README.md).
+Signal–background interference is outside the calculation. Gamma+jet
 uses one hard fake candidate with the [documented flavour model](../SSC_DETECTOR_RESPONSE.md),
 whose ambiguity grows with extra NLO partons.
+
+## Separate loop-induced continuum
+
+[`run_loop_gammagamma.py`](../run_loop_gammagamma.py) adds the continuum
+`g g > a a / h [noborn=QCD]` as a separate `bkg_loop_gg_aa` sample. The Higgs
+is excluded from the amplitude and checked in the LHE provenance. This is the
+one-loop amplitude squared, of order `alpha_s^2 alpha_EM^2`, followed by an
+ordinary LO shower. That contribution is absent from the nominal NLO diphoton
+calculation. It is not an NLO prediction for the gluon channel, and no signal
+or background K-factor is applied.
+
+The model is `loop_sm-no_b_mass`, with massless bottom quarks and a massive
+top quark. The NLO PDF and coupling convention is shared with the nominal
+continuum. The Born cuts are `pT(gamma)>10 GeV`, `|eta(gamma)|<6`; there is no
+outgoing QCD parton at this order. The same SSC reconstruction, isolation and
+photon efficiencies are applied after showering. Rare prompt-photon processes
+and signal–continuum interference are outside this addition.
+
+Start with a technical smoke test, then use a new tag and seed for a larger
+pilot; a successful smoke test alone does not establish an acceptance result:
+
+```bash
+python3 hgammagamma/run_loop_gammagamma.py --stage all \
+  --run-tag gg_aa_loop_smoke --nevents 100 --nb-core 20 \
+  --seed-base 181126031 --ebeam 20000
+```
+
+The usual runtime overrides (`--mg5-dir`, `--mg5-python`, compiler paths,
+`--no-herwig-module`) also apply. The native MG5 cross section supplies the
+rate. Source EOF must be proven without replay, and all attempted source
+weights form the normalization denominator, including failed shower events.
+Cards, logs, ROOT weight moments and the completion record are checked before
+the SSC analysis is accepted.
+
+Use a saved nominal cut summary to add the new contribution without changing
+the cuts or nominal rates:
+
+```bash
+python3 hgammagamma/evaluate_loop_gammagamma.py \
+  --analysis-root hgammagamma/HOAnalysis/runs/gg_aa_loop_pilot \
+  --run-tag gg_aa_loop_pilot \
+  --nominal-summary results/ho_bg_1m_01/cuts/summary.json \
+  --output results/gg_aa_loop_pilot/frozen_cuts.json
+```
+
+The output includes the additive rate, finite-source MC error and combined
+totals, with hashes of the frozen summary and loop manifest. It also gives a
+conservative one-sided 95% upper bound: count hard events with a positive
+selected response, use the [exact binomial limit](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats._result_classes.BinomTestResult.proportion_ci.html),
+and multiply by the native rate. This bounds the weighted yield because each
+hard event's selected response weight is between zero and one; the complete
+response weights are checked to sum to one per saved source. With zero
+selected sources the bound is `sigma * (1 - 0.05**(1/N_attempted))`.
+It covers finite sampling with a fixed native rate, not theory or detector
+uncertainties. For the saved
+classifier, first package its model and a reference of the original scores:
+
+```bash
+python3 hgammagamma/frozen_gammagamma_classifier.py \
+  --report-dir results/ho_bg_1m_01/xgboost \
+  --input-dir results/ho_bg_1m_01/mass_diagnostics/inputs \
+  --output-dir results/frozen_diphoton_classifier
+```
+
+Pass `--frozen-classifier results/frozen_diphoton_classifier` to the evaluator
+to obtain a separate classifier contribution. It replays the original scores
+and test yields before using the saved feature order and threshold. New loop
+events use full-exposure weights and are neither split nor used for training.
+The classifier requires two photon candidates and applies its saved score
+threshold; it does not impose the rectangular mass window as an extra cut.
+Assess generation-cut, scale, PDF and shower uncertainties before treating a
+pilot rate as a physics prediction.
+
+If the broad sample is sparse, a concrete follow-up is three independent
+Born-mass samples using native MG5 `mmaa`/`mmaamax` values `(0,100)`,
+`(100,150)` and `(150,-1)` GeV, where `-1` disables the upper cut. Allocate
+most events to the middle interval and use a distinct seed for each. Sum
+`sigma_i * selected_weight_i / all_attempted_weight_i` across the three
+disjoint intervals, keeping the same photon cuts, PDFs and SSC response.
+The focused sample must not simply be added to the inclusive sample.
+The dedicated runner accepts `--gen-mgg-min 100 --gen-mgg-max 150` and
+checks the Born mass of every LHE event. A new isolated campaign can copy a
+completed export using `--reuse-loop-export /path/to/completed/mg5_process`;
+the copy has independent writable files, and its origin is recorded. This
+does not reuse events from the old run. Use a new tag and seed.
+Alternatively, use the inclusive sample outside the central interval and the
+independent focused sample inside it. For each completed campaign, run
+[`born_mass_mapping.py`](../born_mass_mapping.py) with `--manifest`,
+`--response-root` and a fresh `--output-dir`. It matches the saved hard-photon
+four-vectors to the original LHE sequence, checks any shower losses and binds
+each detector-response row to its Born mass. Ambiguous matches or mass-window
+boundaries stop the audit.
+
+After both mappings and frozen evaluations pass, combine them with:
+
+```bash
+python3 hgammagamma/combine_loop_gammagamma.py \
+  --broad-report results/loop_broad/frozen_selections.json \
+  --focused-report results/loop_focused/frozen_selections.json \
+  --broad-mapping results/loop_broad_born_map/summary.json \
+  --focused-mapping results/loop_focused_born_map/summary.json \
+  --frozen-classifier results/frozen_diphoton_classifier \
+  --output results/loop_combined.json
+```
+
+The combination checks independent seeds, matching physics cards and response
+sources, and reproduces both unpartitioned reports before applying the Born
+partition. Each component keeps its full attempted-source denominator. Source
+MC variances add across the independent samples. For each selection separately,
+the sum of two one-sided 97.5% component limits gives at least 95% coverage;
+this does not claim joint coverage across the cut and classifier results.
 
 ## Signed normalization
 

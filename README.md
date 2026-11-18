@@ -5,102 +5,111 @@ MadGraph, Herwig/HwSim and a simplified SSC/GEM detector response.
 Start with a small leading-order (LO) sample, inspect it, then move to
 higher order (HO) or the four-lepton channel.
 
-## Analyze the prepared four-lepton events on Timur
+## Analyze the prepared 40 TeV events on Timur
 
-Students can use the completed **40 TeV HO four-lepton dataset** without
-generating events, running MadSpin, or repeating the showers. The instructor
-publishes the shared release once using the guide below; `attach` checks that
-it is complete and readable before connecting it. From your own
-Timur account, clone the repository (or `git pull --ff-only` in an existing
-clone), then run:
+In your Timur checkout, run `git pull --ff-only` to get the student analyses and
+the compact background distributions for both channels. For a first checkout, use
+`git clone https://github.com/apapaefs/HiggsSSC.git`, then `cd HiggsSSC`.
+The following commands use the prepared events on the shared disk. You can
+start at the channel you want.
+
+### Four leptons
 
 ```bash
-git clone https://github.com/apapaefs/HiggsSSC.git
-cd HiggsSSC
 python3 student_events.py attach
 python3 student_events.py setup
 python3 student_events.py check
-```
-
-`attach` connects your workspace to
-`/home/shared/HiggsSSC/fourlepton/ssc40-20261112`. It copies only small, editable
-analysis cards into `hfourlepton/student_runs/ssc40/cards/`; the event files
-stay in the shared directory. `setup` installs the Python analysis packages in
-that workspace's `.venv`. This route needs neither a generator installation
-nor access to the instructor's home directory. Do **not** run
-`run_pipeline.py setup` or `run_pipeline.py run` for this exercise.
-
-Run the analyses in a [screen session](docs/TERMINAL.md):
-
-```bash
-# Cutflow and all 17 observables, comparing perfect and SSC responses.
 python3 student_events.py report
-
-# Cut-based analysis and classifier training/evaluation with SSC response.
 python3 student_events.py cuts
 python3 student_events.py xgboost
 ```
 
-Results go to `hfourlepton/student_runs/ssc40/results/baseline/`, in
-`report_both/`, `cuts_ssc/` and `xgboost_ssc/`. Each contains `index.html` and
-machine-readable results; its log and command record are alongside it.
-These commands read existing analysis ROOT trees and preserve the signed
-weights, source-event grouping, higher-order normalization and detector
-response. They cannot launch generation or showering. For this release, a
-full SSC analysis reads over 600 million detector-response records; allow
-tens of minutes on Timur. `attach` itself does not run an analysis.
+The release has **30 samples**. In each of the `4e`, `4mu` and `2e2mu` channels
+it supplies ggF, VBF, W⁺H, W⁻H, qqZH, ggZH and ttH signal and the qq and gg
+continuum backgrounds. Those 27 samples comprise 3,171,000 requested hard events.
+The three additional samples are Z(→ee) + bb, Z(→μμ) + bb and dileptonic tt̄,
+with one million unbiased events each. Both response profiles use the same
+generated events. The two control samples with a Z are distinguished by its
+prompt decay, while reconstructed events are classified by all four leptons.
 
-Edit your private `cards/cuts_ssc.json` or `cards/xgboost_ssc.json` to change
-the cuts or classifier settings. Use a new result name for each variation:
+The report compares ideal (`perfect`) and SSC/GEM (`ssc`) detector responses and
+includes cutflows and 17 observables. Cuts and XGBoost default to the SSC response.
+The per-process cutflows show where the reducible backgrounds enter. In the SSC
+sample, zero events from these three processes pass the final fiducial selection.
+With ideal detector response one Z(→μμ) + bb event passes at 93.5 GeV. Both
+profiles therefore give zero simulated heavy-flavour yield in the 120–130 GeV
+window. The finite-sample upper bound for the SSC response is
+reported separately in the [background study](docs/ANALYSIS.md).
+
+### Diphotons
+
+```bash
+python3 student_events.py attach --channel diphoton
+python3 student_events.py setup --channel diphoton
+python3 student_events.py check --channel diphoton
+python3 student_events.py report --channel diphoton
+python3 student_events.py cuts --channel diphoton
+python3 student_events.py xgboost --channel diphoton
+```
+
+The SSC defaults include the ggF Higgs signal and five backgrounds. Alongside
+prompt diphotons from quark-initiated production, photon + jet and Drell–Yan,
+the plots include the **loop-induced gg → γγ continuum at LO** and **dijets with
+two jets misidentified as photons**. The dijet curve uses the upper GEM fake-rate
+scenario, treating both jets as quark jets and their fake probabilities as
+independent. It enters the total once. The all-gluon alternative and the
+assumptions behind the bound are documented with the
+[event tables](hgammagamma/HOAnalysis/student_backgrounds/README.md).
+Rare prompt-photon processes are outside this sample set. The Higgs signal
+uses its existing ihixs normalization.
+
+### Workspaces and results
+
+The shared releases are under `/home/shared/HiggsSSC/fourlepton/ssc40-20261118`
+and `/home/shared/HiggsSSC/diphoton/ssc40-20261118`. The Git checkout also
+supplies the loop and dijet event tables and both detector responses for the
+three heavy-flavour samples. The standard 40 TeV higher-order generation
+workflows use these distributions when they make reports or run the default
+cuts and classifier. Each channel has a private `student_runs/ssc40-20261118/`
+under `hfourlepton/` or `hgammagamma/`. The workspace contains editable cards,
+its Python environment and the results. A generator installation is unnecessary.
+Use a [screen session](docs/TERMINAL.md) for longer analyses. The four-lepton
+SSC report scans over 600 million detector-response records.
+
+Open `results/baseline/report_both/index.html` for the four-lepton report or
+`results/baseline/report_ssc/index.html` for diphotons. Both channels write the
+cut and classifier reports under `cuts_ssc/` and `xgboost_ssc/` alongside the
+report directory. Logs and execution records identify the release and analysis
+code for each run. All three commands default to 100 fb⁻¹.
+
+Students can also browse the completed default plots on Timur under
+`/home/shared/HiggsSSC/student-results/ssc40-20261118/`. Open the report,
+cuts or classifier directory for your channel, or
+[copy a report home for viewing](SSHFS_REMOTE_MOUNT.md).
+
+Edit the corresponding files under `cards/` and give each variation a new name.
+The diphoton classifier card's `baseline_cuts_config` selects the cut card used
+in its comparison. Set it to the path of your private cut card to compare to
+your own cuts.
 
 ```bash
 python3 student_events.py cuts --name tighter_cuts
-python3 student_events.py xgboost --name classifier_v2
 python3 student_events.py cuts --profile perfect --name perfect_comparison
+python3 student_events.py xgboost --channel diphoton --name classifier_v2
 ```
 
-Existing result directories are never overwritten. `--luminosity-fb 100`
-is the default. For another private workspace, pass
-`--workspace /path/in/your/account` to **every** command. Repeating `attach`
-preserves your edited cards. `check --full` additionally hashes every large
-event file; normal analysis also applies the existing physics and file audits.
+On upgrade, four-lepton `attach` carries edits from the former default
+`hfourlepton/student_runs/ssc40/` cards into the new workspace. The former
+results remain accessible there. Repeating `attach` preserves edits in an
+already connected workspace. Use `--workspace /path/in/your/account` on each
+command to choose a private directory. Use `check --full` to verify every file
+against its SHA-256 checksum.
 
-The shared release contains the following nominal samples in each of the
-`4e`, `4mu` and `2e2mu` channels:
-
-| Process | Hard events per channel |
-| --- | ---: |
-| ggF Higgs | 20,000 |
-| VBF Higgs | 10,000 |
-| W+H, W−H, qqZH, ggZH, ttH (each) | 5,000 |
-| qq → 4ℓ continuum | 1,000,000 |
-| gg → 4ℓ continuum | 2,000 |
-
-There are **27 samples and 3,171,000 requested hard events**, with both
-`perfect` and `ssc` analysis trees. `perfect` means ideal detector response;
-`ssc` includes the implemented SSC/GEM resolutions and efficiencies. The
-continuum samples cover the 90–180 GeV generation window. Reducible-background
-control samples are not part of this nominal set. Shower losses and their
-normalization denominators are recorded in the manifests.
-
-The release also provides the LHE inputs and HwSim shower ROOT files under
-`nominal/events/` for advanced reconstruction work, original provenance under
-`provenance/`, and the instructor's completed plots, cuts and classifier under
-`reference/`. The default student commands use the saved reconstruction;
-changing an analysis card does not change the detector simulation or its
-baseline object selection.
-
-An additional 200,000 qq events per channel are supplied separately through
-`supplemental/manifest_ssc.json`. They were used to extend the **frozen**
-classifier's test, with results under `reference/extended_test/`. Do not add
-them to the nominal samples as another background rate or mix them into
-training when reproducing that test. The nominal classifier test alone had
-88.8 effective background events; the independent extension reached 160.7.
-New student training runs evaluate their own split and statistical adequacy;
-they do not automatically reproduce the extended test.
-
-For instructors publishing a new release, see the
-[shared-event publication guide](hfourlepton/SHARED_EVENTS.md).
+The independent four-lepton qq extension (200,000 events per channel) and the
+original instructor classifier results are historical references. Student
+classifier runs train and choose a threshold on the default sample set.
+The discovery study used frozen classifiers. For the underlying events and
+publication procedure, see the [four-lepton release guide](hfourlepton/SHARED_EVENTS.md).
 
 ## 1. Clone and install on Timur
 

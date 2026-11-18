@@ -20,6 +20,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from read_root_varfiles import FEATURE_NAMES
+from hgammagamma.make_gammagamma_report import SAMPLE_LABELS
+from hgammagamma.student_backgrounds import NAMES as RELEASED_SAMPLES
 
 
 # The signal core is about 0.85--0.9 GeV wide in the SSC response model.
@@ -218,17 +220,29 @@ def mass_summary(mass, weights):
     return output
 
 
+def background_components(samples, labels):
+    backgrounds = sorted(set(samples[labels == 0]))
+    return backgrounds if set(backgrounds).intersection(RELEASED_SAMPLES) else []
+
+
 def _spectrum_plot(output, stem, data, selections, weights, scope, title, luminosity, cuts, plt):
-    fig, axes = plt.subplots(2, 2, figsize=(12, 8), layout="constrained")
+    components = background_components(data["sample"], data["label"])
+    panels = [("Signal", [(key, name, color, mask & (data["label"] == 1), "Signal") for key, name, color, mask in selections]),
+              ("Total background", [(key, name, color, mask & (data["label"] == 0), "Total background") for key, name, color, mask in selections])]
+    if components:
+        for key, selection, _, mask in selections:
+            panels.append((selection, [(key, SAMPLE_LABELS.get(name, name), f"C{i}", mask & (data["sample"] == name), name)
+                                       for i, name in enumerate(components)]))
+    fig, axes = plt.subplots(len(panels), 2, figsize=(12, 3.6 * len(panels)), layout="constrained")
     table = []
-    for axes_row, (view, edges) in zip(axes, MASS_VIEWS):
-        for ax, label, category in zip(axes_row, [1, 0], ["Signal", "Total background"]):
-            for key, name, color, selection in selections:
-                mask = scope & selection & (data["label"] == label)
+    for axes_row, (view, edges) in zip(axes.T, MASS_VIEWS):
+        for ax, (heading, curves) in zip(axes_row, panels):
+            for key, name, color, selection, category in curves:
+                mask = scope & selection
                 values, errors = histogram(data["m_gg"][mask], weights[mask], data["sample"][mask], data["sourceevent"][mask], edges)
                 centers = (edges[1:] + edges[:-1]) / 2
                 ax.stairs(values, edges, label=name, color=color, linewidth=1.6)
-                ax.fill_between(centers, values-errors, values+errors, step="mid", color=color, alpha=.16)
+                ax.fill_between(centers, values-errors, values+errors, step="mid", color=color, alpha=.13)
                 for low, high, value, error in zip(edges[:-1], edges[1:], values, errors):
                     table.append(dict(view=view, category=category, selection=key, low_gev=low, high_gev=high,
                                       expected_events=value, mc_error_events=error))
@@ -239,8 +253,8 @@ def _spectrum_plot(output, stem, data, selections, weights, scope, title, lumino
                             ax.axvline(boundary, color="0.5", linestyle=":", linewidth=1)
             ax.axhline(0, color="0.3", linewidth=.6)
             ax.set(xlim=(edges[0], edges[-1]), xlabel=r"$m_{\gamma\gamma}$ [GeV]",
-                   ylabel=f"Expected events / {edges[1]-edges[0]:g} GeV", title=f"{category} · {view}")
-            ax.legend(fontsize=9)
+                   ylabel=f"Expected events / {edges[1]-edges[0]:g} GeV", title=f"{heading} · {view}")
+            ax.legend(fontsize=8)
             ax.ticklabel_format(axis="y", style="sci", scilimits=(-3, 4), useMathText=True)
     fig.suptitle(f"{title}\nSSC 40 TeV · {luminosity:g} fb$^{{-1}}$ · bands: source-event MC uncertainty", fontsize=13)
     for extension in ("png", "pdf"):
@@ -306,11 +320,14 @@ def write_xgboost_mass_plots(output, data, threshold, luminosity, plt=None):
     else:
         title = "Independent test sample · no supported validation threshold; no score selection"
     _spectrum_plot(output, "m_gg_xgboost", data, selections, projected, test, title, luminosity, [], plt)
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4), layout="constrained")
+    components = background_components(data["sample"], data["label"])
+    fig, axes = plt.subplots(1, 3 if components else 2, figsize=(16 if components else 12, 4), layout="constrained")
     edges = MASS_VIEWS[1][1]
     table = []
-    for ax, label, category in zip(axes, [1, 0], ["Signal", "Background"]):
-        before = test & masks["two_photons"] & (data["label"] == label)
+    curves = [(axes[0], "Signal", data["label"] == 1), (axes[1], "Background", data["label"] == 0)]
+    curves += [(axes[-1], name, data["sample"] == name) for name in components]
+    for ax, category, population in curves:
+        before = test & masks["two_photons"] & population
         denominator = np.histogram(data["m_gg"][before], edges, weights=projected[before])[0]
         numerator = np.full(len(edges)-1, np.nan)
         ratio = np.full(len(edges)-1, np.nan)
@@ -318,16 +335,19 @@ def write_xgboost_mass_plots(output, data, threshold, luminosity, plt=None):
             after = before & masks["xgboost"]
             numerator = np.histogram(data["m_gg"][after], edges, weights=projected[after])[0]
             ratio = np.divide(numerator, denominator, out=ratio, where=denominator > 0)
-            ax.stairs(ratio, edges, color="#20936e", linewidth=1.8)
-        else:
-            ax.text(.5, .5, "No supported validation threshold", ha="center", transform=ax.transAxes)
-        ax.axhline(0, color="0.5", linewidth=.5)
-        ax.set(xlabel=r"$m_{\gamma\gamma}$ [GeV]", ylabel="Signed yield after / before score cut",
-               title=category, xlim=(edges[0], edges[-1]))
+            ax.stairs(ratio, edges, label=SAMPLE_LABELS.get(category, category), linewidth=1.6)
         for low, high, total, selected, efficiency in zip(edges[:-1], edges[1:], denominator, numerator, ratio):
             table.append(dict(category=category, low_gev=low, high_gev=high, before_events=total,
                               after_events=float(selected) if np.isfinite(selected) else None,
                               efficiency=float(efficiency) if np.isfinite(efficiency) else None))
+    for ax, heading in zip(axes, ["Signal", "Total background", "Background components"]):
+        if threshold is None:
+            ax.text(.5, .5, "No supported validation threshold", ha="center", transform=ax.transAxes)
+        elif heading == "Background components":
+            ax.legend(fontsize=8)
+        ax.axhline(0, color="0.5", linewidth=.5)
+        ax.set(xlabel=r"$m_{\gamma\gamma}$ [GeV]", ylabel="Signed yield after / before score cut",
+               title=heading, xlim=(edges[0], edges[-1]))
     title = f"Mass dependence of score ≥ {threshold:g}" if threshold is not None else "Mass acceptance unavailable"
     fig.suptitle(f"{title} · independent test events\n{MASS_BIN_WIDTH_GEV:g} GeV bins; bins with nonpositive signed denominator are omitted", fontsize=12)
     for extension in ("png", "pdf"):

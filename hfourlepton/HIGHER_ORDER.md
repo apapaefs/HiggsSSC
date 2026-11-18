@@ -13,7 +13,11 @@ Use `--preset minimal` for a smaller complete campaign, designed around a
 target needs a full timing run; it is not a measured completion time or a
 deadline enforced by the runner. No production run is launched by `prepare`.
 
-All 27 samples are included. The default event counts below apply separately
+The generation preset supplies the 27 signal and continuum samples.
+For the prepared 40 TeV student analysis on Timur, the shared release adds the
+three unbiased heavy-flavour samples to the default plots, cuts and classifier.
+See the [student commands](../README.md#four-leptons).
+The default generation counts below apply separately
 to each of `4e`, `4mu` and `2e2mu`:
 
 | Process | Events per decay channel | Production treatment |
@@ -700,24 +704,93 @@ The nominal cards do not include data-driven light-jet fakes, bbH/tH,
 electroweak ZZjj, tribosons or signal–continuum interference. The resulting
 counting sensitivity therefore covers the stated irreducible model.
 
-For separate reducible-control pilots, the existing LO runner supplies the
-unbiased Zbb, ttZ and ttbar definitions. First extend the environment with
-`python3 run_pipeline.py setup --workflow fourlepton-lo` to install its LO PDF.
-Then, in that activated runtime, the following commands launch the controls:
+### First-pass SSC heavy-flavour controls
+
+[`run_reducible_controls.py`](run_reducible_controls.py) generates three
+separate LO controls at 40 TeV: `bkg_zbb_ee` (`pp -> e+ e- b b~`),
+`bkg_zbb_mumu` (`pp -> mu+ mu- b b~`), and `bkg_ttbar` (`pp -> t t~`).
+The first two include hard `Z/gamma*` dilepton production with a bb pair.
+In the ttbar control, Herwig selects direct `W -> e nu, mu nu` decays for both charges;
+`W -> tau -> e/mu` routes are outside this source. Heavy-hadron decays are
+unbiased in all three samples. This is a heavy-flavour estimate with the SSC
+lepton response, not a complete experimental reducible-background model:
+generic jet-to-lepton misidentification, detector-material conversions and
+impact-parameter response are absent. The wrapper does not generate ttZ.
+
+Use **`--inclusive-heavy-flavour`** for new production. Its
+`inclusive_heavy_flavour_v2` policy excludes incoming b and bbar partons
+from Zbb only, with massive final-state bottom quarks. The ttbar incoming
+parton definition is unchanged. The existing five-flavour
+`NNPDF40_lo_as_01180` PDF is used as an approximation; this is not a
+consistent four-flavour-scheme calculation. The policy explicitly sets
+`ptj=ptb=0`, `etaj=etab=-1`, and `drjj=drjl=drbb=drbl=0`, then checks both
+`Cards/run_card.dat` and the executable `Source/run_card.inc`. With
+`maxjetflavor=5`, MG5 applies the ordinary jet cuts to final-state bottom
+quarks, even with nonzero bottom mass; setting only `ptb` and `drbb` does not
+remove those cuts. The flag leaves the LO lepton-generation cuts at
+`pT(l)>5 GeV`, `|eta(l)|<3`, `m(ll)>4 GeV`, and `drll=0`. The control index
+records the incoming-parton definition, generation policy and effective
+cuts. Earlier pilots with incoming-b Zbb channels or legacy generator cuts
+are technical checks only; new production requires freshly generated
+sources under a new tag and must not pool the different definitions.
+
+First install the LO PDF with
+`python3 run_pipeline.py setup --workflow fourlepton-lo`, then activate the
+runtime. The following is a small **technical pilot**, with 1000 requested
+hard events per process. Supply the MG5 path and Herwig runtime options for
+the installation; options after `--` go to the ordinary four-lepton runner.
 
 ```bash
-python3 hfourlepton/run_four_lepton_campaign.py --order lo --sample-set reducible \
-  --ebeam 6500 --selection-profile cms --detector-response perfect \
-  --run-tag fourl_lhc13_controls --nevents 30
-python3 hfourlepton/run_four_lepton_campaign.py --order lo --sample-set reducible \
-  --ebeam 20000 --selection-profile ssc --detector-response ssc \
-  --run-tag fourl_ssc40_controls --nevents 30
+python3 hfourlepton/run_reducible_controls.py \
+  --run-tag fourl_ssc40_reducible_pilot --stage all \
+  --inclusive-heavy-flavour --cores 80 --workers 80 \
+  --nevents 1000 --events-per-shard 100 -- \
+  --mg5-dir /path/to/MG5 --herwig-module herwig/stable
 ```
 
-Supply `--mg5-dir`, `--mg5-python` and the Herwig environment options for your
-installation, as in the LO guide. These tiny control pilots only check the
-chain: rare fourth-lepton tails need much larger unbiased samples or validated
-importance sampling. They are not automatically combined with the HO totals.
+Hard processes run sequentially, each using up to `--cores` cores. Shower
+and analysis jobs use disjoint LHE shards, with up to `--workers` concurrent
+single-core jobs. A small pilot may contain fewer shards than workers.
+`--stage prepare` writes the control index without generation;
+`--stage generate` and `--stage shower` separate the two expensive stages.
+Repeat the same configuration to resume. Use a new tag when changing event
+counts or generation cuts. After checking the pilot's cards, shower closure,
+normalization and cutflow, increase the source population under a new tag;
+the required size depends on independent events passing the final selection.
+Pilot completion alone does not establish a useful background estimate.
+
+Each finite LHE source is consumed once, with reopening disabled. Failed
+shower attempts contribute zero simulated response and stay in the source
+normalization denominator. The ttbar event weights include the product of
+the two selected W branching sums, applied by the LHE-compatible prompt
+decay reweighter. Independent Herwig branching-ratio queries and ROOT weight
+moments audit this factor, including the precision of the printed queries.
+The denominator uses pre-decay weights, so the physical W branching factors
+are not cancelled. No additional Z branching factor is applied to the two
+hard-dilepton Zbb samples.
+
+[`evaluate_reducible_backgrounds.py`](evaluate_reducible_backgrounds.py)
+applies a completed SSC analysis card, trained classifier and threshold to
+the new events without retraining or a new threshold scan. For example:
+
+```bash
+python3 hfourlepton/evaluate_reducible_backgrounds.py \
+  --manifest hfourlepton/runs/fourl_ssc40_reducible_pilot-bkg_*/manifest_ssc.json \
+  --shard-index hfourlepton/runs/fourl_ssc40_reducible_pilot/reducible_controls.json \
+  --frozen-analysis /path/to/completed/ssc_xgboost \
+  --output-dir output/fourl_ssc40_reducible_pilot
+```
+
+Pass all completed shard manifests and their control index. The evaluator
+checks source hashes, disjoint source ranges, response and selection
+compatibility, then pools shards of the same process using their source
+denominators. Separate processes are added; their shard cross sections must
+never be added repeatedly. All new events are evaluation-only. Outputs
+include `summary.json`, `yields.csv`, `cutflow.csv`, `scores.csv` and an HTML
+report, with yields by process and reconstructed channel, source-event
+counts and Monte Carlo errors. Existing HO analysis products are unchanged.
+Zero selected events do not establish a zero background or an upper limit;
+such a result requires more events or a separately justified statistical bound.
 
 ## Cuts and detector response
 

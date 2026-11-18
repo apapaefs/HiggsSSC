@@ -9,6 +9,7 @@ weights remain in the denominator instead of renormalizing away their loss.
 from __future__ import annotations
 
 import copy
+from decimal import Decimal, InvalidOperation
 import gzip
 import hashlib
 import json
@@ -25,6 +26,10 @@ SEVERITIES = ("info", "warning", "eventerror", "runerror", "setuperror",
               "maybeabort", "abortnow", "unknown")
 MOMENTS = ("sum_weight", "sum_abs_weight", "sum_weight_squared")
 REL_TOL = 1.e-7
+PROMPT_W_MODES = {
+    "24": ("/Herwig/Particles/W+/W+->nu_e,e+;", "/Herwig/Particles/W+/W+->nu_mu,mu+;"),
+    "-24": ("/Herwig/Particles/W-/W-->nu_ebar,e-;", "/Herwig/Particles/W-/W-->nu_mubar,mu-;"),
+}
 
 
 def finite_shower_plan(sample, requested, lhe_events):
@@ -112,6 +117,145 @@ def _validate_artifact(record, *, verify_file=False):
         raise ValueError("invalid shower artifact SHA-256")
     if verify_file and _artifact(record["path"]) != record:
         raise ValueError(f"shower artifact changed: {record['path']}")
+
+
+def _prompt_branching_sums(evidence):
+    """Validate independently queried, charge-specific direct W decay rates."""
+    if (not isinstance(evidence, dict) or evidence.get("schema_version") != 1
+            or evidence.get("profile") != "w_emu"):
+        raise ValueError("invalid prompt branching-ratio evidence")
+    branching = evidence.get("branching_ratios")
+    if not isinstance(branching, dict) or set(branching) != {mode for modes in PROMPT_W_MODES.values() for mode in modes}:
+        raise ValueError("prompt branching evidence requires exactly four direct W e/mu modes")
+    values = {mode: _finite(value, "selected W branching ratio") for mode, value in branching.items()}
+    if any(not 0 < value < 1 for value in values.values()):
+        raise ValueError("selected W branching ratios must be in (0,1)")
+    sums = {pdg: math.fsum(values[mode] for mode in modes) for pdg, modes in PROMPT_W_MODES.items()}
+    recorded = evidence.get("selected_branching_sums")
+    if (not isinstance(recorded, dict) or set(recorded) != set(sums)
+            or any(not 0 < value < 1 or not _close(value, _finite(recorded[pdg], "selected W sum"))
+                   for pdg, value in sums.items())):
+        raise ValueError("selected W branching sums do not match the four queried modes")
+    for key in ("query_log", "card"):
+        _validate_artifact(evidence.get(key))
+    return sums
+
+
+def _prompt_factor_bounds(evidence):
+    """Propagate the decimal rounding of Herwig's printed branching ratios."""
+    values = evidence["branching_ratios"]
+    tokens = evidence.get("branching_ratio_tokens")
+    if not isinstance(tokens, dict) or set(tokens) != set(values):
+        raise ValueError("prompt branching evidence requires the four original printed values")
+    bounds = {}
+    for mode, token in tokens.items():
+        if not isinstance(token, str) or not re.fullmatch(r"[+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?", token):
+            raise ValueError("invalid printed W branching ratio")
+        try:
+            value = Decimal(token)
+            half_unit = Decimal(5).scaleb(value.as_tuple().exponent - 1)
+            lower, upper = float(value - half_unit), float(value + half_unit)
+        except (InvalidOperation, OverflowError) as error:
+            raise ValueError("invalid printed W branching ratio") from error
+        if float(value) != values[mode] or not 0 < lower <= upper < 1:
+            raise ValueError("printed W branching ratio differs from its recorded value")
+        # Require enough independent precision to be a useful weight audit.
+        if (upper - lower) / values[mode] > 1.e-4:
+            raise ValueError("printed W branching ratio has insufficient precision")
+        bounds[mode] = lower, upper
+    sum_bounds = {pdg: [math.fsum(bounds[mode][side] for mode in modes) for side in (0, 1)]
+                  for pdg, modes in PROMPT_W_MODES.items()}
+    return [sum_bounds["24"][side] * sum_bounds["-24"][side] for side in (0, 1)]
+
+
+def _verify_prompt_runtime_evidence(evidence):
+    for key in ("query_log", "card"):
+        _validate_artifact(evidence[key], verify_file=True)
+    card = Path(evidence["card"]["path"]).read_text()
+    commands = [line.split("#", 1)[0].strip() for line in card.splitlines()]
+    commands = [line for line in commands if line]
+    modes = {mode for choices in PROMPT_W_MODES.values() for mode in choices}
+    queries = [line.removeprefix("get ").removesuffix(":BranchingRatio") for line in commands
+               if line.startswith("get ") and line.endswith(":BranchingRatio")]
+    if len(queries) != 4 or set(queries) != modes:
+        raise ValueError("prompt branching evidence lacks exactly one query for each W mode")
+    tokens = [line.strip() for line in Path(evidence["query_log"]["path"]).read_text().splitlines()
+              if re.fullmatch(r"\s*[+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?\s*", line)]
+    if tokens != [evidence["branching_ratio_tokens"][mode] for mode in queries]:
+        raise ValueError("prompt branching evidence differs from the four runtime query results")
+    selections = [line for line in commands if ":SelectDecayModes " in line]
+    if len(selections) != 2:
+        raise ValueError("prompt branching transformation requires exactly two W selections")
+    for charge, pdg in (("+", "24"), ("-", "-24")):
+        prefix = f"do /Herwig/Particles/W{charge}:SelectDecayModes "
+        matches = [line[len(prefix):].split() for line in selections if line.startswith(prefix)]
+        if len(matches) != 1 or set(matches[0]) != set(PROMPT_W_MODES[pdg]) or len(matches[0]) != 2:
+            raise ValueError("prompt decay selection differs from the queried direct W modes")
+    if "HiggsSSC::LHEBranchingRatioReweighter" not in card or "PostHadronizationHandlers" not in card:
+        raise ValueError("prompt transformation requires the prompt LHE branching-ratio handler")
+
+
+def prompt_branching_transform(evidence_path):
+    """Seal a direct-W-e/mu transformation; the source denominator stays raw."""
+    evidence_path = Path(evidence_path)
+    artifact = _artifact(evidence_path)
+    evidence = json.loads(evidence_path.read_text())
+    sums = _prompt_branching_sums(evidence)
+    bounds = _prompt_factor_bounds(evidence)
+    _verify_prompt_runtime_evidence(evidence)
+    if _artifact(evidence_path) != artifact:
+        raise ValueError("prompt branching evidence changed while reading")
+    result = {"schema_version": 1, "kind": "constant_prompt_branching_ratio", "profile": "w_emu",
+              "factor": sums["24"] * sums["-24"], "selected_branching_sums": sums,
+              "factor_bounds": bounds,
+              "parent_counts": {"24": 1, "-24": 1},
+              "evidence": artifact, "evidence_data": evidence}
+    result["fingerprint"] = completion_fingerprint(result)
+    return result
+
+
+def _prompt_weight_factor(record, source, root_summary, *, verify_file=False):
+    """Only unit-weight ttbar with independently queried W branching factors is supported."""
+    transform = record.get("source_weight_transform")
+    if transform is None:
+        return 1.
+    if (not isinstance(transform, dict) or transform.get("schema_version") != 1
+            or transform.get("kind") != "constant_prompt_branching_ratio"
+            or transform.get("profile") != "w_emu" or record.get("sample") != "bkg_ttbar"
+            or transform.get("parent_counts") != {"24": 1, "-24": 1}
+            or transform.get("fingerprint") != completion_fingerprint(transform)):
+        raise ValueError("unsupported or changed prompt source-weight transformation")
+    evidence = transform.get("evidence_data")
+    sums = _prompt_branching_sums(evidence)
+    bounds = _prompt_factor_bounds(evidence)
+    if transform.get("selected_branching_sums") != sums:
+        raise ValueError("prompt transformation differs from queried branching sums")
+    factor = _finite(transform.get("factor"), "prompt branching factor")
+    if not _close(factor, sums["24"] * sums["-24"]):
+        raise ValueError("prompt transformation factor differs from queried branching ratios")
+    if transform.get("factor_bounds") != bounds:
+        raise ValueError("prompt transformation bounds differ from the printed branching ratios")
+    if evidence["card"] != record.get("artifacts", {}).get("herwig_card"):
+        raise ValueError("prompt branching evidence refers to a different Herwig card")
+    _validate_artifact(transform.get("evidence"), verify_file=verify_file)
+    for key in ("query_log", "card"):
+        _validate_artifact(evidence[key], verify_file=verify_file)
+    if verify_file:
+        if json.loads(Path(transform["evidence"]["path"]).read_text()) != evidence:
+            raise ValueError("prompt branching evidence snapshot differs from its artifact")
+        _verify_prompt_runtime_evidence(evidence)
+    # These controls are unweighted LO. Checking both moments also establishes
+    # constant per-event post-decay weights, even when shower attempts failed.
+    attempted = record["attempted_events"]
+    if (source.get("negative_events") != 0 or any(not _close(source[key], attempted) for key in MOMENTS)):
+        raise ValueError("prompt transformation requires positive unit pre-decay source weights")
+    mean = root_summary["sum_weight"] / record["saved_events"]
+    mean_squared = root_summary["sum_weight_squared"] / record["saved_events"]
+    if (not bounds[0] - 1.e-12 <= mean <= bounds[1] + 1.e-12
+            or not _close(root_summary["sum_weight"], root_summary["sum_abs_weight"])
+            or not _close(mean_squared, mean * mean)):
+        raise ValueError("post-prompt-decay ROOT weights do not match the independently queried branching factor")
+    return factor
 
 
 def _moments(record, *, positive=False):
@@ -300,7 +444,8 @@ def _audit_source_card(path):
 
 
 def build_completion(herwig_dir, sample_name, requested_events, lhe_events,
-                     root_metadata, termination, *, source_weights=None):
+                     root_metadata, termination, *, source_weights=None, source_weight_transform=None,
+                     heavy_flavour_weight_audit=None):
     herwig_dir = Path(herwig_dir).resolve()
     if termination not in KINDS:
         raise ValueError("unknown shower termination")
@@ -342,6 +487,10 @@ def build_completion(herwig_dir, sample_name, requested_events, lhe_events,
         record["artifacts"]["execution_plan"] = _artifact(plan_path)
     if source_weights is not None:
         record["source_weights"] = copy.deepcopy(source_weights)
+    if source_weight_transform is not None:
+        record["source_weight_transform"] = copy.deepcopy(source_weight_transform)
+    if heavy_flavour_weight_audit is not None:
+        record["heavy_flavour_weight_audit"] = copy.deepcopy(heavy_flavour_weight_audit)
     record["fingerprint"] = completion_fingerprint(record)
     validate_completion(record, {"sample": sample_name, "nevents_requested": requested_events,
                                  "lhe": {"events": lhe_events}},
@@ -452,9 +601,13 @@ def source_weight_summary(lhe_path, attempts):
     return result
 
 
-def _validate_source(record, root_summary, *, require_source=True):
+def _validate_source(record, root_summary, *, require_source=True, verify_file=False):
     source = record.get("source_weights")
     if source is None:
+        if record.get("heavy_flavour_weight_audit") is not None:
+            raise ValueError("HF weighting requires pre-decay source-weight proof")
+        if record.get("source_weight_transform") is not None:
+            raise ValueError("prompt transformation requires pre-decay source-weight proof")
         if require_source and record["discarded_events"]:
             raise ValueError("discarded shower events require signed source-weight proof")
         return
@@ -477,6 +630,16 @@ def _validate_source(record, root_summary, *, require_source=True):
         raise ValueError("invalid effective source maximum weight")
     _validate_artifact(source.get("artifact"))
     moments = _moments(source, positive=True)
+    if record.get("heavy_flavour_weight_audit") is not None:
+        from hfourlepton.hf_decay_audit import validate_audit
+        validate_audit(record, source, root_summary, verify_file=verify_file)
+        return
+    if record.get("source_weight_transform") is not None:
+        # Constant post-decay weights are checked against the independent
+        # runtime BR queries and saved count. The original source moments
+        # continue to normalize the cross section, including failed attempts.
+        _prompt_weight_factor(record, source, root_summary, verify_file=verify_file)
+        return
     tolerance = max(1.e-12, REL_TOL * moments["sum_abs_weight"])
     lost_abs = moments["sum_abs_weight"] - root_summary["sum_abs_weight"]
     lost_signed = moments["sum_weight"] - root_summary["sum_weight"]
@@ -572,7 +735,7 @@ def validate_completion(record, manifest, directory=None, *, require_source=True
     for key, artifact in artifacts.items():
         for item in artifact if key == "roots" else [artifact]:
             _validate_artifact(item, verify_file=directory is not None)
-    _validate_source(record, roots, require_source=require_source)
+    _validate_source(record, roots, require_source=require_source, verify_file=directory is not None)
     source = record.get("source_weights")
     if source is not None:
         if "herwig_card" not in artifacts:

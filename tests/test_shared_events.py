@@ -2,6 +2,7 @@
 import copy
 import json
 from pathlib import Path
+import shutil
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -109,6 +110,47 @@ class SharedEventsTest(unittest.TestCase):
             share.safe_path(dataset, "../private/event.root")
         with self.assertRaisesRegex(ValueError, "invalid name"):
             share.name("../output")
+
+    def test_student_upgrade_preserves_cut_edits_and_adds_new_default_samples(self):
+        dataset, _ = self.simple_dataset()
+        old_workspace = self.root / "old-workspace"
+        relative = "cards/cuts_ssc.json"
+        old_default = {"required_samples": [SAMPLE], "cuts": {"pt": 10}}
+        def set_card(root, card):
+            share.save(root / relative, card)
+            index = json.loads((root / "dataset.json").read_text())
+            index["files"][relative] = {"size": (root / relative).stat().st_size,
+                                       "sha256": share.digest(root / relative)}
+            share.save(root / "dataset.json", index)
+        set_card(dataset, old_default)
+        student.attach(dataset, old_workspace)
+        edited = {**old_default, "cuts": {"pt": 22}}
+        share.save(old_workspace / relative, edited)
+        new_release = self.root / "updated"
+        shutil.copytree(dataset, new_release)
+        set_card(new_release, {**old_default, "required_samples": [SAMPLE, "bkg_ttbar"]})
+        new_workspace = self.root / "new-workspace"
+        student.attach(new_release, new_workspace, previous_workspace=old_workspace, channel="fourlepton")
+        self.assertEqual(json.loads((new_workspace / relative).read_text()),
+                         {**edited, "required_samples": [SAMPLE, "bkg_ttbar"]})
+        self.assertEqual(json.loads((old_workspace / relative).read_text()), edited)
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            student.bound(new_workspace, channel="diphoton")
+
+    def test_diphoton_commands_read_shared_nominal_inputs_and_private_cards(self):
+        root = self.root / "diphoton"
+        workspace = self.root / "student"
+        index = {"kind": "diphoton_shared_events", "run_tag": "nominal",
+                 "cards": {"cuts_ssc": "cards/cuts_ssc.yaml", "xgboost_ssc": "cards/xgboost_ssc.yaml"}}
+        for action in ("report", "cuts", "xgboost"):
+            args = SimpleNamespace(action=action, profile="ssc", luminosity_fb=42., config=None)
+            cmd = student.command(args, root, index, workspace, "python", workspace / "results")
+            self.assertEqual(cmd[cmd.index("--analysis-root") + 1], str(root))
+            self.assertEqual(cmd[cmd.index("--run-tag") + 1], "nominal")
+            if action != "report":
+                self.assertEqual(cmd[cmd.index("--config") + 1], str(workspace / index["cards"][action + "_ssc"]))
+            else:
+                self.assertIn("event_xsec", cmd)
 
     def test_student_commands_only_invoke_analysis_scripts(self):
         dataset, _ = self.simple_dataset()

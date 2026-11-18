@@ -3,8 +3,9 @@ analysis:
   # The pipeline supplies the run tag and campaign paths.
   detector_response: ssc
   luminosity_fb: 100.0
-  # Require the complete campaign and all four samples before training.
-  samples: signal_gg_h_aa,bkg_prompt_aa,bkg_gamma_j,bkg_dy_ee
+  # Train on the complete campaign including the published 40 TeV background responses.
+  ssc40_student_backgrounds: true
+  samples: signal_gg_h_aa,bkg_prompt_aa,bkg_gamma_j,bkg_dy_ee,bkg_loop_gg_aa,bkg_dijet_double_fake
   # HO normalization comes from validated sidecars; do not add LO rate_factors.
   # Event caps are rejected, including analysis.max_events and xgboost.max_events.
   xgboost:

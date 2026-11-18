@@ -25,7 +25,7 @@ if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 from hgammagamma import ho_shower_completion as completion
 
-DEFAULT_DATASET = Path("/home/shared/HiggsSSC/fourlepton/ssc40-20261112")
+DEFAULT_DATASET = Path("/home/shared/HiggsSSC/fourlepton/ssc40-20261118")
 
 
 def digest(path):
@@ -191,16 +191,27 @@ class Publisher:
                 text = text.replace(old, new)
             path = self.write(folder / "herwig" / Path(entry["path"]).name, text)
             record["artifacts"][key] = self.artifact(path)
+        if record.get("source_weight_transform"):
+            transform = record["source_weight_transform"]
+            evidence = transform["evidence_data"]
+            self.archive(transform["evidence"]["path"], transform["evidence"]["sha256"])
+            log = evidence["query_log"]
+            evidence["query_log"] = self.artifact(self.copy_file(log["path"],
+                folder / "herwig" / Path(log["path"]).name, log["sha256"]))
+            evidence["card"] = record["artifacts"]["herwig_card"]
+            path = self.json(folder / "herwig/prompt_decay_weights.json", evidence)
+            transform["evidence"] = self.artifact(path)
+            transform["fingerprint"] = completion.completion_fingerprint(transform)
         record["fingerprint"] = completion.completion_fingerprint(record)
         self.json(folder / "herwig/matched_completion.json", record)
         self.showers[fingerprint] = record
         return copy.deepcopy(record)
 
-    def manifest(self, source, relative, namespace="nominal"):
+    def manifest(self, source, relative, namespace="nominal", *, expected_order="ho"):
         source = Path(source).resolve()
         raw = json.loads(source.read_text())
-        if raw.get("status") != "complete" or raw.get("order") != "ho":
-            raise ValueError(f"publication requires a completed HO manifest: {source}")
+        if raw.get("status") != "complete" or raw.get("order") != expected_order:
+            raise ValueError(f"publication requires a completed {expected_order} manifest: {source}")
         profile = raw["detector_profile"]
         if profile not in ("perfect", "ssc"):
             raise ValueError("unsupported detector response")
@@ -299,12 +310,20 @@ class Publisher:
         print(f"Published {len(samples)} samples: {self.root}", flush=True)
 
 
-def load_dataset(path, *, full=False):
+def load_dataset(path, *, full=False, _ancestors=()):
     path = Path(path).resolve()
+    if path in _ancestors:
+        raise ValueError("cyclic dependency between shared releases")
     index = json.loads((path / "dataset.json").read_text())
     if (index.get("schema_version") != 1 or index.get("kind") != "fourlepton_shared_events"
             or index.get("status") != "complete"):
         raise ValueError("shared dataset is incomplete or unsupported")
+    if "base_release" in index:
+        base = index["base_release"]
+        base_path = safe_path(path.parent, name(base["name"]))
+        if digest(base_path / "dataset.json") != base["sha256"]:
+            raise ValueError("nominal event release differs from its published checksum")
+        load_dataset(base_path, full=full, _ancestors=(*_ancestors, path))
     for relative, entry in index["files"].items():
         file = safe_path(path, relative)
         if not file.is_file() or file.stat().st_size != entry["size"] or not os.access(file, os.R_OK):

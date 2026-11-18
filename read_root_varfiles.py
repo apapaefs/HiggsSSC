@@ -213,6 +213,40 @@ def read_ho_ROOT_varfile(filename):
         root_file.Close()
 
 
+def named_rows(variables):
+    """Provide named-column access to a compact Data2 array without copying each row."""
+    import numpy as np
+    table = np.ascontiguousarray(variables, dtype=np.float64)
+    if table.ndim != 2 or table.shape[1] != VARIABLE_COUNT:
+        raise ValueError("invalid Data2 variable dimensions")
+    return table.view([(name, table.dtype) for name in FEATURE_NAMES]).reshape(-1)
+
+
+def read_prepared_ho_varfile(filename):
+    """Read a checksummed student TTree originally validated by the production audit."""
+    import numpy as np
+    import uproot
+    path = Path(filename)
+    before = path.stat()
+    with uproot.open(path) as root_file:
+        tree = root_file[TREE_NAME]
+        if tree.classname != "TTree":
+            raise ValueError(f"expected Data2 TTree in {path}")
+        count = tree.num_entries
+        variables = tree["variables"].array(library="np")
+        weights = tree["eventweight"].array(library="np")
+        sources = tree["sourceevent"].array(library="np")
+    if (weights.shape not in ((count,), (count, 1)) or sources.shape not in ((count,), (count, 1))
+            or variables.shape != (count, VARIABLE_COUNT) or variables.dtype.kind != "f"
+            or weights.dtype.kind != "f" or sources.dtype.kind != "i" or sources.dtype.itemsize != 8
+            or np.any(sources < 0) or not np.isfinite(weights).all() or not np.isfinite(variables).all()):
+        raise ValueError(f"invalid prepared diphoton TTree: {path}")
+    after = path.stat()
+    if (before.st_ino, before.st_size, before.st_mtime_ns) != (after.st_ino, after.st_size, after.st_mtime_ns):
+        raise OSError(f"prepared diphoton input changed during the read: {path}")
+    return named_rows(variables), weights.reshape(-1), sources.reshape(-1), range(count)
+
+
 def sum_ROOT_varfile_weights(filename) -> float:
     """Return the finite weight sum over every detector-response tree row."""
 

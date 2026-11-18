@@ -233,5 +233,34 @@ class HOResponseTreeIntegrityTests(unittest.TestCase):
         self.assertEqual(weights, [-0.5])
 
 
+@unittest.skipUnless(importlib.util.find_spec("uproot"), "student uproot runtime unavailable")
+class PreparedDiphotonReaderTests(unittest.TestCase):
+    def test_signed_rows_and_source_identity_survive_the_student_reader(self):
+        import numpy as np
+        import uproot
+        from read_root_varfiles import FEATURE_NAMES, read_prepared_ho_varfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "data.root"
+            variables = np.full((2, 10), -999.)
+            variables[:, 9] = [0, 2]
+            variables[1, :9] = np.arange(9)
+            for typename in ("int64", "int32"):
+                with uproot.recreate(path) as f:
+                    tree = f.mktree("Data2", {"variables": "10 * float64", "eventweight": "1 * float64",
+                                               "sourceevent": f"1 * {typename}"})
+                    tree.extend({"variables": variables, "eventweight": np.array([[2.], [-.75]]),
+                                 "sourceevent": np.array([[7], [7]], dtype=typename)})
+                if typename == "int32":
+                    with self.assertRaisesRegex(ValueError, "invalid prepared"):
+                        read_prepared_ho_varfile(path)
+                    continue
+                rows, weights, sources, entries = read_prepared_ho_varfile(path)
+                self.assertEqual(rows.dtype.names, tuple(FEATURE_NAMES))
+                np.testing.assert_equal(rows["m_gg"], variables[:, 0])
+                np.testing.assert_equal(weights, [2., -.75])
+                np.testing.assert_equal(sources, [7, 7])
+                self.assertEqual(list(entries), [0, 1])
+
+
 if __name__ == "__main__":
     unittest.main()

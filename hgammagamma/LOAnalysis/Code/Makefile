@@ -17,9 +17,13 @@ CPPFLAGS += $(FASTJET_CPPFLAGS)     # see defn in ../Makefile.include
 LDFLAGS  += $(FASTJET_LDFLAGS)      # see defn in ../Makefile.include
 
 default: $(BINS) $(SCRIPTS)
+
 #	@echo
 #	@echo
 	@echo "Good! Everything was built successfully."
+
+HwSimPostAnalysis_gammagamma_SSC: HwSimPostAnalysis_gammagamma_SSC.cc DijetFakeBound.hh TopHist.h
+	$(CPP) $(CPPFLAGS) -o $@ $< $(LDFLAGS)
 
 %: %.o
 	$(CPP) -std=c++14 -Wunused-variable -ldl -o $@ $< $(LDFLAGS)

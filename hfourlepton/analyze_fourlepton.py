@@ -90,6 +90,18 @@ def audit_disjoint_slices(samples):
         ranges.setdefault(key, []).append((start, stop))
 
 
+def candidate_row(row, name, group, category, scale, luminosity):
+    pts = sorted((float(v) for v in row.get("lepton_pt", [])), reverse=True)
+    if len(pts) != 4:
+        raise ValueError("lepton_pt[4] is required; rerun the four-lepton analyzer")
+    values = {key: float(row.get(key, 0.)) for key in ("m4l", "mZ1", "mZ2", "pt4l", "min_delta_r")}
+    values.update(abs_y4l=abs(float(row.get("y4l", 0.))), **{f"pt{i+1}": pt for i, pt in enumerate(pts)})
+    if not all(math.isfinite(v) for v in values.values()):
+        raise ValueError("nonfinite analysis kinematics")
+    return dict(sample=name, group=group, source=int(row["source_index"]), label=int(category == "signal"),
+                weight=float(row["event_weight"]) * scale * luminosity * 1000., selected=True, **values)
+
+
 def load_dataset(manifest, card, luminosity, *, for_ml=False):
     bundle = report.load_manifest(Path(manifest))
     errors = list(bundle.audit.errors)
@@ -99,11 +111,20 @@ def load_dataset(manifest, card, luminosity, *, for_ml=False):
     if raw_manifest.get("selection_profile", "gem") != card["selection_profile"]:
         raise ValueError("selection profile differs; rerun reconstruction with the intended profile")
     names = {s.name for s in bundle.samples}
-    missing = set(card["required_samples"]) - names
+    from hfourlepton import pooled_controls
+    requested = set(card["required_samples"])
+    extra_names = set(pooled_controls.PROCESSES)
+    use_published = extra_names <= requested and names.isdisjoint(extra_names)
+    controls = (pooled_controls.load(manifest, bundle.cut_stages, published_defaults=use_published)
+                if "pooled_backgrounds" in raw_manifest or use_published else [])
+    if names.intersection(s["name"] for s, _, _ in controls):
+        raise ValueError("a pooled process overlaps the manifest sample inventory")
+    names.update(s["name"] for s, _, _ in controls)
+    missing = requested - names
     if missing:
         raise ValueError(f"missing required samples: {sorted(missing)}")
     # A nominal card must say explicitly whether reducible controls belong in the sum.
-    if names - set(card["required_samples"]):
+    if names - requested:
         raise ValueError("manifest contains samples outside this card's declared sample inventory")
     audit_disjoint_slices(bundle.samples)
     versions = {s.raw.get("selection_version", "legacy_unversioned") for s in bundle.samples}
@@ -160,29 +181,52 @@ def load_dataset(manifest, card, luminosity, *, for_ml=False):
                 # The zero-weight source row above already accounts for this
                 # event in independent train/validation/test populations.
                 continue
-            pts = sorted((float(v) for v in row.get("lepton_pt", [])), reverse=True)
-            if selected and len(pts) != 4:
-                raise ValueError("lepton_pt[4] is required; rerun the four-lepton analyzer")
-            pts = pts if len(pts) == 4 else [0.] * 4
-            values = {name: float(row.get(name, 0.)) for name in ("m4l", "mZ1", "mZ2", "pt4l", "min_delta_r")}
-            values.update(abs_y4l=abs(float(row.get("y4l", 0.))), **{f"pt{i+1}": pt for i, pt in enumerate(pts)})
-            if not all(math.isfinite(v) for v in values.values()):
-                raise ValueError("nonfinite analysis kinematics")
-            rows.append(dict(sample=sample.name, group=group, source=int(row["source_index"]),
-                label=int(sample.category == "signal"), weight=float(row["event_weight"]) * scale * luminosity * 1000.,
-                selected=selected, **values))
+            rows.append(candidate_row(row, sample.name, group, sample.category, scale, luminosity))
         del records
     if errors:
         raise ValueError("four-lepton audit failed:\n" + "\n".join(errors))
+    for sample, path, checksum in controls:
+        name = sample["name"]
+        norm = sample["normalization"]
+        metadata.append(dict(name=name, category="reducible", group=name, production_mode="",
+            target_cross_section_pb=sample["target_pb"], perturbative_order="LO", normalization=norm,
+            pooled_input=str(path), pooled_input_sha256=checksum, selected_hypotheses=len(sample["selected"])))
+        rows.extend(candidate_row(row, name, name, "reducible", norm["scale_pb_per_weight"], luminosity)
+                    for row in sample["selected"])
     data = {key: np.array([row[key] for row in rows]) for key in rows[0]}
+    del rows
+    # For ML every independent source, including unselected sources, contributes
+    # to the exact per-sample split fractions. Store the dummy rows as NumPy
+    # arrays to avoid constructing millions of identical Python dictionaries.
+    if controls:
+        blocks = {key: [col] for key, col in data.items()}
+        for sample, _, _ in controls:
+            name = sample["name"]
+            ranges = sample["source_ranges"]
+            sources = (np.concatenate([np.arange(low, high, dtype=np.int64) for low, high in ranges])
+                       if for_ml else np.asarray([ranges[0][0]], dtype=np.int64))
+            for key, col in data.items():
+                if key in ("group", "sample"):
+                    values = np.full(len(sources), name, dtype=f"<U{len(name)}")
+                elif key == "source":
+                    values = sources
+                else:
+                    values = np.zeros(len(sources), dtype=col.dtype)
+                blocks[key].append(values)
+        data = {key: np.concatenate(values) for key, values in blocks.items()}
     data["eligible"] = data["selected"] & cut_mask(data, card.get("preselection", {}))
     data["baseline"] = data["eligible"] & cut_mask(data, card.get("cuts", {}))
     return data, metadata, bundle
 
 
+def selected_yield(data, weights, mask):
+    # Only selected hypotheses contribute. Building groups for every generated
+    # source for each individual process would repeat millions of empty groups.
+    return signed_yield_summary(weights[mask], data["group"][mask], data["source"][mask])
+
+
 def yields(data, weights, mask):
-    return {name: signed_yield_summary(weights, data["group"], data["source"],
-            selected=mask & select) for name, select in
+    return {name: selected_yield(data, weights, mask & select) for name, select in
             (("signal", data["label"] == 1), ("background", data["label"] == 0))}
 
 
@@ -204,38 +248,74 @@ def totals(data, weights, mask, card):
 
 def sample_yields(data, weights, mask, metadata):
     return [{"sample": item["name"], "category": item["category"],
-             **signed_yield_summary(weights, data["group"], data["source"],
-                selected=mask & (data["sample"] == item["name"]))} for item in metadata]
+             **selected_yield(data, weights, mask & (data["sample"] == item["name"]))} for item in metadata]
 
 
-def write_plots(data, weights, selection, output, *, scores=None, split=None, threshold=None, importance=None):
+def write_plots(data, weights, selection, output, metadata, *, scores=None, split=None, threshold=None, importance=None):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from hfourlepton.observables import COLORS, component
+
+    background_samples = {}
+    for sample in metadata:
+        if sample["category"] != "signal":
+            background_samples.setdefault(component(sample), []).append(sample["name"])
+
     mass_edges = np.linspace(105., 140., 36)
-    fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-    for label, name, ax in zip((1, 0), ("Signal", "Irreducible background"), axes):
-        base = selection & data["eligible"] & (data["label"] == label)
-        ax.stairs(np.histogram(data["m4l"][base], mass_edges, weights=weights[base])[0], mass_edges, label="Preselection")
-        after = base & data["baseline"] if scores is None else base & (scores >= threshold) if threshold is not None else np.zeros(len(base), bool)
-        if scores is None or threshold is not None:
-            ax.stairs(np.histogram(data["m4l"][after], mass_edges, weights=weights[after])[0], mass_edges,
-                      label="Mass window" if scores is None else "Frozen score cut")
-        ax.set(xlabel=r"$m_{4\ell}$ [GeV]", ylabel="Signed expected events / GeV", title=name)
-        ax.legend()
-    fig.tight_layout(); fig.savefig(output / "mass.svg"); plt.close(fig)
+    stages = [("Preselection", selection & data["eligible"])]
+    if scores is None:
+        stages.append(("Mass window", selection & data["baseline"]))
+    elif threshold is not None:
+        stages.append(("Preselection + frozen score (before mass window)", stages[0][1] & (scores >= threshold)))
+
+    fig, axes = plt.subplots(1, len(stages), figsize=(6 * len(stages), 4.8), squeeze=False)
+    for ax, (stage, mask) in zip(axes[0], stages):
+        masses, names = data["m4l"][mask], data["sample"][mask]
+        w, is_signal = weights[mask], data["label"][mask] == 1
+        for label, subset, color in (("Signal", is_signal, COLORS["Signal"]),
+                                     ("Total background", ~is_signal, "black")):
+            ax.stairs(np.histogram(masses[subset], mass_edges, weights=w[subset])[0], mass_edges,
+                      color=color, label=label, linewidth=2)
+        for label, samples in background_samples.items():
+            part = np.isin(names, samples)
+            values = np.histogram(masses[part], mass_edges, weights=w[part])[0]
+            ax.stairs(values, mass_edges, color=COLORS[label], linestyle="--",
+                      label=label if part.any() else f"{label} (0 selected)")
+        ax.set(xlabel=r"$m_{4\ell}$ [GeV]", ylabel="Signed expected events / GeV", title=stage)
+        ax.legend(frameon=False, fontsize=8)
+    fig.tight_layout()
+    fig.savefig(output / "mass.svg")
+    plt.close(fig)
+
     if scores is not None:
-        fig, ax = plt.subplots(figsize=(6, 4))
         edges = np.linspace(0., 1., 26)
-        for label, name, color in ((1, "Signal", "tab:blue"), (0, "Background", "tab:orange")):
-            for partition, style in (("train", "--"), ("test", "-")):
-                mask = data["eligible"] & (data["label"] == label) & (split.partitions == partition)
-                w = np.abs(data["weight"][mask])
-                if w.sum() > 0:
-                    ax.stairs(np.histogram(scores[mask], edges, weights=w)[0] / w.sum() / np.diff(edges), edges,
-                              color=color, linestyle=style, label=f"{name}: {partition}")
-        ax.set(xlabel="Classifier score", ylabel="Absolute-weight density (diagnostic)")
-        ax.legend(); fig.tight_layout(); fig.savefig(output / "scores.svg"); plt.close(fig)
+        fig, axes = plt.subplots(1, 2, figsize=(12, 4.8), sharex=True, sharey=True)
+        for ax, partition in zip(axes, ("train", "test")):
+            mask = data["eligible"] & (split.partitions == partition)
+            w = np.abs(data["weight"][mask])
+            names, score, is_signal = data["sample"][mask], scores[mask], data["label"][mask] == 1
+            for label, subset, color in (("Signal", is_signal, COLORS["Signal"]),
+                                         ("Total background", ~is_signal, "black")):
+                if w[subset].sum() > 0:
+                    values = np.histogram(score[subset], edges, weights=w[subset])[0]
+                    ax.stairs(values / w[subset].sum() / np.diff(edges), edges, color=color,
+                              label=label, linewidth=2)
+            # Each background component integrates to its share of the absolute background weight.
+            total = w[~is_signal].sum()
+            for label, samples in background_samples.items():
+                part = np.isin(names, samples)
+                if total > 0:
+                    values = np.histogram(score[part], edges, weights=w[part])[0]
+                    ax.stairs(values / total / np.diff(edges), edges, color=COLORS[label], linestyle="--",
+                              label=label if part.any() else f"{label} (0 selected)")
+                else:
+                    ax.plot([], [], color=COLORS[label], label=f"{label} (no background weight)")
+            ax.set(xlabel="Classifier score", ylabel="Absolute-weight density", title=partition.capitalize())
+            ax.legend(frameon=False, fontsize=8)
+        fig.tight_layout()
+        fig.savefig(output / "scores.svg")
+        plt.close(fig)
         fig, ax = plt.subplots(figsize=(6, 4))
         ax.barh(list(importance), list(importance.values()))
         ax.set(xlabel="XGBoost feature importance")
@@ -247,7 +327,7 @@ def run_analysis(data, metadata, card, mode, output):
             "samples": sample_yields(data, data["weight"], data["baseline"], metadata)}
     result = {"cuts_full_sample": cuts}
     if mode == "cuts":
-        write_plots(data, data["weight"], np.ones(len(data["weight"]), bool), output)
+        write_plots(data, data["weight"], np.ones(len(data["weight"]), bool), output, metadata)
         return result
     from xgboost import XGBClassifier
     from sklearn.metrics import roc_auc_score
@@ -311,7 +391,7 @@ def run_analysis(data, metadata, card, mode, output):
         spectra[str(label)] = {"before": np.histogram(data["m4l"][before], edges, weights=tw[before])[0].tolist(),
                                "after": np.histogram(data["m4l"][after], edges, weights=tw[after])[0].tolist()}
     result["test_mass_spectra"] = {"edges_gev": edges.tolist(), "spectra": spectra}
-    write_plots(data, tw, test, output, scores=scores, split=split,
+    write_plots(data, tw, test, output, metadata, scores=scores, split=split,
                 threshold=best["threshold"] if best else None, importance=result["feature_importance"])
     return result
 

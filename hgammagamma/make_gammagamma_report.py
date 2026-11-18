@@ -30,9 +30,11 @@ from typing import Iterable, Sequence
 try:
     from . import ho_signal_normalization as ho_normalization
     from . import ho_shower_completion as ho_shower
+    from . import student_backgrounds as release
 except ImportError:
     import ho_signal_normalization as ho_normalization
     import ho_shower_completion as ho_shower
+    import student_backgrounds as release
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -108,6 +110,7 @@ SAMPLE_LABELS = {
     "signal_gg_h_aa": "Higgs signal",
     "bkg_prompt_aa": "Prompt gamma gamma",
     "bkg_loop_gg_aa": "Loop-induced gg -> gamma gamma",
+    "bkg_dijet_double_fake": "Dijet double fake (upper estimate)",
     "bkg_gamma_j": "gamma + j fake",
     "bkg_jj": "jj fake",
     "bkg_ee": "e+e- fake",
@@ -411,22 +414,36 @@ def find_analysis_files(sample_dir: Path, run_tag: str) -> tuple[Path, Path] | N
 
 def load_samples(args: argparse.Namespace) -> list[SampleResult]:
     samples: list[SampleResult] = []
+    prepared = None
+    if (args.analysis_root / "diphoton_samples.json").is_file():
+        sys.path.insert(0, str(SCRIPT_DIR.parent))
+        from hgammagamma.shared_diphoton import load_prepared
+        prepared = load_prepared(args.analysis_root, args.run_tag)
     for category, sample_dir in discover_sample_dirs(args.analysis_root):
         name = sample_dir.name
         if not requested_sample(name, args.samples):
             continue
-        files = find_analysis_files(sample_dir, args.run_tag)
+        if prepared is not None and name not in prepared:
+            continue
+        record = prepared[name] if prepared is not None else None
+        files = ((args.analysis_root / record["top_file"], args.analysis_root / record["dat_file"])
+                 if record else find_analysis_files(sample_dir, args.run_tag))
         if files is None:
             continue
         top_file, dat_file = files
         dat = parse_key_value_dat(dat_file)
         provenance = response_provenance(dat)
-        ho_sidecar = load_ho_signal_sidecar(sample_dir, args.run_tag,
-                                           weight_scale=float(dat.get("weight_scale", 1.0)))
-        if ho_sidecar is not None:
+        ho_sidecar = None if record else load_ho_signal_sidecar(
+            sample_dir, args.run_tag, weight_scale=float(dat.get("weight_scale", 1.0)))
+        if record and record["normalization_kind"] == "ihixs_n3lo":
+            sidecar = args.analysis_root / "provenance" / name / f"normalization-{args.run_tag}.json"
+            ho_sidecar = json.loads(sidecar.read_text())
+        if ho_sidecar is not None and not record:
             validate_ho_analysis_summary(sample_dir, dat_file)
         try:
-            cross_section_pb, cross_section_error_pb = parse_cross_section(sample_dir, args.run_tag)
+            cross_section_pb, cross_section_error_pb = (
+                (record["cross_section_pb"], record["cross_section_error_pb"]) if record
+                else parse_cross_section(sample_dir, args.run_tag))
         except FileNotFoundError as error:
             if not args.allow_missing_xsec:
                 raise
@@ -438,8 +455,8 @@ def load_samples(args: argparse.Namespace) -> list[SampleResult]:
         sum_weight = float(dat.get("sum_weight", events_read))
         sum_diphoton_weight = float(dat.get("sum_diphoton_weight", selected_events))
         weight_scale = float(dat.get("weight_scale", 1.0))
-        normalization_sum_weight = sum_weight
-        shower_quality = None
+        normalization_sum_weight = record["normalization_sum_weight"] if record else sum_weight
+        shower_quality = record["shower_quality"] if record else None
         campaign = sample_dir / "campaign.json"
         if campaign.is_file():
             manifest = json.loads(campaign.read_text())
@@ -493,10 +510,12 @@ def load_samples(args: argparse.Namespace) -> list[SampleResult]:
                 efficiency=efficiency,
                 selected_cross_section_pb=selected_xsec,
                 histograms=parse_top_file(top_file),
-                normalization_kind="ihixs_n3lo" if ho_sidecar is not None else "generator",
+                normalization_kind=(record["normalization_kind"] if record else
+                                    "ihixs_n3lo" if ho_sidecar is not None else "generator"),
                 native_cross_section_pb=(float(ho_sidecar["native_cross_section_pb"])
                                          if ho_sidecar is not None else None),
-                ihixs_record_sha256=ho_sidecar["ihixs_record_sha256"] if ho_sidecar is not None else "",
+                ihixs_record_sha256=(record["ihixs_record_sha256"] if record else
+                                     ho_sidecar["ihixs_record_sha256"] if ho_sidecar is not None else ""),
                 rate_uncertainties=ho_sidecar["ihixs"]["uncertainties"] if ho_sidecar is not None else None,
                 normalization_sum_weight=normalization_sum_weight,
                 shower_quality=shower_quality,
@@ -509,6 +528,57 @@ def ordered_samples(samples: Sequence[SampleResult]) -> list[SampleResult]:
     backgrounds = sorted((sample for sample in samples if sample.category != "Signal"), key=lambda s: s.name)
     signals = sorted((sample for sample in samples if sample.category == "Signal"), key=lambda s: s.name)
     return backgrounds + signals
+
+
+def response_histograms(variables, weights, templates):
+    """Replay the twelve weighted SSC TopHist fills in the original binning."""
+    import numpy as np
+    count = variables[:, -1]
+    result = {}
+    for title, hist in templates.items():
+        slug = PLOT_META[title].slug
+        if slug in ("pt_photons", "eta_photons"):
+            prefix = slug.split("_")[0]
+            fills = [(prefix + "_gamma1", count >= 1), (prefix + "_gamma2", count >= 2)]
+        else:
+            minimum = 0 if slug == "n_selected_photons" else 1 if slug.endswith("_gamma1") else 2
+            fills = [(slug, count >= minimum)]
+        width = (hist.x_max - hist.x_min) / len(hist.x)
+        edges = hist.x_min + np.arange(len(hist.x) + 1) * width
+        bins = np.zeros(len(hist.x))
+        for variable, selected in fills:
+            values = variables[:, release.FEATURES.index(variable)]
+            # TopHist excludes both exterior edges and includes the upper edge
+            # of each interior bin.
+            inside = selected & (values > hist.x_min) & (values < hist.x_max)
+            index = np.searchsorted(edges, values[inside], side="left") - 1
+            bins += np.bincount(index, weights=weights[inside], minlength=len(bins))
+        result[title] = Histogram(title, hist.x_min, hist.x_max, hist.x, bins.tolist())
+    return result
+
+
+def append_response_samples(samples, requested):
+    import numpy as np
+    existing = {sample.name for sample in samples}
+    names = {name for name in release.NAMES if requested_sample(name, requested) and name not in existing}
+    if not names:
+        return
+    templates = {title: hist for sample in samples for title, hist in sample.histograms.items()}
+    if templates.keys() - PLOT_META.keys():
+        raise ValueError("missing SSC response definition for " + ", ".join(sorted(templates.keys() - PLOT_META.keys())))
+    for name, (record, path, manifest) in release.inventory(names).items():
+        variables, weights, sources = release.arrays(record, path)
+        total, pair = record["sum_weight_pb"], record["pair_rate_pb"]
+        samples.append(SampleResult(
+            name=name, label=SAMPLE_LABELS[name], category="Backgrounds", analysis_name="SSC_GEM_weighted_response",
+            detector_response="ssc", response_mode=record["response_mode"], weighted_hypotheses=True,
+            metadata_inferred=False, sample_dir=path.parent, top_file=path, dat_file=manifest,
+            cross_section_pb=total, cross_section_error_pb=None, events_read=record["generated_sources"],
+            selected_events=len(np.unique(sources[variables[:, -1] >= 2])), sum_weight=total,
+            sum_diphoton_weight=pair, weight_scale=1., efficiency=pair/total,
+            selected_cross_section_pb=pair, histograms=response_histograms(variables, weights, templates),
+            normalization_kind="physical_response_pb", normalization_sum_weight=total,
+        ))
 
 
 def bin_width(histogram: Histogram) -> float:
@@ -905,10 +975,15 @@ def write_html(
     yield_heading = "<th>Expected events</th>" if luminosity_fb is not None else ""
     normalization_note = (
         "HO ggF signal: NNLO+PS shapes normalized to N3LO QCD with aN3LO QCD, NLO QED PDFs. "
-        "Backgrounds retain their MC@NLO rates. Numerical integration errors and "
+        "The prompt diphoton, photon + jet and Drell–Yan samples use their MC@NLO rates. Numerical integration errors and "
         "scale/PDF rate uncertainties are separate in the summary CSV."
         if has_ihixs else ""
     )
+    if any(sample.normalization_kind == "physical_response_pb" for sample in samples):
+        normalization_note += (" The loop-induced diphoton sample uses its LO cross section. "
+                               "The dijet contribution counts pairs of jets using independent quark-to-photon "
+                               "fake probabilities for both jets (the upper endpoint of the response estimate). "
+                               "Its photon multiplicity is two by construction. The release supplies differential weights in pb.")
     luminosity_note = (f"Integrated luminosity: {luminosity_fb:g} fb^-1. "
                        "Expected events use physical selected cross sections; plot magnification "
                        "and unit-area normalization do not affect yields."
@@ -930,8 +1005,8 @@ def write_html(
           <td>{sample.selected_cross_section_pb:.6g}</td>
           <td>{int(sample.events_read)}</td>
           <td>{int(sample.selected_events)}</td>
-          {('<td>' + (str(sample.shower_quality['attempted_events']) + ' / ' + str(sample.shower_quality['saved_events']) + ' / ' + str(sample.shower_quality['discarded_events']) if sample.shower_quality is not None else 'historical') + '</td>') if has_shower_quality else ''}
-          {('<td>' + ('ihixs N3LO (ggF)' if sample.normalization_kind == 'ihixs_n3lo' else 'generator') + '</td>') if has_ihixs else ''}
+          {('<td>' + (str(sample.shower_quality['attempted_events']) + ' / ' + str(sample.shower_quality['saved_events']) + ' / ' + str(sample.shower_quality['discarded_events']) if sample.shower_quality is not None else 'See response table' if sample.normalization_kind == 'physical_response_pb' else 'historical') + '</td>') if has_shower_quality else ''}
+          {('<td>' + {'ihixs_n3lo': 'ihixs N3LO (ggF)', 'physical_response_pb': 'Physical response weights (pb)'}.get(sample.normalization_kind, 'generator') + '</td>') if has_ihixs else ''}
           {('<td>' + format(expected_events(sample, luminosity_fb), '.6g') + '</td>') if luminosity_fb is not None else ''}
         </tr>
         """
@@ -1253,12 +1328,25 @@ def main(argv: Sequence[str]) -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     samples = load_samples(args)
+    explicit = {name.strip() for name in args.samples.split(",")} if args.samples != "all" else set()
+    if not samples and explicit and explicit <= set(release.NAMES):
+        # The campaign supplies the binning even for a background-only report.
+        samples = load_samples(argparse.Namespace(**{**vars(args), "samples": "all"}))
     if not samples:
         die(f"no samples with .top/.dat files found under {analysis_root}")
 
     campaigns = [json.loads((sample.sample_dir / "campaign.json").read_text())
                  for sample in samples if (sample.sample_dir / "campaign.json").exists()]
     higher_order, energy_tev = campaign_context(campaigns)
+    if (analysis_root / "diphoton_samples.json").is_file():
+        higher_order, energy_tev = True, 40.
+    if higher_order and energy_tev == 40 and all(sample.detector_response == "ssc" for sample in samples):
+        append_response_samples(samples, args.samples)
+    missing = (explicit & set(release.NAMES)) - {sample.name for sample in samples}
+    if missing:
+        raise ValueError("the published diphoton background distributions require a 40 TeV SSC HO campaign")
+    if explicit:
+        samples = [sample for sample in samples if sample.name in explicit]
     simulation_label = args.simulation_label or ("Higher-order simulation" if higher_order else "LO simulation")
     if not args.simulation_label and any(sample.normalization_kind == "ihixs_n3lo" for sample in samples):
         simulation_label = "HO simulation, N3LO ggF normalization"

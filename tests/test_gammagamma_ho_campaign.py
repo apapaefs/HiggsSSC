@@ -206,7 +206,7 @@ class HigherOrderCampaignTests(unittest.TestCase):
 
     def test_resume_shower_preserves_existing_events_and_invokes_only_recovery(self):
         with TemporaryDirectory() as tmp:
-            path = Path(tmp) / "signal.lhe"
+            path = Path(tmp).resolve() / "signal.lhe"
             path.write_text(lhe_text(True))
             args = self.args(tmp, "--signal-lhe", str(path), "--resume")
             sample = ho.SAMPLES[0]
@@ -229,7 +229,7 @@ class HigherOrderCampaignTests(unittest.TestCase):
 
     def test_unrelated_shower_error_is_not_reclassified_as_input_exhaustion(self):
         with TemporaryDirectory() as tmp:
-            path = Path(tmp) / "signal.lhe"
+            path = Path(tmp).resolve() / "signal.lhe"
             path.write_text(lhe_text(True))
             args = self.args(tmp, "--signal-lhe", str(path), "--resume")
             sample = ho.SAMPLES[0]

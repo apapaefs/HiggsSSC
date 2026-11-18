@@ -419,7 +419,10 @@ class FourLeptonAnalysisTests(unittest.TestCase):
         for energy in ("lhc13", "ssc40"):
             for mode in ("cuts", "xgboost"):
                 card = analysis.read_card(analysis.REPO / f"hfourlepton/analysis_cards/{energy}_{mode}.json")
-                self.assertEqual(set(card["required_samples"]), {s.name for s in ho.all_samples()})
+                expected = {s.name for s in ho.all_samples()}
+                if energy == "ssc40":
+                    expected.update(("bkg_zbb_ee", "bkg_zbb_mumu", "bkg_ttbar"))
+                self.assertEqual(set(card["required_samples"]), expected)
                 self.assertNotIn("m4l", card["features"])
                 self.assertEqual(card["cuts"]["m4l"], {"min": 120., "max": 130.})
 

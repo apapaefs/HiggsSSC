@@ -143,11 +143,15 @@ def component(sample):
             if sample["name"].startswith(prefix):
                 return label
         return "Other signal"
+    if sample["name"] in REDUCIBLE_COMPONENTS:
+        return REDUCIBLE_COMPONENTS[sample["name"]]
     return "qq continuum" if sample["name"].startswith("bkg_qq_") else (
         "gg continuum" if sample["name"].startswith("bkg_gg_") else "Other background")
 
 
+REDUCIBLE_COMPONENTS = {"bkg_zbb_ee": "Z→ee + bb", "bkg_zbb_mumu": "Z→μμ + bb", "bkg_ttbar": "tt̄"}
 COLORS = {"qq continuum": "#d59527", "gg continuum": "#9f5b22", "ggF": "#4385ba",
+          "Z→ee + bb": "#aa4499", "Z→μμ + bb": "#228833", "tt̄": "#206884",
           "VBF": "#65a7cf", "WH": "#83bd9a", "ZH": "#677eb1", "ttH": "#ac87b3",
           "Other background": "#999999", "Other signal": "#8888dd", "Signal": "#205783"}
 
@@ -195,21 +199,27 @@ def render(report, output):
             for region in ("selected", "signal_region"):
                 groups = defaultdict(list)
                 signals = []
+                backgrounds = set()
                 for sample in profile_samples:
                     h = sample["observables"][region]["inclusive"][spec.name]
                     groups[component(sample)].append(h)
                     if sample["category"] == "signal":
                         signals.append(h)
+                    else:
+                        backgrounds.add(component(sample))
                 combined = {key: combine(rows) for key, rows in groups.items()}
                 title = (f"{energy:g} TeV" if energy is not None else "Collider energy unspecified") + f" · {profile} response · " + (
                     "fiducial selection" if region == "selected" else f"{sr[0]:g} < m4l < {sr[1]:g} GeV")
                 fig, axes = plt.subplots(1, 2, figsize=(11.5, 4.5))
-                shape_groups = {"Signal": combine(signals), **{k: v for k, v in combined.items() if "continuum" in k or k == "Other background"}}
+                shape_groups = {"Signal": combine(signals), **{k: h for k, h in combined.items() if k in backgrounds}}
                 unavailable = []
                 for label, h in shape_groups.items():
                     values = density(h)
                     if values is None:
-                        unavailable.append(label)
+                        if h["status"] == "ok" and not any(h["source_events"][1:-1]):
+                            axes[0].plot([], [], color=COLORS[label], label=f"{label} (0 in range)")
+                        else:
+                            unavailable.append(label)
                         continue
                     y, error = values
                     axes[0].stairs(y, spec.edges, label=label, color=COLORS[label], linewidth=1.5)

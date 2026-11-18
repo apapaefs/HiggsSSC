@@ -80,7 +80,8 @@ def _dependencies():
 
 
 def _dataset(loaded, luminosity):
-    features, eligible, weights, labels, names, sources, entries, baseline_rows = ([] for _ in range(8))
+    from read_root_varfiles import FEATURE_NAMES as variables, named_rows
+    tables, raw_weights, labels, names, sources, entries, physical_weights = ([] for _ in range(7))
     samples = {}
     for sample, rows, raw, event_ids, row_ids in loaded:
         if sample.name in samples:
@@ -88,32 +89,31 @@ def _dataset(loaded, luminosity):
         if not (len(rows) == len(raw) == len(event_ids) == len(row_ids)):
             raise ValueError(f"inconsistent HO metadata row lengths: {sample.name}")
         samples[sample.name] = sample
-        for row, weight, source, entry in zip(rows, raw, event_ids, row_ids):
-            accepted = row["n_selected_photons"] >= 2
-            values = [row[key] for key in FEATURE_NAMES]
-            if accepted and any(not math.isfinite(value) or value <= -900 for value in values):
-                raise ValueError(f"invalid selected diphoton features: {sample.name}, entry {entry}")
-            features.append(values)
-            eligible.append(accepted)
-            weights.append(weight)
-            labels.append(int(sample.category == "Signal"))
-            names.append(sample.name)
-            sources.append(source)
-            entries.append(entry)
-            baseline_rows.append(row)
-    data = {
-        "features": np.asarray(features, dtype=float), "eligible": np.asarray(eligible, dtype=bool),
-        "raw_weights": np.asarray(weights, dtype=float), "labels": np.asarray(labels, dtype=int),
-        "sample_ids": np.asarray(names), "source_events": np.asarray(sources, dtype=np.int64),
-        "entries": np.asarray(entries, dtype=np.int64), "samples": samples, "rows": baseline_rows,
-    }
-    physical = np.zeros(len(weights), dtype=float)
-    for name, sample in samples.items():
+        if isinstance(rows, np.ndarray) and rows.dtype.names == tuple(variables):
+            table = rows.view(np.float64).reshape(-1, len(variables))
+        else:
+            table = np.asarray([[row[key] for key in variables] for row in rows], dtype=float).reshape(-1, len(variables))
+        selected_features = table[table[:, -1] >= 2, :-1]
+        if not np.isfinite(selected_features).all() or np.any(selected_features <= -900):
+            raise ValueError(f"invalid selected diphoton features: {sample.name}")
+        weight = np.asarray(raw, dtype=float)
         factor = luminosity * 1000 * sample.cross_section_pb * sample.weight_scale / sample.normalization_sum_weight
         if not math.isfinite(factor) or factor <= 0:
-            raise ValueError(f"HO physical scale must be finite and positive: {name}")
-        mask = data["sample_ids"] == name
-        physical[mask] = data["raw_weights"][mask] * factor
+            raise ValueError(f"HO physical scale must be finite and positive: {sample.name}")
+        tables.append(table)
+        raw_weights.append(weight)
+        physical_weights.append(weight * factor)
+        labels.append(np.full(len(rows), int(sample.category == "Signal"), dtype=np.int8))
+        names.append(np.full(len(rows), sample.name))
+        sources.append(np.asarray(event_ids, dtype=np.int64))
+        entries.append(np.asarray(row_ids, dtype=np.int64))
+    table = np.concatenate(tables)
+    data = {
+        "features": table[:, :-1], "eligible": table[:, -1] >= 2, "raw_weights": np.concatenate(raw_weights),
+        "labels": np.concatenate(labels), "sample_ids": np.concatenate(names), "source_events": np.concatenate(sources),
+        "entries": np.concatenate(entries), "samples": samples, "rows": named_rows(table),
+    }
+    physical = np.concatenate(physical_weights)
     if not np.all(np.isfinite(physical)):
         raise ValueError("nonfinite HO physical event weights")
     data["physical_weights"] = physical
@@ -128,7 +128,7 @@ def _sample_summaries(data, selected, split, luminosity, partition="test"):
         in_partition = in_sample & (split.partitions == partition)
         accepted = in_partition & selected
         fraction = split.sample_fractions[name][partition]
-        summary = signed_yield_summary(projected, data["sample_ids"], data["source_events"], selected=accepted)
+        summary = signed_yield_summary(projected[accepted], data["sample_ids"][accepted], data["source_events"][accepted])
         selected_sum = math.fsum(data["raw_weights"][accepted])
         efficiency = selected_sum / fraction / sample.normalization_sum_weight
         rows.append({
@@ -190,9 +190,9 @@ def _provenance(loaded, run_tag):
         records = {}
         # Small sidecars are hashed; ROOT population integrity is checked by the
         # CLI, and exact group/row assignments are persisted separately.
-        for path in (sample.dat_file, sample.sample_dir / "campaign.json",
+        for path in (sample.dat_file, getattr(sample, "prepared_manifest", None), sample.sample_dir / "campaign.json",
                      sample.sample_dir / f"normalization-{run_tag}.json"):
-            if path.is_file():
+            if path is not None and path.is_file():
                 records[path.name] = {"path": str(path.resolve()), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
         output.append({
             "sample": sample.name, "input_file": str(sample.var_file.resolve()),
@@ -203,16 +203,24 @@ def _provenance(loaded, run_tag):
             "cross_section_pb": sample.cross_section_pb, "weight_scale": sample.weight_scale,
             "ihixs_record_sha256": sample.ihixs_record_sha256, "shower_quality": sample.shower_quality,
             "records": records,
+            **({"input_sha256": sample.portable_background["sha256"],
+                "generated_sources": sample.portable_background["generated_sources"],
+                "represented_sources": sample.portable_background["represented_sources"],
+                "response_normalization": sample.portable_background["normalization"]}
+               if getattr(sample, "portable_background", None) else {}),
         })
     return output
 
 
 def _plots(stage, data, split, scores, model, threshold, baseline_mask, plt, roc_curve, roc_auc_score):
+    from hgammagamma.plot_ho_mass_diagnostics import SAMPLE_LABELS, background_components
+    components = background_components(data["sample_ids"], data["labels"])
     test = data["eligible"] & (split.partitions == "test")
     projected = project_partition_weights(data["physical_weights"], data["sample_ids"], split, "test")
     y, s, w = data["labels"][test], scores[test], np.abs(projected[test])
     diagnostics = {"auc_unweighted": None, "auc_absolute_weight": None}
-    fig, ax = plt.subplots(figsize=(6, 5))
+    fig, axes = plt.subplots(1, 2 if components else 1, squeeze=False, figsize=(12 if components else 6, 5))
+    ax = axes[0, 0]
     if len(np.unique(y)) == 2 and all(np.sum(w[y == label]) > 0 for label in (0, 1)):
         diagnostics = {"auc_unweighted": float(roc_auc_score(y, s)),
                        "auc_absolute_weight": float(roc_auc_score(y, s, sample_weight=w))}
@@ -225,6 +233,15 @@ def _plots(stage, data, split, scores, model, threshold, baseline_mask, plt, roc
         ax.text(.5, .5, "Insufficient test classes for ROC", ha="center", transform=ax.transAxes)
     ax.set(xlabel="Background efficiency (diagnostic)", ylabel="Signal efficiency (diagnostic)",
            title="Untouched test ROC — nonnegative diagnostic weights")
+    if components:
+        panel = axes[0, 1]
+        for name in components:
+            mask = (y == 1) | (data["sample_ids"][test] == name)
+            if all(np.sum(w[mask & (y == label)]) > 0 for label in (0, 1)):
+                fpr, tpr, _ = roc_curve(y[mask], s[mask], sample_weight=w[mask])
+                panel.plot(fpr, tpr, label=SAMPLE_LABELS.get(name, name))
+        panel.set(xlabel="Background efficiency", ylabel="Signal efficiency", title="Test ROC by background · absolute weights")
+        panel.legend(fontsize=8)
     fig.tight_layout(); fig.savefig(stage / "roc.png", dpi=160); plt.close(fig)
 
     fig, ax = plt.subplots(figsize=(7, 4.5))
@@ -234,7 +251,8 @@ def _plots(stage, data, split, scores, model, threshold, baseline_mask, plt, roc
     ax.set(xlabel="Feature importance", title="HO XGBoost")
     fig.tight_layout(); fig.savefig(stage / "feature_importance.png", dpi=160); plt.close(fig)
 
-    fig, ax = plt.subplots(figsize=(7, 4.5))
+    fig, axes = plt.subplots(1, 2 if components else 1, squeeze=False, figsize=(13 if components else 7, 4.5))
+    ax = axes[0, 0]
     bins = np.linspace(0, 1, 31)
     for partition, style in (("train", "--"), ("test", "-")):
         partition_weights = project_partition_weights(data["physical_weights"], data["sample_ids"], split, partition)
@@ -246,9 +264,16 @@ def _plots(stage, data, split, scores, model, threshold, baseline_mask, plt, roc
                         linestyle=style, color=color, label=f"{name} {partition}")
     ax.set(xlabel="Classifier score", ylabel="Fraction of absolute physical weight",
            title="Training/test diagnostic — each curve normalized")
+    if components:
+        panel = axes[0, 1]
+        for name in components:
+            mask = test & (data["sample_ids"] == name)
+            panel.hist(scores[mask], bins=bins, weights=projected[mask], histtype="step",
+                       label=SAMPLE_LABELS.get(name, name))
+        panel.set(xlabel="Classifier score", ylabel="Projected signed events / bin", title="Test score by background")
+        panel.legend(fontsize=8)
     ax.legend(); fig.tight_layout(); fig.savefig(stage / "score_distributions.png", dpi=160); plt.close(fig)
 
-    fig, axes = plt.subplots(2, 2, figsize=(12, 8.5))
     mass = data["features"][:, 0]
     finite_mass = mass[test]
     if finite_mass.size:
@@ -260,8 +285,10 @@ def _plots(stage, data, split, scores, model, threshold, baseline_mask, plt, roc
     selections = [("Two photons", data["eligible"]), ("Cut baseline", baseline_mask)]
     if threshold is not None:
         selections.append(("XGBoost", data["eligible"] & (scores >= threshold)))
-    for row_axes, bins, view in ((axes[0], np.linspace(lo, hi, 51), "full test range"),
-                                 (axes[1], np.linspace(100, 150, 51), "100–150 GeV view")):
+    panel_rows = 2 + (len(selections) if components else 0)
+    fig, axes = plt.subplots(panel_rows, 2, figsize=(12, 3.6 * panel_rows), layout="constrained")
+    for row_axes, bins, view in ((axes[:, 0], np.linspace(lo, hi, 51), "full test range"),
+                                 (axes[:, 1], np.linspace(100, 150, 51), "100–150 GeV view")):
         for label, name, ax in zip((1, 0), ("Signal", "Background"), row_axes):
             for selection, mask in selections:
                 selected = mask & test & (data["labels"] == label)
@@ -270,8 +297,17 @@ def _plots(stage, data, split, scores, model, threshold, baseline_mask, plt, roc
             ax.set(xlabel="Diphoton mass [GeV]", ylabel="Projected signed events / bin",
                    title=f"{name}: {view}")
             ax.legend()
+        for ax, (selection, mask) in zip(row_axes[2:], selections):
+            for process in components:
+                selected = test & mask & (data["sample_ids"] == process)
+                ax.hist(mass[selected], bins=bins, weights=projected[selected], histtype="step",
+                        label=SAMPLE_LABELS.get(process, process))
+            ax.axhline(0, color="black", linewidth=.5)
+            ax.set(xlabel="Diphoton mass [GeV]", ylabel="Projected signed events / bin",
+                   title=f"{selection} · {view}")
+            ax.legend(fontsize=8)
     fig.suptitle("Untouched test events — viewing ranges do not change the selection")
-    fig.tight_layout(); fig.savefig(stage / "mass_distributions.png", dpi=160); plt.close(fig)
+    fig.savefig(stage / "mass_distributions.png", dpi=160); plt.close(fig)
     return diagnostics
 
 
@@ -309,6 +345,7 @@ th:first-child,td:first-child{{text-align:left}}img{{max-width:100%;height:auto}
 <h1>{html.escape(metadata['name'])}</h1>
 <p>HO diphoton XGBoost • campaign {html.escape(metadata['run_tag'])} •
 {metadata['luminosity_fb']:.6g} fb<sup>−1</sup> • {html.escape(metadata['detector_response'])} response</p>
+{('<p>' + html.escape(metadata['background_scenario']) + '</p>') if metadata.get('background_scenario') else ''}
 <p>Status: <strong>{html.escape(metadata['status'])}</strong>. Frozen score threshold:
 <strong>{fmt(metadata['best_threshold'])}</strong>.</p>
 <div class="notice"><ul>{warnings}</ul></div>
@@ -320,7 +357,7 @@ MC errors combine response rows from each source event before squaring and condi
 They do not include cross-section or detector systematic uncertainties.</p>{summary}
 <h2>Per-sample signed yields</h2>{detail}
 <p>Training uses class-balanced absolute physical weights. Physics yields use signed weights.
-ROC and score overlays use nonnegative diagnostic weights; training scores never enter the test comparison.</p>
+The ROC curves and normalized training/test score shapes use nonnegative diagnostic weights.</p>
 <p>The additional mass spectra use {metadata['mass_bin_width_gev']:g} GeV bins with source-event MC uncertainty bands.
 The cut spectrum uses the full sample and overlays the selections without and with the mass cut.
 The XGBoost spectrum and mass acceptance use only the independent test partition at the frozen score threshold.</p>
@@ -374,6 +411,9 @@ def _run(loaded, stage, output_dir, metadata, baseline_cuts, config, xgb, plt, r
     seed, systematics = int(config.get("seed", 12345)), float(config.get("systematics", 0))
     minimum = float(config.get("min_background_effective_count", 25))
     data = _dataset(loaded, luminosity)
+    if "bkg_dijet_double_fake" in data["samples"]:
+        from hgammagamma.student_backgrounds import DIJET_SCENARIO
+        metadata["background_scenario"] = DIJET_SCENARIO
     provenance = _provenance(loaded, metadata["run_tag"])
     split = grouped_sample_split(data["sample_ids"], data["source_events"],
                                  fractions=(1-validation_size-test_size, validation_size, test_size), seed=seed)

@@ -310,13 +310,13 @@ class FourLeptonReportOutputTest(unittest.TestCase):
         raw["samples"] = [raw["samples"][1]]
         sample = raw["samples"][0]
         helper = completion_fixtures.ShowerCompletionTests()
-        with patch.object(completion_fixtures, "SAMPLE", sample["name"]):
-            fixture = helper.fixture(directory / "shower", weights=(1., 1., 1.),
-                                     requested=3, saved=2, termination="source_exhausted")
-            if finite_guard:
-                plan = completion_fixtures.completion.finite_shower_plan(sample["name"], 3, 3)
-                (fixture[0] / "shower_execution.json").write_text(json.dumps(plan))
-            completed, native = helper.build(fixture)
+        fixture = helper.fixture(directory / "shower", weights=(1., 1., 1.),
+                                 requested=3, saved=2, termination="source_exhausted",
+                                 sample=sample["name"])
+        if finite_guard:
+            plan = completion_fixtures.completion.finite_shower_plan(sample["name"], 3, 3)
+            (fixture[0] / "shower_execution.json").write_text(json.dumps(plan))
+        completed, native = helper.build(fixture)
         sample.update(order="ho", nevents_requested=3, shower_completion=completed,
                       input_lhe=native["lhe_file"], analysis_summary="background.summary.json")
         sample["normalization"].update(denominator_sumw=3., denominator_sumw2=3.)
@@ -358,6 +358,24 @@ class FourLeptonReportOutputTest(unittest.TestCase):
             result = generate_report([manifest], directory / "invalid-proof", record_loader=self._strict_loader)
             self.assertTrue(any("matched shower event count: HO shower completion fingerprint changed" in e
                                 for e in result["audit"]["errors"]))
+
+    def test_lo_finite_shower_losses_use_all_source_events_and_require_valid_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            manifest = self._matched_manifest(directory, finite_guard=True)
+            raw = json.loads(manifest.read_text())
+            raw["samples"][0]["order"] = "lo"
+            manifest.write_text(json.dumps(raw))
+            result = generate_report([manifest], directory / "lo-finite", record_loader=self._strict_loader)
+            self.assertTrue(result["audit"]["ok"], result["audit"]["errors"])
+            sample = result["samples"][0]
+            self.assertEqual(sample["detector_audit"]["events"]["shower_discarded"], 1)
+            self.assertAlmostEqual(sample["selected"]["cross_section_pb"], 8. / 3.)
+            raw["samples"][0]["shower_completion"]["saved_events"] = 3
+            manifest.write_text(json.dumps(raw))
+            result = generate_report([manifest], directory / "lo-invalid", record_loader=self._strict_loader)
+            self.assertFalse(result["audit"]["ok"])
+            self.assertTrue(any("completion fingerprint changed" in e for e in result["audit"]["errors"]))
 
     def test_report_without_matched_proof_still_requires_requested_event_count(self):
         with tempfile.TemporaryDirectory() as tmp:

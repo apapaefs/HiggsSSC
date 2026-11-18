@@ -27,7 +27,10 @@
 #include "Herwig/Utilities/EnumParticles.h"
 
 #include <cmath>
+#include <iomanip>
+#include <iostream>
 #include <set>
+#include <sstream>
 
 namespace HiggsSSC {
 
@@ -86,7 +89,8 @@ bool is_biased_semileptonic_mode(const tcDMPtr& mode) {
 }
 
 double heavy_flavour_importance_factor(const tcPPtr& particle,
-                                       const char* handler_name) {
+                                       const char* handler_name,
+                                       std::ostream* audit) {
   // The campaign multiplies only the selected direct one-hadron e/mu
   // branching ratios by kHeavyFlavorSemileptonicBias.  All other active
   // modes retain b_m=1, so the proposal has full support.  Recover the
@@ -118,6 +122,14 @@ double heavy_flavour_importance_factor(const tcPPtr& particle,
                       << ", selected bias " << selected_bias << ")"
                       << Exception::runerror;
   }
+  if (audit) {
+    *audit << "{\"pdg\":" << particle->id()
+           << ",\"mode\":\"" << particle->decayMode()->fullName()
+           << "\",\"original_sum\":" << original_sum
+           << ",\"proposal_sum\":" << biased_sum
+           << ",\"mode_bias\":" << selected_bias
+           << ",\"factor\":" << factor << "}";
+  }
   return factor;
 }
 
@@ -129,6 +141,10 @@ void apply_reweighting(EventHandler& event_handler, ReweightScope scope,
   }
 
   double factor = 1.0;
+  const double before = event->weight();
+  std::ostringstream audit;
+  audit << std::setprecision(17);
+  bool first_parent = true;
   std::set<tcPPtr> particles;
   event->select(std::inserter(particles, particles.end()), AllSelector());
   for (const tcPPtr& particle : particles) {
@@ -156,10 +172,13 @@ void apply_reweighting(EventHandler& event_handler, ReweightScope scope,
     if (!is_terminal_copy(particle, scope)) {
       continue;
     }
-    factor *=
-        scope == ReweightScope::HeavyFlavor
-            ? heavy_flavour_importance_factor(particle, handler_name)
-            : particle->dataPtr()->decaySelector().sum();
+    if (scope == ReweightScope::HeavyFlavor) {
+      if (!first_parent) audit << ',';
+      first_parent = false;
+      factor *= heavy_flavour_importance_factor(particle, handler_name, &audit);
+    } else {
+      factor *= particle->dataPtr()->decaySelector().sum();
+    }
   }
 
   if (!std::isfinite(factor) || factor < 0.0) {
@@ -170,6 +189,14 @@ void apply_reweighting(EventHandler& event_handler, ReweightScope scope,
   event->weight(event->weight() * factor);
   for (auto& named_weight : event->optionalWeights()) {
     named_weight.second *= factor;
+  }
+  if (scope == ReweightScope::HeavyFlavor) {
+    // A separate validator recomputes every p/q from the unmodified decay
+    // table and compares the audited moments with finalized ROOT weights.
+    std::cout << std::setprecision(17) << "HIGGSSSC_HF_AUDIT {\"event\":"
+              << event->number() << ",\"before\":" << before
+              << ",\"factor\":" << factor << ",\"after\":" << event->weight()
+              << ",\"parents\":[" << audit.str() << "]}" << std::endl;
   }
 }
 

@@ -30,6 +30,7 @@ from read_root_varfiles import FEATURE_NAMES, read_named_ROOT_varfile
 from hgammagamma import ho_shower_completion as ho_shower
 from hgammagamma import ho_signal_normalization as ho_normalization
 from hgammagamma import make_gammagamma_report as campaign_report
+from hgammagamma import student_backgrounds
 
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -98,6 +99,8 @@ class SampleInfo:
     tree_entries: int | None = None
     sum_tree_weight: float | None = None
     sum_abs_weight: float | None = None
+    portable_background: dict | None = None
+    prepared_manifest: Path | None = None
 
 
 @dataclass
@@ -445,7 +448,7 @@ def ho_sample_metadata(sample_dir: Path, run_tag: str, dat_file: Path,
         return {}
     manifest = json.loads(campaign.read_text())
     is_signal = ho_normalization.is_ho_signal(manifest)
-    if not is_signal and manifest.get("hard_accuracy") != "NLO QCD + PS":
+    if not is_signal and manifest.get("hard_accuracy") not in {"NLO QCD + PS", "loop-induced LO + PS"}:
         return {}
     if (manifest.get("run_tag") != run_tag or manifest.get("sample") != sample_dir.name
             or "analyze" not in manifest.get("completed", [])):
@@ -509,6 +512,29 @@ def discover_samples(
     requested: set[str] | None = None,
     rate_factors: dict[str, float] | None = None,
 ) -> list[SampleInfo]:
+    if (analysis_root / "diphoton_samples.json").is_file():
+        from hgammagamma.shared_diphoton import load_prepared
+        records = load_prepared(analysis_root, run_tag)
+        samples = []
+        for name, record in records.items():
+            if requested is not None and name not in requested:
+                continue
+            scale = record["weight_scale"]
+            for key in (name, record["category"]):
+                if key in (rate_factors or {}) and not math.isclose(rate_factors[key], scale, rel_tol=1.e-12):
+                    raise ValueError(f"rate_factors cannot replace the prepared physical scale for {name}")
+            dat_path = analysis_root / record["dat_file"]
+            analysis_name, detector, response = response_provenance(parse_key_value_dat(dat_path))
+            keys = ("category", "cross_section_pb", "cross_section_error_pb", "weight_scale", "events_read",
+                    "sum_weight", "normalization_sum_weight", "normalization_kind", "ihixs_record_sha256",
+                    "shower_quality", "tree_entries", "sum_tree_weight", "sum_abs_weight")
+            samples.append(SampleInfo(name=name, sample_dir=dat_path.parent, dat_file=dat_path,
+                var_file=analysis_root / record["var_file"], analysis_name=analysis_name, detector_response=detector,
+                response_mode=response, requires_full_sample=True, prepared_manifest=analysis_root / "diphoton_samples.json",
+                **{key: record[key] for key in keys}))
+        if requested is not None and requested - {sample.name for sample in samples}:
+            raise FileNotFoundError(f"missing requested prepared samples: {sorted(requested - set(records))}")
+        return samples
     samples: list[SampleInfo] = []
     for category in ("Backgrounds", "Signal"):
         events_dir = analysis_root / category / "events"
@@ -553,6 +579,41 @@ def discover_samples(
         if missing:
             raise FileNotFoundError("missing requested analyzed samples: " + ", ".join(sorted(missing)))
     return samples
+
+
+def add_student_backgrounds(samples, names, rate_factors, prepared, context=None):
+    """Use the released physical weights alongside the compatible campaign."""
+    context = samples if context is None else context
+    if ((not context and not prepared)
+            or any(not sample.requires_full_sample or sample.detector_response != "ssc" for sample in context)):
+        raise ValueError("the published diphoton backgrounds require a 40 TeV SSC HO analysis")
+    if not prepared:
+        for sample in context:
+            campaign = json.loads((sample.sample_dir / "campaign.json").read_text())
+            if campaign.get("ebeam_gev") != 20000:
+                raise ValueError("the published diphoton backgrounds require 20 TeV beams")
+    for name, (record, path, manifest) in student_backgrounds.inventory(names).items():
+        if any(key in rate_factors and rate_factors[key] != 1 for key in (name, "Backgrounds")):
+            raise ValueError(f"{name} already contains its physical cross-section weights")
+        total = record["sum_weight_pb"]
+        samples.append(SampleInfo(name=name, category="Backgrounds", sample_dir=path.parent,
+            var_file=path, dat_file=manifest, cross_section_pb=total, cross_section_error_pb=None,
+            weight_scale=1., events_read=record["represented_sources"], sum_weight=total,
+            analysis_name="SSC_GEM_weighted_response", detector_response="ssc", response_mode=record["response_mode"],
+            normalization_sum_weight=total, normalization_kind="physical_response_pb", requires_full_sample=True,
+            tree_entries=record["rows"], sum_tree_weight=total, sum_abs_weight=total, portable_background=record))
+
+
+def read_ho_sample(sample):
+    if sample.portable_background is None:
+        if sample.prepared_manifest is not None:
+            from read_root_varfiles import read_prepared_ho_varfile
+            return read_prepared_ho_varfile(sample.var_file)
+        from read_root_varfiles import read_ho_ROOT_varfile
+        return read_ho_ROOT_varfile(sample.var_file)
+    variables, weights, sources = student_backgrounds.arrays(sample.portable_background, sample.var_file)
+    from read_root_varfiles import named_rows
+    return named_rows(variables), weights, sources, range(len(weights))
 
 
 def apply_cuts(rows: Sequence[dict[str, float]], cuts: Sequence[Cut]) -> list[bool]:
@@ -727,6 +788,7 @@ def write_html_report(metadata: dict[str, Any], rows: Sequence[dict[str, Any]], 
     <div>Luminosity: {metadata['luminosity_fb']:.6g} fb<sup>-1</sup></div>
   </div>
   <p>{html.escape(str(metadata.get('evaluation_scope', '')))}</p>
+  {('<p>' + html.escape(metadata['background_scenario']) + '</p>') if metadata.get('background_scenario') else ''}
   <p><a href="summary.csv">Download CSV</a> | <a href="summary.json">Download JSON</a></p>
   <h2>Selection</h2>
   <ul>{cuts_html}</ul>
@@ -869,7 +931,17 @@ def load_analysis_inputs(
         raise ValueError("luminosity_fb must be finite and positive")
     analysis_root = Path(analysis.get("analysis_root", DEFAULT_ANALYSIS_ROOT)).expanduser()
     rate_factors = parse_rate_factors(analysis.get("rate_factors"))
-    samples = discover_samples(analysis_root, run_tag, requested_samples(analysis.get("samples")), rate_factors)
+    names = requested_samples(analysis.get("samples"))
+    extra = set(student_backgrounds.NAMES) if analysis.get("ssc40_student_backgrounds") else set()
+    if names is not None:
+        extra &= names
+    samples = discover_samples(analysis_root, run_tag, names - extra if names is not None else None, rate_factors)
+    if extra:
+        if extra.intersection(sample.name for sample in samples):
+            raise ValueError("a published diphoton background is already present in this campaign")
+        prepared = (analysis_root / "diphoton_samples.json").is_file()
+        context = discover_samples(analysis_root, run_tag) if not samples and not prepared else samples
+        add_student_backgrounds(samples, extra, rate_factors, prepared, context)
     if not samples:
         raise RuntimeError(f"no gamma-gamma _var.root samples found under {analysis_root} for run tag {run_tag}")
     analysis["_resolved_detector_response"] = validate_detector_response(
@@ -893,7 +965,6 @@ def run_cuts(config_path: Path, run_tag_override: str | None = None, progress_en
     # each error bar. Read once and share the population with the cut summary.
     mass_inputs = [] if all(sample.requires_full_sample for sample in samples) else None
     if mass_inputs is not None:
-        from read_root_varfiles import read_ho_ROOT_varfile
         from hgammagamma.plot_ho_mass_diagnostics import (
             MASS_BIN_WIDTH_GEV, sample_plot_data, write_cut_mass_plots,
         )
@@ -904,7 +975,7 @@ def run_cuts(config_path: Path, run_tag_override: str | None = None, progress_en
             if mass_inputs is None:
                 rows.append(summarize_sample(sample, cuts, luminosity_fb, _optional_float(max_events)))
             else:
-                source_rows, weights, source_events, entries = read_ho_ROOT_varfile(sample.var_file)
+                source_rows, weights, source_events, entries = read_ho_sample(sample)
                 rows.append(_summarize_loaded_sample(sample, source_rows, weights, cuts, luminosity_fb))
                 if len(set(source_events)) != sample.events_read:
                     raise ValueError(f"HO source-event count differs from its analysis summary: {sample.var_file}")
@@ -926,6 +997,8 @@ def run_cuts(config_path: Path, run_tag_override: str | None = None, progress_en
         "cuts": cut_metadata,
     }
     metadata["totals"] = compute_analysis_totals(rows)
+    if any(sample.name == "bkg_dijet_double_fake" for sample in samples):
+        metadata["background_scenario"] = student_backgrounds.DIJET_SCENARIO
     assets = []
     if mass_inputs is not None:
         import numpy as np
@@ -1048,14 +1121,13 @@ def run_ho_xgboost(analysis, name, run_tag, luminosity_fb, samples, output_dir, 
         raise ValueError("baseline_cuts_config must contain a nonempty analysis.cuts list")
     baseline_cuts = [Cut.from_mapping(item) for item in baseline_analysis["cuts"]]
     from ho_xgboost_analysis import run_ho_signal_background_analysis, validate_config
-    from read_root_varfiles import read_ho_ROOT_varfile
 
     validate_config(xgb_cfg)
     progress = ProgressBar(len(samples) + 2, "HO XGBoost analysis", enabled=progress_enabled)
     try:
         loaded = []
         for index, sample in enumerate(samples, start=1):
-            rows, weights, source_events, entries = read_ho_ROOT_varfile(sample.var_file)
+            rows, weights, source_events, entries = read_ho_sample(sample)
             validate_ho_sample_population(sample, rows, weights)
             if len(set(source_events)) != sample.events_read:
                 raise ValueError(f"HO source-event count differs from its analysis summary: {sample.var_file}")

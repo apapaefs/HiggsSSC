@@ -3,8 +3,9 @@ analysis:
   # The pipeline supplies the run tag and campaign paths.
   detector_response: ssc
   luminosity_fb: 100.0
-  # Keep all four samples explicit so missing outputs cannot produce a partial report.
-  samples: signal_gg_h_aa,bkg_prompt_aa,bkg_gamma_j,bkg_dy_ee
+  # The loop continuum and dijet double fakes use the published 40 TeV response weights.
+  ssc40_student_backgrounds: true
+  samples: signal_gg_h_aa,bkg_prompt_aa,bkg_gamma_j,bkg_dy_ee,bkg_loop_gg_aa,bkg_dijet_double_fake
   # HO rates come from the validated normalization sidecars. The saved signal
   # weights already contain BR(H -> gamma gamma) once; no LO K-factor applies.
   cuts:

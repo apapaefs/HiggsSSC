@@ -404,6 +404,8 @@ def report(pipeline):
         command = [pipeline.python, REPO / "hfourlepton/make_fourlepton_report.py",
                    *[directory / f"manifest_{profile}.json" for profile in profiles],
                    "--output-dir", output, "--luminosity-fb", args.luminosity_fb, "--strict"]
+        if args.workflow == "fourlepton-ho" and args.energy_tev == 40:
+            command.append("--ssc40-backgrounds")
     else:
         command = [pipeline.python, REPO / "hgammagamma/make_gammagamma_report.py",
                    "--analysis-root", directory, "--run-tag", args.run_tag, "--output-dir", output,
@@ -433,7 +435,8 @@ def downstream_analysis(pipeline):
             if args.config is None and sampling and sampling["preset"] == "minimal":
                 settings = json.loads(card.read_text())
                 settings["min_background_effective_events"] = 400. if args.action == "cuts" else 100.
-                card = directory / "analysis_cards" / (args.action + ".json")
+                filename = (f"ssc40_20261118_{args.action}.json" if tag == "ssc40" else args.action + ".json")
+                card = directory / "analysis_cards" / filename
                 shared.frozen(card, settings)
             command = [pipeline.python, REPO / "hfourlepton/analyze_fourlepton.py", args.action,
                        "--manifest", directory / f"manifest_{profile}.json", "--config", card,

@@ -1,0 +1,295 @@
+{
+  "schema_version": 1,
+  "release": "ssc40-20261118",
+  "dataset_sha256": "4fcb8e5dce2dbf76e02eabff9861a683024e24d516fc250b4ed8a73f971ca8ae",
+  "profiles": {
+    "ssc": {
+      "detector": {
+        "active_efficiencies": {
+          "electron": 0.9,
+          "muon": 0.8075,
+          "trigger": {
+            "2e2mu": 0.99,
+            "4e": 0.98,
+            "4mu": 0.99
+          }
+        },
+        "declared_unmodeled_effects": [
+          "charge_misidentification",
+          "explicit_pileup_event_overlay",
+          "conversions",
+          "impact_parameter_response"
+        ],
+        "electron": {
+          "barrel_boundary_abs_eta": 1.01,
+          "noise_combination": "thermal_and_pileup_in_quadrature_then_divide_by_pt",
+          "pileup_noise_et_gev": {
+            "abs_eta_above_1p4_formula": "0.120 + 0.366*(abs_eta-1.4)",
+            "abs_eta_below_1p4": 0.12
+          },
+          "reconstruction_efficiency": 0.9,
+          "resolution_constant": 0.004,
+          "resolution_stochastic_barrel": 0.06,
+          "resolution_stochastic_endcap": 0.085,
+          "thermal_noise_et_gev": {
+            "barrel": 0.1,
+            "outside_barrel": 0.175
+          }
+        },
+        "muon": {
+          "clamp_pt_gev": [
+            10.0,
+            500.0
+          ],
+          "eta_nodes_abs": [
+            0.1,
+            0.6,
+            1.0,
+            1.3,
+            1.6,
+            1.85,
+            2.0,
+            2.2,
+            2.5
+          ],
+          "high_pt_anchor": {
+            "pt_gev": 500.0,
+            "relative_resolution_eta0": 0.05,
+            "relative_resolution_eta2p5": 0.12
+          },
+          "interpolation": "linear_abs_eta_and_logarithmic_pt",
+          "reconstruction_efficiency": 0.8075,
+          "relative_resolution_rows": {
+            "pt10": [
+              0.028,
+              0.0265,
+              0.0255,
+              0.0215,
+              0.019,
+              0.0195,
+              0.02,
+              0.0205,
+              0.022
+            ],
+            "pt100": [
+              0.0135,
+              0.0125,
+              0.0125,
+              0.0195,
+              0.023,
+              0.025,
+              0.0205,
+              0.0235,
+              0.0245
+            ],
+            "pt25": [
+              0.0167,
+              0.0155,
+              0.015,
+              0.0175,
+              0.0182,
+              0.0195,
+              0.014,
+              0.0135,
+              0.0125
+            ],
+            "pt50": [
+              0.0148,
+              0.0138,
+              0.0138,
+              0.0185,
+              0.0198,
+              0.02,
+              0.0145,
+              0.0145,
+              0.0135
+            ]
+          },
+          "smearing_variable": "q_over_pt",
+          "table_identity": "GEM_TDR_Fig4-20_approx_digitization",
+          "variation": {
+            "down": 0.8,
+            "nominal": 1.0,
+            "parameter": "multiplicative_muon_resolution_scale",
+            "up": 1.2
+          }
+        },
+        "muon_resolution_scale": 1.0,
+        "pileup_noise_configured": true,
+        "pileup_noise_enabled": true,
+        "profile": "ssc",
+        "references": {
+          "four_lepton_study": "https://lss.fnal.gov/archive/other/calt-68-1856.pdf",
+          "gem_tdr": "https://lss.fnal.gov/archive/other/ssc/ssc-gem-tn-93-262.pdf"
+        },
+        "trigger_efficiency": {
+          "4e": 0.98,
+          "other": 0.99
+        }
+      },
+      "samples": {
+        "bkg_ttbar": {
+          "path": "bkg_ttbar_ssc.json.gz",
+          "sha256": "fe0634eb45f54794f344cba90e047ab1bf0e90f6e3bdc5fc8a4d4520efe15d55",
+          "public_path": "controls/bkg_ttbar/ssc.json",
+          "public_sha256": "a89d8fb70778eb0039ce4b761caa65f68b76ddc39b42ba98da0c9148d4b7f55f"
+        },
+        "bkg_zbb_ee": {
+          "path": "bkg_zbb_ee_ssc.json.gz",
+          "sha256": "ca48b057466499a4cb3da2dfcf626fabfa9f451f41abb2ce68ebb314dc65b34e",
+          "public_path": "controls/bkg_zbb_ee/ssc.json",
+          "public_sha256": "38579d22e8233a9809927faa102439a86d4004f92120120faee0fbcc94238a43"
+        },
+        "bkg_zbb_mumu": {
+          "path": "bkg_zbb_mumu_ssc.json.gz",
+          "sha256": "18c34c43849ecb023ad18439abff8b09ec4f016b9fcf768a81c58a0c17a851bd",
+          "public_path": "controls/bkg_zbb_mumu/ssc.json",
+          "public_sha256": "ff8c04554e55d2bf7a4381a2c67181377611d430a4e3a423eda044b2f24df1df"
+        }
+      }
+    },
+    "perfect": {
+      "detector": {
+        "active_efficiencies": {
+          "electron": 1.0,
+          "muon": 1.0,
+          "trigger": {
+            "all": 1.0
+          }
+        },
+        "declared_unmodeled_effects": [
+          "charge_misidentification",
+          "explicit_pileup_event_overlay",
+          "conversions",
+          "impact_parameter_response"
+        ],
+        "electron": {
+          "barrel_boundary_abs_eta": 1.01,
+          "noise_combination": "thermal_and_pileup_in_quadrature_then_divide_by_pt",
+          "pileup_noise_et_gev": {
+            "abs_eta_above_1p4_formula": "0.120 + 0.366*(abs_eta-1.4)",
+            "abs_eta_below_1p4": 0.12
+          },
+          "reconstruction_efficiency": 0.9,
+          "resolution_constant": 0.004,
+          "resolution_stochastic_barrel": 0.06,
+          "resolution_stochastic_endcap": 0.085,
+          "thermal_noise_et_gev": {
+            "barrel": 0.1,
+            "outside_barrel": 0.175
+          }
+        },
+        "muon": {
+          "clamp_pt_gev": [
+            10.0,
+            500.0
+          ],
+          "eta_nodes_abs": [
+            0.1,
+            0.6,
+            1.0,
+            1.3,
+            1.6,
+            1.85,
+            2.0,
+            2.2,
+            2.5
+          ],
+          "high_pt_anchor": {
+            "pt_gev": 500.0,
+            "relative_resolution_eta0": 0.05,
+            "relative_resolution_eta2p5": 0.12
+          },
+          "interpolation": "linear_abs_eta_and_logarithmic_pt",
+          "reconstruction_efficiency": 0.8075,
+          "relative_resolution_rows": {
+            "pt10": [
+              0.028,
+              0.0265,
+              0.0255,
+              0.0215,
+              0.019,
+              0.0195,
+              0.02,
+              0.0205,
+              0.022
+            ],
+            "pt100": [
+              0.0135,
+              0.0125,
+              0.0125,
+              0.0195,
+              0.023,
+              0.025,
+              0.0205,
+              0.0235,
+              0.0245
+            ],
+            "pt25": [
+              0.0167,
+              0.0155,
+              0.015,
+              0.0175,
+              0.0182,
+              0.0195,
+              0.014,
+              0.0135,
+              0.0125
+            ],
+            "pt50": [
+              0.0148,
+              0.0138,
+              0.0138,
+              0.0185,
+              0.0198,
+              0.02,
+              0.0145,
+              0.0145,
+              0.0135
+            ]
+          },
+          "smearing_variable": "q_over_pt",
+          "table_identity": "GEM_TDR_Fig4-20_approx_digitization",
+          "variation": {
+            "down": 0.8,
+            "nominal": 1.0,
+            "parameter": "multiplicative_muon_resolution_scale",
+            "up": 1.2
+          }
+        },
+        "muon_resolution_scale": 1.0,
+        "pileup_noise_configured": true,
+        "pileup_noise_enabled": false,
+        "profile": "perfect",
+        "references": {
+          "four_lepton_study": "https://lss.fnal.gov/archive/other/calt-68-1856.pdf",
+          "gem_tdr": "https://lss.fnal.gov/archive/other/ssc/ssc-gem-tn-93-262.pdf"
+        },
+        "trigger_efficiency": {
+          "4e": 0.98,
+          "other": 0.99
+        }
+      },
+      "samples": {
+        "bkg_ttbar": {
+          "path": "bkg_ttbar_perfect.json.gz",
+          "sha256": "7f6d49c2735e898cff4cbf409f37bda3915fec341ba81907eff828f80b44674c",
+          "public_path": "controls/bkg_ttbar/perfect.json",
+          "public_sha256": "84958cf0a058d7e6e61a6387206fe5a965d00a7c4aed31ea7ce24ac9800e37f4"
+        },
+        "bkg_zbb_ee": {
+          "path": "bkg_zbb_ee_perfect.json.gz",
+          "sha256": "bb9e6567275305de2e07c343db19e2c984624e34defbd2634110929682b44ccf",
+          "public_path": "controls/bkg_zbb_ee/perfect.json",
+          "public_sha256": "dcff22c19c40014f209e6dd256671f435ddf5c83258302a153f42a859042f6ce"
+        },
+        "bkg_zbb_mumu": {
+          "path": "bkg_zbb_mumu_perfect.json.gz",
+          "sha256": "fe82e0a92e4bc94f59fbf5c5239484d1c107795764ac5a8edd3402a8ec70a53b",
+          "public_path": "controls/bkg_zbb_mumu/perfect.json",
+          "public_sha256": "8003e7335e689b610b3f2aac43f6511500368c184d98f88402db9f5e98399b23"
+        }
+      }
+    }
+  }
+}

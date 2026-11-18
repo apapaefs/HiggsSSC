@@ -36,7 +36,9 @@ def lhe_text(weights=(10., -2., 8.), idwtup=-4):
 
 class ShowerCompletionTests(unittest.TestCase):
     def fixture(self, directory, *, weights=(10., -2., 8.), saved=None,
-                requested=None, termination="requested_events", attempts=None):
+                requested=None, termination="requested_events", attempts=None, sample=None):
+        if sample is None:
+            sample = SAMPLE
         directory = Path(directory)
         herwig = directory / "herwig"
         (herwig / "events").mkdir(parents=True)
@@ -52,8 +54,8 @@ class ShowerCompletionTests(unittest.TestCase):
                "Per Les Houches Reader breakdown:\n"
                f"LesHouchesReader {saved} {attempts} 0.214(1)e+00\n"
                "Statistics for unrelated UE process:\nTotal: 100291 100291 1.7e+08\n")
-        (herwig / f"{SAMPLE}.out").write_text(out)
-        root = herwig / "events" / f"{SAMPLE}.root"
+        (herwig / f"{sample}.out").write_text(out)
+        root = herwig / "events" / f"{sample}.root"
         root.write_bytes(b"finalized ROOT fixture")
         normalized = [weight / max(map(abs, weights)) for weight in weights[:saved]]
         metadata = [{"path": str(root.resolve()), "entries": saved,
@@ -62,7 +64,7 @@ class ShowerCompletionTests(unittest.TestCase):
                      "sum_abs_weight": math.fsum(map(abs, normalized)),
                      "sum_weight_squared": math.fsum(weight * weight for weight in normalized)}]
         run = ("HwSim Loaded.\nBasicConsistency: maximum 4-momentum violation: 4120632.432 MeV\n"
-               f"A root tree has been written to the file:events/./{SAMPLE}.root\n"
+               f"A root tree has been written to the file:events/./{sample}.root\n"
                f"Number of events that pass basic cuts: {saved}\n"
                f"Weight of events that pass basic cuts: {metadata[0]['sum_weight']:.6g}\n")
         classes = ["ThePEG::EventHandler::ConsistencyException warning (206 times)"]
@@ -73,12 +75,12 @@ class ShowerCompletionTests(unittest.TestCase):
                     + " LesHouchesReader\nSee logfile for details.\n")
             classes.append("ThePEG::Exception runerror (1 times)")
         (herwig / "run.log").write_text(run)
-        (herwig / f"{SAMPLE}.log").write_text(
+        (herwig / f"{sample}.log").write_text(
             "Some detailed diagnostics\nThe following exception classes were reported in this run:\n"
             + "\n".join(classes) + "\n\nMiscellaneous output from modules:\n")
         card = CARD + f"set LesHouchesReader:FileName {source.resolve()}\n"
-        (herwig / f"{SAMPLE}.in").write_text(card)
-        manifest = {"sample": SAMPLE, "nevents_requested": requested,
+        (herwig / f"{sample}.in").write_text(card)
+        manifest = {"sample": sample, "nevents_requested": requested,
                     "configuration": {"herwig_card": card},
                     "root_files": [{key: entry[key] for key in ("path", "size", "mtime_ns")}
                                    for entry in metadata],
@@ -92,10 +94,109 @@ class ShowerCompletionTests(unittest.TestCase):
         herwig, source, metadata, manifest, termination, attempts = fixture
         weights = completion.source_weight_summary(source, attempts)
         record = completion.build_completion(
-            herwig, SAMPLE, manifest["nevents_requested"], manifest["lhe"]["events"],
+            herwig, manifest["sample"], manifest["nevents_requested"], manifest["lhe"]["events"],
             metadata, termination, source_weights=weights)
         manifest["shower_completion"] = record
         return record, manifest
+
+    def prompt_fixture(self, directory, *, discarded=0):
+        fixture = self.fixture(directory, weights=(1.,) * 5, saved=5-discarded,
+                               sample="bkg_ttbar")
+        herwig, source, metadata, manifest, termination, attempts = fixture
+        card = herwig / "bkg_ttbar.in"
+        extra = "create HiggsSSC::LHEBranchingRatioReweighter /Herwig/Reweights/PromptBR\n"
+        extra += "insert LesHouchesHandler:PostHadronizationHandlers 0 /Herwig/Reweights/PromptBR\n"
+        for charge, pdg in (("+", "24"), ("-", "-24")):
+            extra += f"do /Herwig/Particles/W{charge}:SelectDecayModes " + " ".join(completion.PROMPT_W_MODES[pdg]) + "\n"
+        modes = [mode for choices in completion.PROMPT_W_MODES.values() for mode in choices]
+        extra += "".join(f"get {mode}:BranchingRatio\n" for mode in modes)
+        card.write_text(card.read_text() + extra)
+        manifest["configuration"]["herwig_card"] = card.read_text()
+        tokens = dict(zip(modes, ("0.106832", "0.106049", "0.106832", "0.106049")))
+        query = herwig / "read.log"
+        query.write_text("Herwig runtime queries\n" + "\n".join(tokens.values()) + "\n")
+        evidence = dict(schema_version=1, profile="w_emu", branching_ratio_tokens=tokens,
+            branching_ratios={mode: float(value) for mode, value in tokens.items()},
+            selected_branching_sums={"24": .106832 + .106049, "-24": .106832 + .106049},
+            query_log=completion._artifact(query), card=completion._artifact(card))
+        path = herwig / "prompt_decay_weights.json"
+        path.write_text(json.dumps(evidence))
+        transform = completion.prompt_branching_transform(path)
+        # The real runtime uses more digits than the independent query prints.
+        actual = (.1068324 + .1060493)**2
+        for key in completion.MOMENTS:
+            metadata[0][key] *= actual**(2 if key == "sum_weight_squared" else 1)
+        weights = completion.source_weight_summary(source, attempts)
+        record = completion.build_completion(herwig, "bkg_ttbar", manifest["nevents_requested"], 5,
+            metadata, termination, source_weights=weights, source_weight_transform=transform)
+        manifest["shower_completion"] = record
+        return record, manifest, herwig, actual
+
+    def test_prompt_branching_weights_close_without_cancelling_physical_branching(self):
+        for discarded in (0, 1, 3):
+            with self.subTest(discarded=discarded), TemporaryDirectory() as directory:
+                record, manifest, herwig, actual = self.prompt_fixture(directory, discarded=discarded)
+                completion.validate_completion(record, manifest, herwig)
+                self.assertEqual(record["source_weights"]["sum_weight"], 5.)
+                self.assertAlmostEqual(record["root_summary"]["sum_weight"], (5-discarded)*actual)
+                self.assertEqual(completion.normalization_denominator(
+                    manifest, record["root_summary"]["sum_weight"], 1.), 5.)
+                bounds = record["source_weight_transform"]["factor_bounds"]
+                self.assertLess(bounds[0], actual)
+                self.assertGreater(bounds[1], actual)
+
+    def test_prompt_closure_rejects_missing_or_invented_branching_correction(self):
+        with TemporaryDirectory() as directory:
+            record, manifest, _, _ = self.prompt_fixture(directory, discarded=1)
+            for field in ("source_weights", "source_weight_transform"):
+                altered = copy.deepcopy(record)
+                del altered[field]
+                altered["fingerprint"] = completion.completion_fingerprint(altered)
+                with self.subTest(field=field), self.assertRaises(ValueError):
+                    completion.validate_completion(altered, manifest)
+            for key, value in (("factor", .5), ("factor_bounds", [0., 1.]),
+                               ("parent_counts", {"24": 2, "-24": 1})):
+                altered = copy.deepcopy(record)
+                transform = altered["source_weight_transform"]
+                transform[key] = value
+                transform["fingerprint"] = completion.completion_fingerprint(transform)
+                altered["fingerprint"] = completion.completion_fingerprint(altered)
+                with self.subTest(key=key), self.assertRaises(ValueError):
+                    completion.validate_completion(altered, manifest)
+
+    def test_prompt_closure_rejects_nonconstant_weights_even_with_matching_mean(self):
+        with TemporaryDirectory() as directory:
+            record, manifest, _, _ = self.prompt_fixture(directory, discarded=1)
+            record["root_metadata"][0]["sum_weight_squared"] *= 1.01
+            record["root_summary"]["sum_weight_squared"] *= 1.01
+            record["fingerprint"] = completion.completion_fingerprint(record)
+            with self.assertRaisesRegex(ValueError, "independently queried"):
+                completion.validate_completion(record, manifest)
+
+    def test_prompt_branching_runtime_artifacts_and_queries_are_bound(self):
+        for change in ("log", "query", "selection"):
+            with self.subTest(change=change), TemporaryDirectory() as directory:
+                record, manifest, herwig, _ = self.prompt_fixture(directory)
+                transform = record["source_weight_transform"]
+                evidence = copy.deepcopy(transform["evidence_data"])
+                card = Path(evidence["card"]["path"])
+                query = Path(evidence["query_log"]["path"])
+                if change == "log":
+                    query.write_text(query.read_text().replace("0.106832", "0.106833", 1))
+                elif change == "query":
+                    card.write_text(card.read_text().replace("get ", "# get ", 1))
+                else:
+                    card.write_text(card.read_text().replace("W+:SelectDecayModes", "W+:WrongSelection"))
+                with self.assertRaisesRegex(ValueError, "artifact changed"):
+                    completion.validate_completion(record, manifest, herwig)
+                # Updating hashes cannot make unrelated query values or decay
+                # selections satisfy the independent evidence requirements.
+                evidence["card"] = completion._artifact(card)
+                evidence["query_log"] = completion._artifact(query)
+                path = Path(transform["evidence"]["path"])
+                path.write_text(json.dumps(evidence))
+                with self.assertRaises(ValueError):
+                    completion.prompt_branching_transform(path)
 
     def test_finite_source_eof_with_zero_one_or_several_discarded_events(self):
         for discarded in (0, 1, 3):

@@ -29,7 +29,10 @@
     "bkg_qq_2e2mu",
     "bkg_gg_4e",
     "bkg_gg_4mu",
-    "bkg_gg_2e2mu"
+    "bkg_gg_2e2mu",
+    "bkg_zbb_ee",
+    "bkg_zbb_mumu",
+    "bkg_ttbar"
   ],
   "preselection": {
     "m4l": {

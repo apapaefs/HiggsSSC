@@ -663,7 +663,8 @@ def inspect_lhe(path, sample, args, *, powheg_validator=None):
         pdf_ids = [int(match[1]) for match in matches]
     if pdf_ids != [sample.lhaid, sample.lhaid]:
         raise ValueError(f"LHE PDF IDs differ from required {sample.lhaid}")
-    if not sample.signal and not re.search(r"HERWIGPP\s*['\"]?\s*=\s*parton_shower", header_text, re.I):
+    if (not sample.signal and getattr(sample, "matching", "MC@NLO") == "MC@NLO"
+            and not re.search(r"HERWIGPP\s*['\"]?\s*=\s*parton_shower", header_text, re.I)):
         raise ValueError("MC@NLO LHE lacks parton_shower=HERWIGPP provenance")
     if sample.signal and powheg_validator is None and not re.search(r"\bminnlo\s+1\b", header_text, re.I):
         raise ValueError("signal LHE lacks HJMiNNLO provenance (minnlo 1)")

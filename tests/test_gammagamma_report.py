@@ -42,6 +42,46 @@ class CampaignContextTests(unittest.TestCase):
             report.campaign_context([{}])
 
 
+class ReleasedBackgroundPlotTests(unittest.TestCase):
+    def test_each_response_observable_has_the_same_photon_population_as_top_hist(self):
+        import numpy as np
+        from hgammagamma.student_backgrounds import FEATURES
+        variables = np.ones((3, len(FEATURES)))
+        variables[:, -1] = [0, 1, 2]
+        weights = np.array([9., 2., 3.])
+        templates = {title: report.Histogram(title, -.5, 2.5, [0., 1., 2.], [0.] * 3)
+                     for title in report.PLOT_META}
+        result = report.response_histograms(variables, weights, templates)
+        for title, histogram in result.items():
+            slug = report.PLOT_META[title].slug
+            if slug == "n_selected_photons":
+                self.assertEqual(histogram.y, [9., 2., 3.])
+            elif slug in ("pt_photons", "eta_photons"):
+                self.assertEqual(sum(histogram.y), 8.)  # one object plus a weighted pair
+            elif slug.endswith("_gamma1"):
+                self.assertEqual(sum(histogram.y), 5.)
+            else:
+                self.assertEqual(sum(histogram.y), 3.)
+        title = "diphoton invariant mass"
+        variables[:, -1], variables[:, 0] = 2., [100., 125., 150.]
+        template = report.Histogram(title, 100., 150., [112.5, 137.5], [0., 0.])
+        self.assertEqual(report.response_histograms(variables, weights, {title: template})[title].y, [2., 0.])
+
+    def test_default_physical_mass_bins_close_to_the_two_published_background_rates(self):
+        from types import SimpleNamespace
+        title = "diphoton invariant mass"
+        template = report.Histogram(title, 120., 130., [122.5, 127.5], [0., 0.])
+        samples = [SimpleNamespace(name="nominal", histograms={title: template})]
+        report.append_response_samples(samples, "all")
+        expected = {"bkg_loop_gg_aa": .7390980753408, "bkg_dijet_double_fake": 3.01056023847953}
+        self.assertEqual({sample.name for sample in samples[1:]}, set(expected))
+        for sample in samples[1:]:
+            bins = report.scaled_histogram(sample.histograms[title], sample, "event_xsec", False)
+            self.assertAlmostEqual(sum(bins), expected[sample.name])
+        report.append_response_samples(samples, "all")
+        self.assertEqual(len(samples), 3)
+
+
 class ReportViewTests(unittest.TestCase):
     def campaign(self, root, background=(3., -1., 8.)):
         for name, category, values, cross_section, weight_scale in (

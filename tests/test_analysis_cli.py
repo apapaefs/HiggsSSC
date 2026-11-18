@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 import subprocess
 import sys
 import tempfile
@@ -104,10 +105,25 @@ class AnalysisCLITests(unittest.TestCase):
         for card in sorted((REPO / "hgammagamma/analysis_cards").glob("*.yaml")):
             with self.subTest(card=card.name):
                 config = analysis.load_config(card)["analysis"]
-                self.assertEqual(analysis.requested_samples(config["samples"]), set(SAMPLES))
+                higher_order = card.name.startswith("ho_")
+                expected = set(SAMPLES)
+                if higher_order:
+                    expected.update(("bkg_loop_gg_aa", "bkg_dijet_double_fake"))
+                self.assertEqual(analysis.requested_samples(config["samples"]), expected)
+                self.assertEqual(bool(config.get("ssc40_student_backgrounds")), higher_order)
                 self.assertNotIn("analysis_root", config)
                 self.assertNotIn("output_dir", config)
                 self.assertNotIn("run_tag", config)
+
+    def test_40tev_tables_cannot_be_used_with_other_beam_energies_or_profiles(self):
+        sample = SimpleNamespace(name="bkg_prompt_aa", sample_dir=self.root, requires_full_sample=True,
+                                 detector_response="ssc")
+        (self.root / "campaign.json").write_text(json.dumps({"ebeam_gev": 6500.}))
+        with self.assertRaisesRegex(ValueError, "20 TeV beams"):
+            analysis.add_student_backgrounds([sample], {"bkg_loop_gg_aa"}, {}, False)
+        sample.detector_response = "perfect"
+        with self.assertRaisesRegex(ValueError, "40 TeV SSC HO"):
+            analysis.add_student_backgrounds([sample], {"bkg_dijet_double_fake"}, {}, False)
 
     def test_help_without_site_packages(self):
         result = subprocess.run([sys.executable, "-S", str(REPO / "analyze_lo_varfiles.py"),

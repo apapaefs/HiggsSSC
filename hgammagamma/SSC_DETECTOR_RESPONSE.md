@@ -131,6 +131,58 @@ is a mixture controlled by `--unmatched-jet-quark-fraction`, whose conservative
 default is 1.0. The `.dat` counters distinguish geometric matching, hard-record
 fallback, and unknown flavor.
 
+## Dijet double-fake bounds
+
+The separate dijet diagnostic uses every unordered pair of EM-smeared HwSim
+jets satisfying the photon kinematic acceptance. The cut analysis counts
+pairs with mass in 120–130 GeV. Supply `--frozen-dir` to either evaluator
+to apply the saved diphoton classifier as a second selection across the
+full accepted mass range. Use the [classifier bundle](frozen_gammagamma_classifier.py)
+for verification against the saved nominal scores. Each selection measures
+the following quantities at fake-rate scale factors 0.5, 1 and 2.
+
+- the independent-fake contribution from events with exactly two eligible jets;
+- the sum of independent pair probabilities using geometric hard-parton
+  matches and the quark rate for unmatched jets;
+- the same sum using the quark rate for both jets;
+- the sum of the maximum joint probabilities allowed by the two quark-rate
+  marginals, allowing arbitrary correlation within each pair;
+- a lower envelope using only the events with exactly two eligible jets and
+  the gluon probability for both.
+
+For each sum over all pairs the event probability is bounded by the pair
+sum capped at one. This union bound also covers events with more than two
+eligible jets. The two-eligible-jet contribution is a subset of the
+independent-fake estimate. For independent fakes and per-jet rates between the
+GEM gluon and quark values, the all-gluon two-jet contribution and the
+all-quark pair sum bracket the selected event rate in the simulated sample.
+Unrestricted correlations allow a zero lower endpoint. The analysis groups pairs by showered event before
+forming MC errors. No extra photon ID or isolation efficiency enters these
+probabilities. The inputs describe a transfer of GEM gamma+jet fake rates
+to QCD dijets. A fake photon takes the jet direction and its EM-smeared jet
+energy. GEM's single-jet fake probability supplies no distribution for the
+fraction of that energy carried by the isolated EM cluster. This assumption
+affects both the pair mass and its classifier score.
+
+The source generator [run_dijet_bound.py](run_dijet_bound.py) produces one
+Born-transverse-momentum bin of five-flavour LO QCD, checks the bin on every
+hard event, and audits the finite shower. [evaluate_dijet_bound.py](evaluate_dijet_bound.py)
+combines adjacent bins using each native cross section and its full hard-event
+population. The calculated envelopes apply within those generated bins. Bins
+with zero contributing MC events need additional sampling to constrain their
+rates. The calculation does not extrapolate below the lowest generated scale.
+
+[reshower_dijet_no_mpi.py](reshower_dijet_no_mpi.py) repeats each verified
+hard source with the MPI handler disabled as a shower variation. A separate
+inclusive-event check uses the installed Herwig minimum-bias example with
+diffraction, the collider energy set to 40 TeV and the same HwSim jet
+reconstruction and EM response. [evaluate_dijet_minbias.py](evaluate_dijet_minbias.py)
+normalizes each unit-weight minimum-bias sample with its generated-event
+cross section and measures the MC error between independently seeded runs.
+Use the all-quark envelope when the flavour of jets from additional scatters
+is unknown. These are alternate descriptions of the same inelastic events;
+the three predictions must be compared individually.
+
 ## Electron-To-Photon Fakes
 
 The `dielectron` topology promotes an isolated reconstructed electron and
@@ -270,7 +322,7 @@ are recorded in [VALIDATION.md](../VALIDATION.md).
 - The offline jet efficiency is fixed to an assumed 100% by default.
 - `gammajet` selects one hard fake candidate rather than summing over every
   shower jet as an independent fake source.
-- There is no `dijet` double-fake response mode yet.
+- The dijet study models double fakes in the mass window and after the frozen classifier.
 - Isolation is a simple `DeltaR` veto against reconstructed jets, not the full
   GEM shower-shape, calorimeter, tracker, and underlying-event procedure.
 - Object-ID probabilities are independent; correlated efficiencies and

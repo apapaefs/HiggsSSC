@@ -1328,7 +1328,7 @@ def _normalization(
     sample: ManifestSample, generated: WeightStats, selected: WeightStats, audit: Audit
 ) -> dict[str, Any]:
     manifest_normalization = nested_mapping(sample.raw, "normalization")
-    if sample.raw.get("order") == "ho":
+    if sample.raw.get("order") == "ho" or "shower_completion" in sample.raw:
         try:
             saved = _validated_shower_completion(sample, verify_files=True)
             if generated.entries != saved["saved_events"]:
@@ -1812,7 +1812,7 @@ def detector_provenance_audit(
     events_expected = events_requested
     events_expected_source = "manifest nevents_requested"
     shower = None
-    if sample.raw.get("order") == "ho":
+    if sample.raw.get("order") == "ho" or "shower_completion" in sample.raw:
         try:
             # A finite matched shower can discard events. Its validated saved
             # population defines the analyzer input; signed source weights still
@@ -2219,7 +2219,10 @@ def aggregate_mass_spectra(samples: Sequence[Mapping[str, Any]]) -> list[dict[st
         category = str(sample["category"])
         for channel, channel_data in sample["channels"].items():
             spectrum = channel_data["mass_spectrum"]
-            if not any(bin_value["source_events"] for bin_value in spectrum["bins"]):
+            has_selected = any(b["source_events"] for b in spectrum["bins"])
+            measured_channel = (category == "reducible" and channel in ("4e", "4mu", "2e2mu")
+                                and any(row.get("entries", 0) for row in channel_data.get("cutflow", [])))
+            if not (has_selected or measured_channel):
                 continue
             key = (profile, channel, category)
             group = groups.get(key)
@@ -2236,6 +2239,7 @@ def aggregate_mass_spectra(samples: Sequence[Mapping[str, Any]]) -> list[dict[st
                             "type": bin_value["type"],
                             "low_gev": bin_value["low_gev"],
                             "high_gev": bin_value["high_gev"],
+                            "source_events": 0,
                             "cross_section_pb": 0.0,
                             "cross_section_sumw2_pb2": 0.0,
                             "events": 0.0,
@@ -2252,7 +2256,10 @@ def aggregate_mass_spectra(samples: Sequence[Mapping[str, Any]]) -> list[dict[st
             ):
                 raise ValueError(f"incompatible mass binning in aggregate group {key}")
             group["samples"].append(sample["name"])
+            if category == "reducible":
+                group.setdefault("components", {})[sample["name"]] = spectrum
             for target, source in zip(group["bins"], spectrum["bins"]):
+                target["source_events"] += source["source_events"]
                 if source["cross_section_pb"] is None:
                     target["normalization_available"] = False
                     target["cross_section_pb"] = None
@@ -2782,6 +2789,8 @@ def spectrum_plot_values(spectrum: Mapping[str, Any], *, density: bool = False) 
 def _spectrum_svg(spectrum: Mapping[str, Any], *, density: bool = False) -> str:
     numeric = spectrum_plot_values(spectrum, density=density)
     if numeric is None:
+        if density and all(b.get("source_events") == 0 for b in spectrum["bins"]):
+            return '<p class="note">Zero selected events. A unit-area shape is undefined.</p>'
         message = (
             "Unit-area shape unavailable: finite physical bin weights and a positive signed "
             "sum within the displayed mass range are required."
@@ -2974,6 +2983,17 @@ def render_html(report: Mapping[str, Any]) -> str:
                 f'<p class="note">Physical yield at {metadata["luminosity_fb"]:g} fb<sup>&minus;1</sup>.</p>'
                 f'{_spectrum_svg(spectrum)}</div>'
             )
+        components = []
+        for process, distribution in spectrum.get("components", {}).items():
+            views = []
+            if plot_mode in ("both", "density"):
+                views.append(_spectrum_svg(distribution, density=True))
+            if plot_mode in ("both", "counts"):
+                views.append(_spectrum_svg(distribution))
+            has_selected = any(b["source_events"] for b in distribution["bins"])
+            label = process if has_selected else f"{process} (0 selected)"
+            components.append(f'<details><summary>{html.escape(label)}</summary>'
+                              f'<div class="spectrum-views paired">{"".join(views)}</div></details>')
         spectrum_sections.append(
             f'<details class="spectrum-section" open><summary>{html.escape(heading)}</summary>'
             f'<div class="spectrum-views{" paired" if plot_mode == "both" else ""}">'
@@ -2983,7 +3003,8 @@ def render_html(report: Mapping[str, Any]) -> str:
             f"overflow: {_format_number(overflow['events'])} events. "
             f"Nominal bin width: {spectrum['bin_width_gev']:g} GeV; the final bin ends at the mass-range boundary. "
             "Underflow and overflow are excluded from the unit-area shape. "
-            "Physical bin yields and their statistical variances are in report.json.</p></details>"
+            "Physical bin yields and their statistical variances are in report.json.</p>"
+            + "".join(components) + "</details>"
         )
     comparison_rows = "".join(
         "<tr>"
@@ -3174,6 +3195,7 @@ def generate_report(
     allow_unvalidated_bias: bool = False,
     plot_mode: str = "both",
     observables: bool = False,
+    published_defaults: bool = False,
 ) -> dict[str, Any]:
     if plot_mode not in PLOT_MODES:
         raise ValueError(f"unknown plot mode {plot_mode!r}; choose from {', '.join(PLOT_MODES)}")
@@ -3204,6 +3226,10 @@ def generate_report(
         global_audit.extend(bundle.audit, prefix=f"{bundle.path.name}: ")
         if bundle.cut_stages != stages:
             global_audit.errors.append(f"{bundle.path}: cut-stage definition differs")
+        from hfourlepton import pooled_controls
+        controls = pooled_controls.load(bundle.path, stages, published_defaults=published_defaults)
+        if {s.name for s in bundle.samples}.intersection(s["name"] for s, _, _ in controls):
+            raise ValueError("a pooled background overlaps the campaign samples")
         for sample in bundle.samples:
             print(f"Reporting {sample.detector_profile}/{sample.name}", flush=True)
             if sample.output_root is None:
@@ -3238,6 +3264,14 @@ def generate_report(
                 global_audit.errors.append(f"{sample.name}: {message}")
             for message in result["audit"]["warnings"]:
                 global_audit.warnings.append(f"{sample.name}: {message}")
+
+        for compact, compact_path, checksum in controls:
+            result = pooled_controls.sample_report(compact, compact_path, stages, luminosity_fb,
+                signal_region_gev, closure_tolerance, mass_range_gev, mass_bin_width_gev, observables)
+            result["pooled_input_sha256"] = checksum
+            sample_reports.append(result)
+            global_audit.errors.extend(f"{result['name']}: {message}" for message in result["audit"]["errors"])
+            global_audit.warnings.extend(f"{result['name']}: {message}" for message in result["audit"]["warnings"])
 
     profiles = {sample["detector_profile"] for sample in sample_reports}
     if None in profiles:
@@ -3335,6 +3369,8 @@ def positive_float(value: str) -> float:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--ssc40-backgrounds", action="store_true",
+                        help="Include the published SSC heavy-flavour samples for a compatible 40 TeV campaign.")
     parser.add_argument("--observables", action="store_true",
                         help="Export paired shape/yield plots and PDF/SVG/CSV for 17 selected-lepton observables.")
     parser.add_argument(
@@ -3418,6 +3454,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         allow_unvalidated_bias=args.allow_unvalidated_bias,
         plot_mode=args.plot_mode,
         observables=args.observables,
+        published_defaults=args.ssc40_backgrounds,
     )
     print(f"Report JSON: {args.output_dir / 'report.json'}")
     print(f"Report HTML: {args.output_dir / 'index.html'}")

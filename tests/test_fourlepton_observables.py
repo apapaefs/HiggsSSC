@@ -2,6 +2,7 @@ from copy import deepcopy
 import csv
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -86,6 +87,35 @@ class ObservableTests(unittest.TestCase):
                             r["region"] == "selected" and r["channel"] == "inclusive"]
                 self.assertAlmostEqual(sum(float(r["events"]) for r in selected), 90.)
                 self.assertIn("Unit-area shapes", (Path(directory) / "index.html").read_text())
+
+    def test_zero_backgrounds_have_yields_and_legends_without_inventing_a_shape(self):
+        from hfourlepton import analyze_fourlepton as analysis
+        from hfourlepton import make_fourlepton_report as report
+        spec = obs.Observable("m4l", "Mass", "m4l", 100., 150., 5)
+        empty = report.mass_spectrum([], {"scale_pb_per_weight": .01}, 100.)
+        names = ["signal_gg_h_4e", "bkg_qq_4e", *obs.REDUCIBLE_COMPONENTS]
+        cats = ["signal", "irreducible", "reducible", "reducible", "reducible"]
+        rows = [self.row(1, 124., 1.)]
+        with patch.object(obs, "OBSERVABLES", (spec,)), TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            samples = [dict(name=n, category=c, detector_profile="ssc", included_in_physics_totals=True,
+                            observables=obs.sample_observables(rows if i < 2 else [],
+                                {"scale_pb_per_weight": .01}, (120., 130.))) for i, (n, c) in enumerate(zip(names, cats))]
+            obs.render(dict(metadata=dict(luminosity_fb=100., sqrt_s_tev=40., signal_region_gev=[120., 130.]),
+                            samples=samples, audit={"errors": []}), out)
+            data = dict(eligible=np.ones(2, bool), baseline=np.ones(2, bool), label=np.array([1, 0]),
+                        weight=np.array([.1, .2]), sample=np.array(names[:2]), m4l=np.array([124., 125.]))
+            analysis.write_plots(data, data["weight"], data["eligible"], out, samples, scores=np.array([.9, .6]),
+                                 split=SimpleNamespace(partitions=np.array(["train", "test"])), threshold=.8, importance={})
+            for name in ("plots/ssc_signal_region_m4l.svg", "mass.svg", "scores.svg"):
+                svg = (out / name).read_text()
+                for label in obs.REDUCIBLE_COMPONENTS.values():
+                    self.assertIn(label, svg)
+            channel = dict(mass_spectrum=empty, cutflow=[dict(entries=4)])
+            groups = report.aggregate_mass_spectra([dict(s, channels={"4e": channel}) for s in samples[2:]])
+            self.assertEqual(set(groups[0]["components"]), set(names[2:]))
+            self.assertFalse(any(report.spectrum_plot_values(groups[0])))
+            self.assertIn("Zero selected events", report._spectrum_svg(empty, density=True))
 
 
 if __name__ == "__main__":
