@@ -1,5 +1,63 @@
 # Higgs to four leptons at the 40 TeV SSC
 
+## Access the generated events
+
+**On Timur**, run the following from the root of your HiggsSSC checkout to
+analyze all 30 prepared samples without copying or regenerating events.
+
+```bash
+git pull --ff-only
+python3 student_events.py attach
+python3 student_events.py check
+```
+
+`check` should report `Ready: 30 samples`. In your checkout,
+`hfourlepton/student_runs/ssc40-20261118/events/` links to the read-only
+release at `/home/shared/HiggsSSC/fourlepton/ssc40-20261118/`. You get your
+own analysis cards and results directory. [Run the cuts, XGBoost and plots](../README.md#four-leptons)
+
+- For the 27 signal and continuum samples, use `nominal/events/<sample>/`
+  for the LHE and HwSim shower files, and `nominal/analysis/<profile>/<sample>/`
+  for the reconstructed ROOT trees. The detector profiles are `ssc` and `perfect`.
+- The three added backgrounds are Z/γ* + bb̄ with an electron pair
+  (`bkg_zbb_ee`), Z/γ* + bb̄ with a muon pair (`bkg_zbb_mumu`), and
+  dileptonic tt̄ (`bkg_ttbar`). Each has one million hard events in 100 partitions,
+  numbered `00000` through `00099`. Under `controls/<sample>/<partition>/raw/`,
+  `events/<sample>/` holds the LHE and shower files, and
+  `analysis/<profile>/<sample>/` holds the reconstructed ROOT trees.
+
+### Download event files to your own computer
+
+Run `rsync` **on your own computer**, replacing `YOUR_USERNAME` with your
+Timur username. Set `release` once, then choose the files you want.
+
+```bash
+release=YOUR_USERNAME@timur.kennesaw.edu:/home/shared/HiggsSSC/fourlepton/ssc40-20261118
+
+# 10,000 hard events from the dileptonic tt̄ sample (11 MB, compressed LHE)
+rsync -rt --partial --chmod=u+rwX \
+  "$release/controls/bkg_ttbar/00000/raw/events/bkg_ttbar/part-00000.lhe.gz" ./
+
+# Reconstructed SSC events for the gg → 4e continuum (91 MB, ROOT)
+rsync -rt --partial --chmod=u+rwX "$release/nominal/analysis/ssc/bkg_gg_4e/*.root" ./
+```
+
+For **all 30 samples**, allow about **323 GB**. The 18 November release links
+to the original 27 samples in the 12 November release. This command downloads
+both directories side by side and preserves those links. Rerun it if the
+transfer is interrupted.
+
+```bash
+rsync -rlt --partial --chmod=u+rwX \
+  --include='/ssc40-20261112/' --include='/ssc40-20261118/' --exclude='/*' \
+  YOUR_USERNAME@timur.kennesaw.edu:/home/shared/HiggsSSC/fourlepton/ \
+  ./fourlepton-events/
+```
+
+Open the downloaded ROOT or LHE files directly for local studies. Run the
+standard `student_events.py` analyses on Timur because the published manifests
+use absolute paths on its shared disk. [Shared event file layout](SHARED_EVENTS.md)
+
 ## Download the finished four-lepton results
 
 The **18 November 2026** release contains the instructor's 40 TeV results at
@@ -33,11 +91,6 @@ The three added samples are Z/γ* + bb̄ with an e⁺e⁻ pair (`bkg_zbb_ee`),
 Z/γ* + bb̄ with a μ⁺μ⁻ pair (`bkg_zbb_mumu`), and dileptonic tt̄
 (`bkg_ttbar`). The detector report shows their cutflows. All three have zero
 simulated yield in the 120–130 GeV SSC mass window.
-
-To change the cuts or train your own classifier, run `git pull --ff-only` from
-the root of your HiggsSSC checkout on Timur, then `python3 student_events.py attach`
-to use the prepared events. [Student run instructions](../README.md#four-leptons) ·
-[Shared event files](SHARED_EVENTS.md)
 
 ## Analysis workflows
 
