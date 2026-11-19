@@ -1,10 +1,45 @@
 # Higgs to four leptons at the 40 TeV SSC
 
-For the completed instructor dataset on Timur, start with
-[`student_events.py attach`](../README.md#four-leptons).
-Students can run plots, cuts and XGBoost from the shared events with no event
-generation. See [shared data and publication](SHARED_EVENTS.md) for the file
-layout and provenance.
+## Download the finished four-lepton results
+
+The **18 November 2026** release contains the instructor's 40 TeV results at
+100 fb⁻¹. You can view the finished plots and tables with a Timur login and
+`rsync`. Run this command **on your own computer**, replacing `YOUR_USERNAME`
+with your Timur username. It downloads the HTML pages, figures and tables
+(about 174 MiB) for offline viewing.
+
+```bash
+rsync -rt --chmod=u+rwX \
+  YOUR_USERNAME@timur.kennesaw.edu:/home/shared/HiggsSSC/student-results/ssc40-20261118/fourlepton/ \
+  ./fourlepton-results-20261118/
+```
+
+If you are **already logged in to Timur**, use this command to make a copy in
+your current directory on Timur.
+
+```bash
+rsync -rt --chmod=u+rwX \
+  /home/shared/HiggsSSC/student-results/ssc40-20261118/fourlepton/ \
+  ./fourlepton-results-20261118/
+```
+
+Open `fourlepton-results-20261118/index.html` in a browser. It links to the
+cutflows and 17 observables for both detector responses (`report_both/`), the
+SSC cut analysis (`cuts_ssc/`) and the SSC classifier (`xgboost_ssc/`).
+
+Both `cuts_ssc/summary.csv` and `xgboost_ssc/summary.csv` list all 30 samples.
+The backgrounds include the quark- and gluon-initiated four-lepton continua.
+The three added samples are Z/γ* + bb̄ with an e⁺e⁻ pair (`bkg_zbb_ee`),
+Z/γ* + bb̄ with a μ⁺μ⁻ pair (`bkg_zbb_mumu`), and dileptonic tt̄
+(`bkg_ttbar`). The detector report shows their cutflows. All three have zero
+simulated yield in the 120–130 GeV SSC mass window.
+
+To change the cuts or train your own classifier, run `git pull --ff-only` from
+the root of your HiggsSSC checkout on Timur, then `python3 student_events.py attach`
+to use the prepared events. [Student run instructions](../README.md#four-leptons) ·
+[Shared event files](SHARED_EVENTS.md)
+
+## Analysis workflows
 
 This directory contains LO and higher-order workflows for
 
