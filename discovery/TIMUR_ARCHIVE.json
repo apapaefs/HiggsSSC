@@ -1,0 +1,52 @@
+{
+  "release": "ssc40-discovery-20261123",
+  "shared_directory": "/home/shared/HiggsSSC/student-results/ssc40-discovery-20261123",
+  "analysis_commit": "d7f8a24eda518e13f95a551776be1292dc467609",
+  "source_files_sha256": "f268e4699a1a89c2dfa361549e7f39de4f4c3e347a793f875310129a4df9e580",
+  "generator_details_tar_gz_sha256": "3f1758e0f3ef25928e7a61d5db4bbbc8404bec5212269451c2ab9b8943412daf",
+  "portable_spectra_tar_gz_sha256": "08d120fa03420bf6aa04590f54a7e8ca72d730233db8352b581941115fc85c91",
+  "source_files": 161457,
+  "logical_source_bytes": 42022473866,
+  "by_source_directory": {
+    "sideband_20pct_20261120": {
+      "files": 137853,
+      "bytes": 35519739362,
+      "dijet_pair_tables": 4841,
+      "analysis_root_trees": 22242,
+      "compressed_lhe_files": 561
+    },
+    "sideband_campaign_20261119": {
+      "files": 6866,
+      "bytes": 227507474,
+      "dijet_pair_tables": 923,
+      "analysis_root_trees": 8,
+      "compressed_lhe_files": 16
+    },
+    "sideband-20261119": {
+      "files": 16597,
+      "bytes": 3095435166,
+      "compressed_lhe_files": 39,
+      "analysis_root_trees": 3220
+    },
+    "earlier_ho": {
+      "files": 141,
+      "bytes": 3179791864,
+      "analysis_root_trees": 3,
+      "compressed_lhe_files": 4
+    }
+  },
+  "timur_replay_versions": {
+    "python": "3.9.25",
+    "numpy": "2.0.2",
+    "scipy": "1.13.1",
+    "matplotlib": "3.9.4"
+  },
+  "public_checkout_replay_versions": {
+    "python": "3.14.7",
+    "numpy": "2.5.5",
+    "scipy": "1.18.1",
+    "matplotlib": "3.11.2"
+  },
+  "fit_release_commit": "e4a285ac3b1480de7e6f9d99769e66666855986d",
+  "fourlepton_spectrum_sha256": "7d1a9df590004d5fbd21e4ca4850d9d293e5529a1a930a8f391c2c69b23f8d06"
+}

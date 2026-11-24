@@ -24,7 +24,9 @@ The replay verifies each packet against the original fit manifest and checks bot
 
 ## Event-level data on Timur
 
-The release lives at `/home/shared/HiggsSSC/student-results/ssc40-discovery-20261123`. Students can read the snapshots and write results into their own checkouts. The older channel event sets remain the starting point for per-object plots, cuts and classifier training. The discovery mass spectrum additionally pools the large background campaign. [Channel setup and student commands](../README.md#analyze-the-prepared-40-tev-events-on-timur)
+The release lives at `/home/shared/HiggsSSC/student-results/ssc40-discovery-20261123`. It contains 161,457 source files (42.02 GB). The Git copy of the archive index pins the source manifest and generator supplement by SHA-256. The source audit checked all 696 final packets, and rebuilding the portable bundle from the student share reproduced its original bytes. [Timur archive index](TIMUR_ARCHIVE.json)
+
+Students can read the snapshots and write results into their own checkouts. The older channel event sets remain the starting point for per-object plots, cuts and classifier training. The discovery mass spectrum additionally pools the large background campaign. [Channel setup and student commands](../README.md#analyze-the-prepared-40-tev-events-on-timur)
 
 | Path | Contents |
 | --- | --- |
