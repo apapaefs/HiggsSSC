@@ -16,7 +16,7 @@ if __name__ == "__main__":
 import numpy as np
 from scipy.stats import chi2, norm
 
-from input_data import BACKGROUNDS, DATA, SCENARIOS, SIGNAL, fourlepton_rates, load_archive, pool
+from input_data import BACKGROUNDS, DATA, SCENARIOS, SIGNAL, fourlepton_rates, fourlepton_spectrum, load_archive, pool
 from likelihood import ALL, BLIND, EDGES, MODELS, Calibration, Shape, crossing, fourlepton_median, joint_power
 
 
@@ -123,7 +123,8 @@ def analyze():
                   signal_normalization_check=signal_check, gem_table18=gem)
     if result["target_met"] != reference["precision_target"]["achieved"]:
         raise ValueError("Campaign precision decision changed")
-    return result, spectra
+    four_spectrum = fourlepton_spectrum(records["records/extended_fourlepton.json"], records["records/reducible_bound.json"])
+    return result, spectra, four_spectrum
 
 
 def write_csv(path, rows):
@@ -137,14 +138,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path("results/discovery-ssc40"))
     out = parser.parse_args().output
-    from plots import plot_reach, plot_spectrum
-    results, spectra = analyze()
+    from plots import plot_fourlepton, plot_reach, plot_spectrum
+    results, spectra, four_spectrum = analyze()
     out.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=out) as directory:
         temp = Path(directory)
         (temp / "results.json").write_text(json.dumps(results, indent=2, allow_nan=False) + "\n")
         write_csv(temp / "reach.csv", results["reach"])
         write_csv(temp / "mass_spectrum.csv", [dict(zip(spectra, row)) for row in zip(*spectra.values())])
+        write_csv(temp / "fourlepton_mass_spectrum.csv", [dict(zip(four_spectrum, row)) for row in zip(*four_spectrum.values())])
+        plot_fourlepton(four_spectrum, temp)
         plot_spectrum(spectra, temp)
         plot_reach(results["reach"], results["gem_table18"], temp)
         for path in temp.iterdir():

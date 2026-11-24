@@ -114,3 +114,32 @@ def plot_reach(rows, gem, out):
     ax.legend(loc="upper right", frameon=False, fontsize=9)
     fig.suptitle("Inclusive diphoton discovery projections", fontsize=16, x=.02, ha="left", color=INK, weight="bold")
     save(fig, out, "gem-diphoton")
+
+
+def plot_fourlepton(data, out):
+    fig, axes = plt.subplots(1, 2, figsize=(9.2, 4.1), sharex=True, layout="constrained")
+    edges = np.r_[data["low_gev"], data["high_gev"][-1]]
+    mids = (edges[:-1] + edges[1:]) / 2
+    for ax in axes:
+        style(ax)
+        ax.set_xlim(120, 130)
+        ax.set_xticks([120, 122, 124, 126, 128, 130])
+        ax.set_xlabel(r"Reconstructed $m_{4\ell}$ [GeV]")
+    signal = data["signal_fb"]
+    axes[0].stairs(signal, edges, color=BLUE, lw=2, fill=True, alpha=.75)
+    axes[0].errorbar(mids, signal, yerr=data["signal_mc_sigma_fb"], fmt=".", color=INK, lw=1)
+    axes[0].set_ylabel("Cross section [fb / GeV]")
+    axes[0].set_title("Higgs signal", loc="left", color=INK)
+    qq, gg = data["qq_continuum_fb"], data["gg_continuum_fb"]
+    axes[1].stairs(qq, edges, fill=True, color=COLORS[0], label=r"$q\bar q$ continuum")
+    axes[1].stairs(qq + gg, edges, baseline=qq, fill=True, color=COLORS[1], label=r"$gg$ continuum")
+    sigma = np.hypot(data["qq_continuum_mc_sigma_fb"], data["gg_continuum_mc_sigma_fb"])
+    axes[1].errorbar(mids, qq + gg, yerr=sigma, fmt=".", color=INK, lw=1, label="Total MC error")
+    axes[1].set_ylim(0, 1.55 * np.max(qq + gg + sigma))
+    axes[1].set_title("Backgrounds", loc="left", color=INK)
+    axes[1].text(.035, .96, r"$Zb\bar b$, $t\bar t$" + "\n0 selected", transform=axes[1].transAxes,
+                 va="top", color=INK, fontsize=9)
+    axes[1].legend(frameon=False, loc="upper right", fontsize=8.5)
+    fig.suptitle("Four-lepton mass after the frozen classifier selection", x=.02,
+                 ha="left", fontsize=17, color=INK, weight="bold")
+    save(fig, out, "fourlepton-spectrum")

@@ -16,6 +16,7 @@ On Linux, `sha256sum -c SHA256SUMS` also works. The published inputs and fit are
 | [spectra.tar.gz](data/spectra.tar.gz) | Seven reference spectra (six processes with the loop in two Born regions), 51 earlier packets and 696 final packets. Each packet includes its independent source identifier, bin rates in fb, full 55 × 55 covariance in fb² and event exposure. An internal SHA-256 manifest covers every member. |
 | `records/` inside the spectrum archive | Original final fit and reach, extended four-lepton test, zero-count heavy-flavour input record and the iHixs normalization. Some historical records identify generator paths in the production account. The portable refit reads the archive members directly. |
 | [production-sources.tar.gz](data/production-sources.tar.gz) | Frozen site-specific production and extraction scripts, detector source, example cards, seed settings, the fit used during the campaign, and the earlier baseline and four-lepton analysis recipes. Use the student command for the portable calculation. |
+| [Four-lepton mass inputs](data/fourlepton-spectrum.json) | Per-process bins and source covariances projected from the frozen original and extended scores. The output CSV includes the three heavy-flavour processes with zero central rate. |
 | [GEM table excerpt](data/gem-table18.csv) | The two neighboring mass points from Table 18. The plotting code converts each quoted significance to a 5σ luminosity at its own mass. |
 | [Published outputs](published/) | PNG and PDF figures, CSV tables and the JSON result. The CSV mass-spectrum entries are fb per one-GeV bin. `background_mc_sigma_fb` describes the total simulated background per bin. `residual_mc_sigma_fb` includes its correlation with the fitted sidebands. Full covariance matrices are in the input packets. |
 
@@ -51,6 +52,15 @@ python discovery/build_inputs.py "$release/sources/sideband_20pct_20261120" \
   "$release/records" results/discovery-rebuild/spectra.tar.gz
 cmp discovery/data/spectra.tar.gz results/discovery-rebuild/spectra.tar.gz
 ```
+
+The selected four-lepton mass histogram can also be rebuilt from the original and additional student score files. The projection checks the integrated rate and signed source variance for each of the 27 signal and continuum samples against the frozen extended-test summary.
+
+```bash
+python discovery/prepare_fourlepton.py /home/shared/HiggsSSC/fourlepton/ssc40-20261112/reference \
+  > results/discovery-rebuild/fourlepton-spectrum.json
+```
+
+The clean HTTPS checkout was tested with Python 3.14.7, NumPy 2.5.5, SciPy 1.18.1 and Matplotlib 3.11.2. The independent Timur replay used Python 3.9.25, NumPy 2.0.2, SciPy 1.13.1 and Matplotlib 3.9.4.
 
 ### From generated events to spectra
 

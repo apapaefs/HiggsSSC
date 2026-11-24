@@ -20,9 +20,10 @@ SCENARIOS = {"central": "observed_heavy_flavour", "upper": "upper_heavy_flavour"
 
 def load_archive():
     path = DATA / "spectra.tar.gz"
-    expected = (DATA / "SHA256SUMS").read_text().split()[0]
-    if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
-        raise ValueError("Input archive checksum mismatch")
+    for line in (DATA / "SHA256SUMS").read_text().splitlines():
+        expected, filename = line.split()
+        if hashlib.sha256((DATA / filename).read_bytes()).hexdigest() != expected:
+            raise ValueError(f"Input checksum mismatch for {filename}")
     with tarfile.open(path) as tar:
         names = tar.getnames()
         manifest = json.load(tar.extractfile("manifest.json"))
@@ -137,3 +138,31 @@ def fourlepton_rates(extended, reducible):
     upper = brentq(lambda rate: log_zero(rate) - math.log(.05), 0.,
                    -math.log(.05) / ordered[0]["mc_exposure_fb_inverse"])
     return signal, {"central": central, "upper": central + upper}
+
+
+def fourlepton_spectrum(extended, reducible):
+    shape = json.loads((DATA / "fourlepton-spectrum.json").read_text())
+    if shape["threshold"] != extended["threshold"]:
+        raise ValueError("Frozen four-lepton thresholds differ")
+    edges = np.asarray(shape["edges_gev"])
+    bins = {"low_gev": edges[:-1], "high_gev": edges[1:]}
+    groups = {"signal_fb": "signal_", "qq_continuum_fb": "bkg_qq_", "gg_continuum_fb": "bkg_gg_"}
+    expected = {row["sample"]: row for row in extended["extended_test"]["samples"]}
+    if set(expected) != set(shape["samples"]):
+        raise ValueError("Missing four-lepton score sample")
+    for column, prefix in groups.items():
+        rates = np.zeros(len(edges) - 1)
+        covariance = np.zeros((len(rates), len(rates)))
+        for name, item in shape["samples"].items():
+            if name.startswith(prefix):
+                if not np.isclose(sum(item["rate_fb"]), expected[name]["sum_weight"] / 100):
+                    raise ValueError(f"Four-lepton spectrum integral differs for {name}")
+                rates += item["rate_fb"]
+                covariance += item["covariance_fb2"]
+        bins[column] = rates
+        bins[column[:-3] + "_mc_sigma_fb"] = np.sqrt(covariance.diagonal())
+    for row in reducible["old_zero_count_inputs"]:
+        if row["selected_positive_response_events"] != 0:
+            raise ValueError("Nonzero heavy-flavour response requires a measured shape")
+        bins[row["sample"] + "_fb"] = np.zeros(len(edges) - 1)
+    return bins
