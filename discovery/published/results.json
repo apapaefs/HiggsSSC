@@ -1,0 +1,277 @@
+{
+  "energy_tev": 40,
+  "higgs_mass_gev": 125,
+  "design_fb_inverse_per_year": 10,
+  "target_met": true,
+  "campaign_fit_sha256": "0e118f60f9ef74abde08db9a07792ab93cf4a1c532160d53b3c73a6e484016e4",
+  "final_campaign_utc": "2026-11-23T23:29:28.379345+00:00",
+  "prior_packets": 51,
+  "final_packets": 696,
+  "total_generated_by_stratum": {
+    "bkg_dy_ee/full": 100000,
+    "bkg_gamma_j/full": 50935000,
+    "bkg_prompt_aa/full": 81740000,
+    "signal_gg_h_aa/full": 100000,
+    "bkg_dijet_double_fake/full": 286920000,
+    "bkg_loop_gg_aa/broad_outside": 124000,
+    "bkg_loop_gg_aa/focused_inside": 421000
+  },
+  "final_campaign_generated_by_stratum": {
+    "bkg_dijet_double_fake/full": 240000000,
+    "bkg_loop_gg_aa/broad_outside": 104000,
+    "bkg_loop_gg_aa/focused_inside": 352000,
+    "bkg_gamma_j/full": 42585000,
+    "bkg_prompt_aa/full": 68340000
+  },
+  "closure": {
+    "window_chi2": 6.272514376069187,
+    "window_dof": 10,
+    "window_p": 0.7918716760605279,
+    "spurious_two_sided_p": 0.30926856476881814
+  },
+  "models": {
+    "exponential2": {
+      "spurious_mu": -0.08248357375175504,
+      "sigma_mu": 0.08112409583051845,
+      "variance_by_sample": {
+        "bkg_prompt_aa": 0.001873594558763372,
+        "bkg_loop_gg_aa": 0.0010160395045700895,
+        "bkg_gamma_j": 0.0021171426164459796,
+        "bkg_dijet_double_fake": 0.001573598683321455,
+        "bkg_dy_ee": 7.435612182444008e-07
+      },
+      "luminosity_penalty_percent": 19.796301176208118
+    },
+    "power2": {
+      "spurious_mu": -0.07127324371569801,
+      "sigma_mu": 0.08093004173563859,
+      "variance_by_sample": {
+        "bkg_prompt_aa": 0.0018897297829066936,
+        "bkg_loop_gg_aa": 0.0009350798774767461,
+        "bkg_gamma_j": 0.0021363302109287967,
+        "bkg_dijet_double_fake": 0.001587776258609036,
+        "bkg_dy_ee": 7.555254109320299e-07
+      },
+      "luminosity_penalty_percent": 19.75178596649898
+    },
+    "exponential3": {
+      "spurious_mu": -0.08108486168436813,
+      "sigma_mu": 0.07817421188156999,
+      "variance_by_sample": {
+        "bkg_prompt_aa": 0.0019329397137505101,
+        "bkg_loop_gg_aa": 0.0003597673338980368,
+        "bkg_gamma_j": 0.0021902922938323356,
+        "bkg_dijet_double_fake": 0.0016274065370560826,
+        "bkg_dy_ee": 8.015247676340607e-07
+      },
+      "luminosity_penalty_percent": 18.073938949773584
+    }
+  },
+  "fourlepton": {
+    "central": {
+      "signal_fb": 1.6685373865023225,
+      "background_fb": 0.12569246670743067,
+      "critical_count": 8
+    },
+    "upper": {
+      "signal_fb": 1.6685373865023225,
+      "background_fb": 0.6712671044239029,
+      "critical_count": 24
+    }
+  },
+  "reach": [
+    {
+      "model": "exact_poisson",
+      "treatment": "count",
+      "channel": "fourlepton",
+      "heavy_flavour": "central",
+      "luminosity_fb_inverse": 4.274396298100295,
+      "design_months": 5.129275557720353
+    },
+    {
+      "model": "exact_poisson",
+      "treatment": "count",
+      "channel": "fourlepton",
+      "heavy_flavour": "upper",
+      "luminosity_fb_inverse": 10.11516234241323,
+      "design_months": 12.138194810895877
+    },
+    {
+      "model": "exponential2",
+      "treatment": "smooth",
+      "channel": "diphoton",
+      "heavy_flavour": "both",
+      "luminosity_fb_inverse": 3.013476834972246,
+      "design_months": 3.6161722019666955
+    },
+    {
+      "model": "exponential2",
+      "treatment": "smooth",
+      "channel": "combined",
+      "heavy_flavour": "central",
+      "luminosity_fb_inverse": 1.7358876767457403,
+      "design_months": 2.0830652120948883
+    },
+    {
+      "model": "exponential2",
+      "treatment": "smooth",
+      "channel": "combined",
+      "heavy_flavour": "upper",
+      "luminosity_fb_inverse": 2.31681053189492,
+      "design_months": 2.7801726382739043
+    },
+    {
+      "model": "exponential2",
+      "treatment": "calibrated",
+      "channel": "diphoton",
+      "heavy_flavour": "both",
+      "luminosity_fb_inverse": 3.610033785098616,
+      "design_months": 4.33204054211834
+    },
+    {
+      "model": "exponential2",
+      "treatment": "calibrated",
+      "channel": "combined",
+      "heavy_flavour": "central",
+      "luminosity_fb_inverse": 1.8297340980952546,
+      "design_months": 2.1956809177143053
+    },
+    {
+      "model": "exponential2",
+      "treatment": "calibrated",
+      "channel": "combined",
+      "heavy_flavour": "upper",
+      "luminosity_fb_inverse": 2.556599753435222,
+      "design_months": 3.0679197041222666
+    },
+    {
+      "model": "power2",
+      "treatment": "smooth",
+      "channel": "diphoton",
+      "heavy_flavour": "both",
+      "luminosity_fb_inverse": 3.0366936165789307,
+      "design_months": 3.644032339894717
+    },
+    {
+      "model": "power2",
+      "treatment": "smooth",
+      "channel": "combined",
+      "heavy_flavour": "central",
+      "luminosity_fb_inverse": 1.7435334295410307,
+      "design_months": 2.092240115449237
+    },
+    {
+      "model": "power2",
+      "treatment": "smooth",
+      "channel": "combined",
+      "heavy_flavour": "upper",
+      "luminosity_fb_inverse": 2.3305050990134717,
+      "design_months": 2.796606118816166
+    },
+    {
+      "model": "power2",
+      "treatment": "calibrated",
+      "channel": "diphoton",
+      "heavy_flavour": "both",
+      "luminosity_fb_inverse": 3.6364948401839383,
+      "design_months": 4.363793808220725
+    },
+    {
+      "model": "power2",
+      "treatment": "calibrated",
+      "channel": "combined",
+      "heavy_flavour": "central",
+      "luminosity_fb_inverse": 1.837260153010108,
+      "design_months": 2.2047121836121297
+    },
+    {
+      "model": "power2",
+      "treatment": "calibrated",
+      "channel": "combined",
+      "heavy_flavour": "upper",
+      "luminosity_fb_inverse": 2.570591124252381,
+      "design_months": 3.0847093491028574
+    },
+    {
+      "model": "exponential3",
+      "treatment": "smooth",
+      "channel": "diphoton",
+      "heavy_flavour": "both",
+      "luminosity_fb_inverse": 3.111270779688299,
+      "design_months": 3.733524935625959
+    },
+    {
+      "model": "exponential3",
+      "treatment": "smooth",
+      "channel": "combined",
+      "heavy_flavour": "central",
+      "luminosity_fb_inverse": 1.7677567019589626,
+      "design_months": 2.1213080423507553
+    },
+    {
+      "model": "exponential3",
+      "treatment": "smooth",
+      "channel": "combined",
+      "heavy_flavour": "upper",
+      "luminosity_fb_inverse": 2.3741667470609693,
+      "design_months": 2.849000096473163
+    },
+    {
+      "model": "exponential3",
+      "treatment": "calibrated",
+      "channel": "diphoton",
+      "heavy_flavour": "both",
+      "luminosity_fb_inverse": 3.673599960971307,
+      "design_months": 4.408319953165568
+    },
+    {
+      "model": "exponential3",
+      "treatment": "calibrated",
+      "channel": "combined",
+      "heavy_flavour": "central",
+      "luminosity_fb_inverse": 1.8535285726695039,
+      "design_months": 2.2242342872034047
+    },
+    {
+      "model": "exponential3",
+      "treatment": "calibrated",
+      "channel": "combined",
+      "heavy_flavour": "upper",
+      "luminosity_fb_inverse": 2.596709718647781,
+      "design_months": 3.116051662377337
+    }
+  ],
+  "signal_normalization_check": {
+    "ihixs_pb": 226.82244161097535,
+    "native_hjminnlo_pb": 213.77129726000118,
+    "branching_fraction": 0.00227,
+    "native_diphoton_fb_inverse": 4.163186198389914,
+    "native_diphoton_design_months": 4.995823438067896,
+    "native_combined_fb_inverse": {
+      "central": 1.9546442798577561,
+      "upper": 2.8108405195985307
+    }
+  },
+  "gem_table18": [
+    {
+      "mass_gev": 120.0,
+      "reference_luminosity_fb_inverse": 10.0,
+      "diphoton_significance": 7.8,
+      "accepted_signal_fb": 74.0,
+      "background_fb_per_gev": 250.0,
+      "resolution_gev": 0.84,
+      "estimated_five_sigma_fb_inverse": 4.109138724523341,
+      "design_months": 4.930966469428008
+    },
+    {
+      "mass_gev": 140.0,
+      "reference_luminosity_fb_inverse": 10.0,
+      "diphoton_significance": 9.0,
+      "accepted_signal_fb": 66.0,
+      "background_fb_per_gev": 140.0,
+      "resolution_gev": 0.91,
+      "estimated_five_sigma_fb_inverse": 3.08641975308642,
+      "design_months": 3.703703703703704
+    }
+  ]
+}

@@ -5,6 +5,21 @@ MadGraph, Herwig/HwSim and a simplified SSC/GEM detector response.
 Start with a small leading-order (LO) sample, inspect it, then move to
 higher order (HO) or the four-lepton channel.
 
+## How much SSC luminosity would a Higgs discovery have needed?
+
+At 40 TeV, the combined diphoton and four-lepton median local 5σ reach for a
+125 GeV SM Higgs is **1.83 fb⁻¹ (2.20 design months)**, or **2.56 fb⁻¹
+(3.07 months)** at the four-lepton heavy-flavour upper bound. Students can
+refit the full background campaign and redraw the figures from a clean checkout.
+
+```bash
+python3 -m pip install -r discovery/requirements.txt
+python3 student_events.py discovery
+```
+
+[Results, plots and the comparison with GEM](discovery/README.md) ·
+[Inputs, checksums and replication on Timur](discovery/REPLICATION.md)
+
 ## Analyze the prepared 40 TeV events on Timur
 
 In your Timur checkout, run `git pull --ff-only` to get the student analyses and

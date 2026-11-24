@@ -205,8 +205,11 @@ def analyze(args):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("attach", "setup", "check", "report", "cuts", "xgboost"))
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["discovery"]:
+        return subprocess.call([sys.executable, str(REPO / "discovery/reproduce.py"), *argv[1:]])
+    parser = argparse.ArgumentParser(description=__doc__, epilog="Use discovery --help for the portable 5-sigma fit.")
+    parser.add_argument("action", choices=("attach", "setup", "check", "report", "cuts", "xgboost", "discovery"))
     parser.add_argument("--channel", choices=("fourlepton", "diphoton"), default="fourlepton")
     parser.add_argument("--workspace", type=Path, help="Private analysis workspace for this channel.")
     parser.add_argument("--dataset", type=Path, help="Shared release to attach.")

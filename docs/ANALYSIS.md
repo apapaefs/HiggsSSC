@@ -1,5 +1,7 @@
 # Cuts and classifiers
 
+For the final median 5σ projections at 125 GeV, use the sideband fit to all diphoton background batches and the independent four-lepton classifier test. The counting projections below document the earlier classifier study. [Discovery results and replication](../discovery/README.md)
+
 For four leptons, use the [HO analysis and run guide](../hfourlepton/HIGHER_ORDER.md).
 Both `fourlepton-lo` and `fourlepton-ho` support `cuts` and `xgboost`; HO also
 provides the energy-specific `validate` action. The sections below describe

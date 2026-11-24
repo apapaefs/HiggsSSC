@@ -11,6 +11,8 @@ The executable approximations are documented separately for
 [four leptons](hfourlepton/README.md). Historical projections should not be
 confused with outputs of this repository's simplified simulation.
 
+The 125 GeV discovery study compares its projected luminosity with the published GEM significances at 120 and 140 GeV. [Results and original GEM tables](discovery/README.md#comparison-with-the-1993-gem-study)
+
 ## Detector baseline
 
 | Object | Historical acceptance/efficiency | Resolution and fake assumptions |
