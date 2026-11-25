@@ -1,0 +1,3 @@
+import model sm-no_b_mass
+define p = g u c d s b u~ c~ d~ s~ b~
+generate p p > t t~ QCD==2 QED==0

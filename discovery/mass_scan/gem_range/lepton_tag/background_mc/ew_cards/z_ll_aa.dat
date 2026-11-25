@@ -1,0 +1,5 @@
+import model sm-lepton_masses
+define q = u d s c u~ d~ s~ c~
+generate q q > e+ e- a a QCD=0
+add process q q > mu+ mu- a a QCD=0
+add process q q > ta+ ta- a a QCD=0

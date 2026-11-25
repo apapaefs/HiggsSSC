@@ -2,7 +2,9 @@
 
 One 40 TeV experiment tests a common Higgs mass in two samples. It searches the inclusive diphoton mass range of **80–160 GeV**. From **80 through 140 GeV**, the search also uses a category with an isolated electron or muon accompanying the photon pair. Above 140 GeV only the untagged photon category contributes. The injected Standard Model Higgs has a mass of 125 GeV. GEM's original report quoted local significances at selected masses. We evaluate global discovery on a predeclared 0.5 GeV grid with 161 trial masses. [GEM Technical Design Report, Tables 2-9 and 2-10](https://lss.fnal.gov/archive/other/ssc/ssc-gem-tn-93-262.pdf#page=62) · [Inclusive diphoton projection](../README.md)
 
-## Discovery exposure
+The [direct background simulation](background_mc/README.md) tests the historical 0.408 fb continuum with new electroweak and top samples. Its [first 148,000 collisions](background_mc/first-pass/README.md) also provide an independent combined-likelihood checkpoint.
+
+## Discovery exposure with GEM's tagged background
 
 With our 125 GeV ggF, WH and ttH signals and GEM's tagged background, one experiment reaches a **50% probability of global 5σ at 4.23 fb⁻¹ (5.08 design months)**. The 90% exposure is **7.08 fb⁻¹ (8.49 months)**. Sorting the same production samples into tagged and untagged categories saves **11.9% of the luminosity**, or **0.69 design months**, at the median.
 

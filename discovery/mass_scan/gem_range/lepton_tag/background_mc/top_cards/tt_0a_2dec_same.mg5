@@ -1,0 +1,5 @@
+import model sm-no_b_mass
+define p = g u c d s b u~ c~ d~ s~ b~
+define f = u c d s u~ c~ d~ s~ e- e+ mu- mu+ ta- ta+ ve ve~ vm vm~ vt vt~
+generate p p > t t~ QCD=2 QED=0, t > b f f a a QCD=0 QED=4
+add process p p > t t~ QCD=2 QED=0, t~ > b~ f f a a QCD=0 QED=4

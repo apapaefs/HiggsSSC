@@ -144,7 +144,7 @@ def fixed_reach(inputs, signal, background, power, alpha):
     return brentq(gap, .05, 35.)
 
 
-def search(inputs, signal_fb, bscale, toys, seed):
+def search(inputs, signal_fb, bscale, toys, seed, max_iterations=4):
     def experiment(lumi):
         return TaggedExperiment(inputs, lumi, signal_fb, bscale)
 
@@ -162,7 +162,7 @@ def search(inputs, signal_fb, bscale, toys, seed):
         lumi = .965 * upper
         alpha = ALPHA / 135.
         step_seed = seed + 100 * index
-        for step in range(4):
+        for step in range(max_iterations):
             exp = experiment(lumi)
             n = max(4000, toys // 4) if step == 0 else toys
             trials, trials_se = exp.null_trials(alpha, n, step_seed + 1)

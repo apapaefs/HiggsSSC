@@ -70,6 +70,7 @@ template <class T> void read(TTree *t,const char *name,T* address) {
   t->SetBranchStatus(name,1);t->SetBranchAddress(name,address);
 }
 }
+#ifndef TAGGED_BACKGROUND_RESPONSE
 int main(int argc,char** argv) {
   if(argc!=4) throw std::runtime_error("Use measure shower.root output.csv response-seed");
   TFile input(argv[1],"READ");
@@ -171,3 +172,4 @@ int main(int argc,char** argv) {
     out<<','<<genuine.size()<<'\n';
   }
 }
+#endif

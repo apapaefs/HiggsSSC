@@ -1,0 +1,68 @@
+# Herwig 7.3 LO Les Houches shower; inclusive top, W and tau decays.
+cd /Herwig/EventHandlers
+library LesHouches.so
+create ThePEG::Cuts /Herwig/Cuts/NoCuts
+create ThePEG::LesHouchesEventHandler LesHouchesHandler
+set LesHouchesHandler:PartonExtractor /Herwig/Partons/PPExtractor
+set LesHouchesHandler:CascadeHandler /Herwig/Shower/ShowerHandler
+set LesHouchesHandler:HadronizationHandler /Herwig/Hadronization/ClusterHadHandler
+set LesHouchesHandler:DecayHandler /Herwig/Decays/DecayHandler
+set LesHouchesHandler:WeightOption VarNegWeight
+set LesHouchesHandler:Cuts /Herwig/Cuts/NoCuts
+create ThePEG::LesHouchesFileReader LesHouchesReader
+set LesHouchesReader:FileName @LHE@
+set LesHouchesReader:AllowedToReOpen No
+set LesHouchesReader:InitPDFs 0
+set LesHouchesReader:MaxScan -1
+set LesHouchesReader:Cuts /Herwig/Cuts/NoCuts
+set LesHouchesReader:MomentumTreatment RescaleEnergy
+insert LesHouchesHandler:LesHouchesReaders 0 LesHouchesReader
+create ThePEG::LHAPDF /Herwig/Partons/HardPDF ThePEGLHAPDF.so
+set /Herwig/Partons/HardPDF:PDFName NNPDF40_nlo_as_01180_qed
+set /Herwig/Partons/HardPDF:RemnantHandler /Herwig/Partons/HadronRemnants
+set /Herwig/Partons/RemnantDecayer:AllowTop Yes
+set /Herwig/Particles/p+:PDF /Herwig/Partons/HardPDF
+set /Herwig/Particles/pbar-:PDF /Herwig/Partons/HardPDF
+set /Herwig/Partons/PPExtractor:FirstPDF /Herwig/Partons/HardPDF
+set /Herwig/Partons/PPExtractor:SecondPDF /Herwig/Partons/HardPDF
+set LesHouchesReader:PDFA /Herwig/Partons/HardPDF
+set LesHouchesReader:PDFB /Herwig/Partons/HardPDF
+set /Herwig/Shower/ShowerHandler:PDFA /Herwig/Partons/HardPDF
+set /Herwig/Shower/ShowerHandler:PDFB /Herwig/Partons/HardPDF
+set /Herwig/Shower/ShowerHandler:Interactions QEDQCD
+set /Herwig/Shower/ShowerHandler:MaxPtIsMuF Yes
+set /Herwig/Shower/ShowerHandler:RestrictPhasespace Yes
+set /Herwig/Shower/PartnerFinder:PartnerMethod Random
+set /Herwig/Shower/PartnerFinder:ScaleChoice Partner
+
+cd /Herwig/Generators
+set EventGenerator:EventHandler /Herwig/EventHandlers/LesHouchesHandler
+set EventGenerator:NumberOfEvents @EVENTS@
+set EventGenerator:RandomNumberGenerator:Seed @SEED@
+set EventGenerator:PrintEvent 0
+set EventGenerator:MaxErrors 100
+library @PLUGIN@
+create Herwig::HwSim /Herwig/Analysis/HwSim
+insert EventGenerator:AnalysisHandlers 0 /Herwig/Analysis/HwSim
+set /Herwig/Analysis/HwSim:OutputLocation events/
+set /Herwig/Analysis/HwSim:CharmTagging Yes
+set /Herwig/Analysis/HwSim:OnTheFlyAnalysis No
+set /Herwig/Analysis/HwSim:SaveObjects Yes
+set /Herwig/Analysis/HwSim:SaveAncestry Yes
+set /Herwig/Analysis/HwSim:SavePartons Yes
+set /Herwig/Analysis/HwSim:SaveOptionalWeights No
+set /Herwig/Analysis/HwSim:SaveReconstructed Yes
+set /Herwig/Analysis/HwSim:JetAlgorithm AntiKt
+set /Herwig/Analysis/HwSim:RParameter 0.4
+set /Herwig/Analysis/HwSim:BTaggingMethod GhostBHadrons
+set /Herwig/Analysis/HwSim:PTCutParticles 0.4
+set /Herwig/Analysis/HwSim:EtaCutParticles 6.0
+set /Herwig/Analysis/HwSim:PTCutJets 10.0
+set /Herwig/Analysis/HwSim:EtaCutJets 6.0
+set /Herwig/Analysis/HwSim:PTCutElectron 0.4
+set /Herwig/Analysis/HwSim:EtaCutElectron 6.0
+set /Herwig/Analysis/HwSim:PTCutMuon 0.4
+set /Herwig/Analysis/HwSim:EtaCutMuon 6.0
+set /Herwig/Analysis/HwSim:PTCutPhoton 0.4
+set /Herwig/Analysis/HwSim:EtaCutPhoton 6.0
+saverun tagged EventGenerator
