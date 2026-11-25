@@ -2,6 +2,7 @@
 import argparse
 import gzip
 import hashlib
+import itertools
 import json
 from pathlib import Path
 import tarfile
@@ -15,14 +16,14 @@ def digest(path):
     return sha.hexdigest()
 
 
-def archive(root, report_path, target):
+def archive(root, report_path, target, software_root=None):
     if target.exists():
         raise FileExistsError(target)
     opener = gzip.open if report_path.suffix == ".gz" else open
     with opener(report_path, "rt") as stream:
         report = json.load(stream)
     chosen = set()
-    parents = {}
+    parents = set()
     response_hashes = set()
     plugins = {}
     for row in report["shards"]:
@@ -30,7 +31,7 @@ def archive(root, report_path, target):
         packet = receipt.with_name("packet.csv")
         if digest(receipt) != row["receipt_sha256"] or digest(packet) != row["packet_sha256"]:
             raise ValueError(f"Detector packet or receipt changed in {receipt.parent}")
-        parents[row["integration_id"]] = row["source_lhe_sha256"]
+        parents.add((row["integration_id"], row["source_lhe_sha256"]))
         audit = json.loads(receipt.read_text())
         config = receipt.with_name("tagged.in")
         response_hashes.add(audit["response_sha256"])
@@ -41,21 +42,47 @@ def archive(root, report_path, target):
         chosen.update([receipt, packet, config])
     # Only include integrations which actually contributed to the published estimate.
     found = set()
-    for path in root.rglob("hard.json"):
+    grid_hashes = set()
+    hard_paths = itertools.chain(root.glob("top/tt_*/round-*/hard.json"), root.glob("ew/*/hard.json"),
+                                 root.glob("*/hard.json"), root.glob("tt_*/round-*/hard.json"))
+    grid_paths = set()
+    for path in hard_paths:
         info = json.loads(path.read_text())
-        group = info.get("integration_id")
-        if group not in parents:
+        grid = path.with_name("native-gridpack.tar.gz")
+        if grid.is_file():
+            grid_paths.add(grid)
+        source = (info.get("integration_id"), info.get("lhe_sha256"))
+        if source not in parents:
             continue
         lhe = path.with_name("events.lhe.gz")
-        if group in found or digest(lhe) != parents[group]:
-            raise ValueError(f"Ambiguous or altered hard events for {group}")
-        found.add(group)
-        chosen.update([path, lhe, path.with_name("banner.txt"), path.with_name("run_card.dat"),
+        if source in found or digest(lhe) != source[1]:
+            raise ValueError(f"Ambiguous or altered hard events for {source}")
+        found.add(source)
+        chosen.update([path, lhe, path.with_name("run_card.dat"),
                        path.with_name("param_card.dat"), path.with_name("proc_card_mg5.dat")])
-    if found != set(parents):
-        raise ValueError(f"Missing hard-event inputs for {set(parents)-found}")
+        if "cut_function_sha256" in info:
+            cut = path.with_name("outside_nominal.f")
+            if digest(cut) != info["cut_function_sha256"]:
+                raise ValueError(f"Generator acceptance function changed in {path.parent}")
+            chosen.add(cut)
+        if "gridpack_sha256" in info:
+            grid_hashes.add(info["gridpack_sha256"])
+            for lot in info["native_lots"]:
+                native = Path(lot["lhe"]).resolve()
+                if not native.is_relative_to(root) or digest(native) != lot["lhe_sha256"]:
+                    raise ValueError(f"Unverified native gridpack events in {path.parent}")
+                chosen.add(native)
+        else:
+            chosen.add(path.with_name("banner.txt"))
+    if found != parents:
+        raise ValueError(f"Missing hard-event inputs for {parents-found}")
+    if grid_hashes:
+        packs = {digest(p):p for p in grid_paths}
+        if grid_hashes - packs.keys():
+            raise ValueError(f"Missing adaptive grids for {grid_hashes-packs.keys()}")
+        chosen.update(packs[sha] for sha in grid_hashes)
     executables = {}
-    for path in root.glob("response*"):
+    for path in (software_root or root).glob("response*"):
         if path.is_file() and path.stat().st_mode & 0o111:
             executables[digest(path)] = path
     if response_hashes - executables.keys():
@@ -89,5 +116,6 @@ if __name__ == "__main__":
     cli.add_argument("campaign", type=Path)
     cli.add_argument("spectrum", type=Path)
     cli.add_argument("archive", type=Path)
+    cli.add_argument("--software-root", type=Path, help="Directory holding the detector-response binaries")
     args = cli.parse_args()
-    archive(args.campaign.resolve(), args.spectrum, args.archive)
+    archive(args.campaign.resolve(), args.spectrum, args.archive, args.software_root)

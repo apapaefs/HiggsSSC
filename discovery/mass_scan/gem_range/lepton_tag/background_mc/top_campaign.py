@@ -1,6 +1,7 @@
 """Generate the three independent top-background matrix elements on Timur."""
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -13,7 +14,11 @@ def hard_job(sample, args):
     index = SAMPLES.index(sample)
     work = args.out / sample / f"round-{args.round:03}"
     work.mkdir(parents=True, exist_ok=True)
+    seed = 721000 + 100 * args.round + index
     if (work / "hard.json").exists():
+        info = json.loads((work / "hard.json").read_text())
+        if (info["sample"], info["hard_seed"], info["generated_events"]) != (sample, seed, args.events[index]):
+            raise ValueError(f"Existing integration has different sample, seed or event count in {work}")
         return
     source = Path(__file__).resolve().parent
     options = []
@@ -21,7 +26,6 @@ def hard_job(sample, args):
         options += ["--set", "pta=14.", "--set", "etaa=3.5"]
     if index == 2:
         options += ["--set", "draa=0.", "--set", "mmaa=60.", "--set", "mmaamax=170."]
-    seed = 721000 + 100 * args.round + index
     command = [sys.executable, source / "ew_generate.py", "--mg5", args.mg5, "--process", sample,
                "--work", work, "--events", str(args.events[index]), "--cores", str(args.cores // len(args.samples)),
                "--seed", str(seed), "--pdf", "335900", "--card", source / "top_cards" / (sample + ".mg5"),

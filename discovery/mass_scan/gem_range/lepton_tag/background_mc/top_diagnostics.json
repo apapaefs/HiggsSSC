@@ -1,0 +1,774 @@
+{
+  "tt_dielectron_fake": {
+    "attempted": 1015000,
+    "saved": 1014895,
+    "eligible_pair_multiplicities": {
+      "all_masses": {
+        "0": 1014893,
+        "1": 2
+      },
+      "higgs_window": {
+        "0": 1014895
+      }
+    },
+    "hard_integrations": {
+      "tt_0a-721000-047b0df66ec40ea4": {
+        "cross_section_pb": 4083.59,
+        "integration_error_pb": 3.033376,
+        "hard_seed": 721000,
+        "source_lhe_sha256": "047b0df66ec40ea4bfea5c04cbb2ed49c58b883b26dab574aa1d799b49b5351f"
+      },
+      "tt_0a-721100-e8ad576c993c24e0": {
+        "cross_section_pb": 4085.19,
+        "integration_error_pb": 0.5795029,
+        "hard_seed": 721100,
+        "source_lhe_sha256": "e8ad576c993c24e0b1e49e713109b7969626eb2c796ce1ebdb22deff48efefd0"
+      },
+      "tt_0a-721200-1933c13c7a5f65ba": {
+        "cross_section_pb": 4083.94,
+        "integration_error_pb": 0.5905235,
+        "hard_seed": 721200,
+        "source_lhe_sha256": "1933c13c7a5f65baa84c71b24635cbcc219d9e75921dabc7cc47e7850702a234"
+      },
+      "tt_0a-721300-4e518261008643bd": {
+        "cross_section_pb": 4084.77,
+        "integration_error_pb": 0.3626016,
+        "hard_seed": 721300,
+        "source_lhe_sha256": "4e518261008643bd6dc369183a1c7b5a8b020de2e0f95fa4080d36660d8689eb"
+      }
+    },
+    "zero_count_95_upper_fb_by_maximum_pairs": {
+      "1": 0.008859340914538195,
+      "3": 0.026578022743614583,
+      "6": 0.053156045487229166
+    },
+    "zero_count_95_upper_fb_arbitrary_multiplicity": 11.910891673990239,
+    "specified_electron_pair_95_upper_fb": 0.008859340914538192,
+    "window_events_with_any_electron_pair_and_distinct_tag": 0
+  },
+  "dilepton_enriched_combination": true,
+  "radiative_photon_quark": {
+    "tt_0a_1dec/round-000": {
+      "integration_id": "tt_0a_1dec-751000-1c27cd19e5e382a5",
+      "source_lhe_sha256": "1c27cd19e5e382a52ba9b528bf161f5b01532a1dc5c5b6813faef771b3a55647",
+      "events": 10000,
+      "dr_edges": [
+        0.0,
+        0.05,
+        0.1,
+        0.2,
+        0.45,
+        null
+      ],
+      "hard_photon_top_ancestors": {
+        "-6": 5073,
+        "6": 4927
+      },
+      "unique_hard_collisions_checked": 10000,
+      "window_by_nearest_hard_muon": {
+        "no hard muon": {
+          "rate_fb": 0.011146866068209511,
+          "mc_error_fb": 0.0055790147970266905
+        },
+        "dR < 0.05": {
+          "rate_fb": 0.002708165000190843,
+          "mc_error_fb": 0.002708165000190843
+        },
+        "dR >= 0.05": {
+          "rate_fb": 0.008438701434042259,
+          "mc_error_fb": 0.004878096302813154
+        }
+      },
+      "accepted_rates_fb": {
+        "scan": [
+          0.0,
+          0.014367792062213546,
+          0.00541633036627076,
+          0.020516921585768316,
+          0.44879800263420233
+        ],
+        "window": [
+          0.0,
+          0.002710156599267716,
+          0.0,
+          0.0027101565992677175,
+          0.016873419303907178
+        ]
+      },
+      "window_mc_error_fb": [
+        0.0,
+        0.002710156599267716,
+        0.0,
+        0.0027101565992677175,
+        0.006896073403799416
+      ]
+    },
+    "tt_0a_1dec_ll/round-000": {
+      "integration_id": "tt_0a_1dec_ll-751004-0325cf79b54c6c2f",
+      "source_lhe_sha256": "0325cf79b54c6c2f961b98234d825650fae7d6dcbbeae0f9231b29312d45fef6",
+      "events": 50000,
+      "dr_edges": [
+        0.0,
+        0.05,
+        0.1,
+        0.2,
+        0.45,
+        null
+      ],
+      "hard_photon_top_ancestors": {
+        "6": 24698,
+        "-6": 25302
+      },
+      "unique_hard_collisions_checked": 50000,
+      "window_by_nearest_hard_muon": {
+        "no hard muon": {
+          "rate_fb": 0.023380818202144996,
+          "mc_error_fb": 0.01045580167791172
+        },
+        "dR >= 0.05": {
+          "rate_fb": 0.016781615460790197,
+          "mc_error_fb": 0.00839055642233532
+        },
+        "dR < 0.05": {
+          "rate_fb": 0.0,
+          "mc_error_fb": 0.0
+        }
+      },
+      "accepted_rates_fb": {
+        "scan": [
+          0.0,
+          0.013544898097547853,
+          0.004197717431787928,
+          0.023382538840316398,
+          0.5042707223831764
+        ],
+        "window": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.04016243366293519
+        ]
+      },
+      "window_mc_error_fb": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.013405578345386833
+      ]
+    },
+    "tt_0a_1dec_ll/round-001": {
+      "integration_id": "tt_0a_1dec_ll-751004-0325cf79b54c6c2f",
+      "source_lhe_sha256": "6ad1603fd8e1fbeaacd15a27c922ecfbda6b7bc0a1829d52b6e887e5cf872965",
+      "events": 15500,
+      "dr_edges": [
+        0.0,
+        0.05,
+        0.1,
+        0.2,
+        0.45,
+        null
+      ],
+      "hard_photon_top_ancestors": {
+        "-6": 7815,
+        "6": 7685
+      },
+      "unique_hard_collisions_checked": 15500,
+      "window_by_nearest_hard_muon": {
+        "dR >= 0.05": {
+          "rate_fb": 0.027072095294398368,
+          "mc_error_fb": 0.019142244602111304
+        },
+        "no hard muon": {
+          "rate_fb": 0.0,
+          "mc_error_fb": 0.0
+        },
+        "dR < 0.05": {
+          "rate_fb": 0.0,
+          "mc_error_fb": 0.0
+        }
+      },
+      "accepted_rates_fb": {
+        "scan": [
+          0.0,
+          0.027082047947018892,
+          0.013536047647199184,
+          0.015092162942611143,
+          0.45015990506748155
+        ],
+        "window": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.027072095294398368
+        ]
+      },
+      "window_mc_error_fb": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.019142244602111304
+      ]
+    },
+    "tt_0a_2dec_same/round-000": {
+      "integration_id": "tt_0a_2dec_same-751002-246a3f1d5654e893",
+      "source_lhe_sha256": "246a3f1d5654e893db7317a1014469ec9c1dfb0c48b692352f2c3a4d94754dd9",
+      "events": 10000,
+      "dr_edges": [
+        0.0,
+        0.05,
+        0.1,
+        0.2,
+        0.45,
+        null
+      ],
+      "hard_photon_top_ancestors": {
+        "6,6": 5002,
+        "-6,-6": 4998
+      },
+      "unique_hard_collisions_checked": 10000,
+      "window_by_nearest_hard_muon": {
+        "no hard muon": {
+          "rate_fb": 0.0,
+          "mc_error_fb": 0.0
+        },
+        "dR < 0.05": {
+          "rate_fb": 0.0,
+          "mc_error_fb": 0.0
+        },
+        "dR >= 0.05": {
+          "rate_fb": 0.0,
+          "mc_error_fb": 0.0
+        }
+      },
+      "accepted_rates_fb": {
+        "scan": [
+          0.0,
+          0.006006641716933076,
+          0.009171798858942544,
+          0.0,
+          0.030138393888109447
+        ],
+        "window": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "window_mc_error_fb": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "tt_0a_2dec_same/round-020": {
+      "integration_id": "tt_0a_2dec_same-751002-246a3f1d5654e893",
+      "source_lhe_sha256": "c6b08de201b102a63df77c298bc19e092c650ec645cc8f17ba7113fc69264097",
+      "events": 30000,
+      "dr_edges": [
+        0.0,
+        0.05,
+        0.1,
+        0.2,
+        0.45,
+        null
+      ],
+      "hard_photon_top_ancestors": {
+        "6,6": 14901,
+        "-6,-6": 15099
+      },
+      "unique_hard_collisions_checked": 30000,
+      "window_by_nearest_hard_muon": {
+        "no hard muon": {
+          "rate_fb": 0.0029487192127786565,
+          "mc_error_fb": 0.0017046491832648808
+        },
+        "dR >= 0.05": {
+          "rate_fb": 0.0009472411207446219,
+          "mc_error_fb": 0.0009472411207446221
+        },
+        "dR < 0.05": {
+          "rate_fb": 0.0,
+          "mc_error_fb": 0.0
+        }
+      },
+      "accepted_rates_fb": {
+        "scan": [
+          0.0,
+          0.01106662922619828,
+          0.010302321527368912,
+          0.008006769158994762,
+          0.05098362413839965
+        ],
+        "window": [
+          0.0,
+          0.0,
+          0.0009468930096327484,
+          0.0009472411207446219,
+          0.002001826203145908
+        ]
+      },
+      "window_mc_error_fb": [
+        0.0,
+        0.0,
+        0.0009468930096327484,
+        0.0009472411207446221,
+        0.001417515022216417
+      ]
+    },
+    "tt_0a_2dec_split/round-000": {
+      "integration_id": "tt_0a_2dec_split-751003-e5ff1e0d83c6a8f4",
+      "source_lhe_sha256": "e5ff1e0d83c6a8f46d02641e47a812c05bbe615a57a123022b5f881ff5a01692",
+      "events": 10000,
+      "dr_edges": [
+        0.0,
+        0.05,
+        0.1,
+        0.2,
+        0.45,
+        null
+      ],
+      "hard_photon_top_ancestors": {
+        "-6,6": 10000
+      },
+      "unique_hard_collisions_checked": 10000,
+      "window_by_nearest_hard_muon": {
+        "no hard muon": {
+          "rate_fb": 0.024140306192732566,
+          "mc_error_fb": 0.024140306192732566
+        },
+        "dR < 0.05": {
+          "rate_fb": 0.0,
+          "mc_error_fb": 0.0
+        },
+        "dR >= 0.05": {
+          "rate_fb": 0.0,
+          "mc_error_fb": 0.0
+        }
+      },
+      "accepted_rates_fb": {
+        "scan": [
+          0.0,
+          0.0216353486528001,
+          0.021659219167368383,
+          0.045807488049433284,
+          0.1848683925716143
+        ],
+        "window": [
+          0.0,
+          0.0,
+          0.0,
+          0.024140306192732566,
+          0.0
+        ]
+      },
+      "window_mc_error_fb": [
+        0.0,
+        0.0,
+        0.0,
+        0.024140306192732566,
+        0.0
+      ]
+    },
+    "tt_0a_2dec_split/round-001": {
+      "integration_id": "tt_0a_2dec_split-751003-e5ff1e0d83c6a8f4",
+      "source_lhe_sha256": "005c4aeb5e277f961a68233f2f91ee316c6a275d9df1a64a6d25fc9adaaff227",
+      "events": 60000,
+      "dr_edges": [
+        0.0,
+        0.05,
+        0.1,
+        0.2,
+        0.45,
+        null
+      ],
+      "hard_photon_top_ancestors": {
+        "-6,6": 60000
+      },
+      "unique_hard_collisions_checked": 60000,
+      "window_by_nearest_hard_muon": {
+        "no hard muon": {
+          "rate_fb": 0.004023384365455427,
+          "mc_error_fb": 0.004023384365455427
+        },
+        "dR >= 0.05": {
+          "rate_fb": 0.007215760328469612,
+          "mc_error_fb": 0.005102270625687623
+        },
+        "dR < 0.05": {
+          "rate_fb": 0.007631927599509491,
+          "mc_error_fb": 0.005404509419390583
+        }
+      },
+      "accepted_rates_fb": {
+        "scan": [
+          0.0,
+          0.014438153792988462,
+          0.018460059564689588,
+          0.029652421412867964,
+          0.26602585752799834
+        ],
+        "window": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.01887107229343453
+        ]
+      },
+      "window_mc_error_fb": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.00845137162555572
+      ]
+    },
+    "tt_1a_1dec/round-000": {
+      "integration_id": "tt_1a_1dec-751001-0e0bc04a922d1ad0",
+      "source_lhe_sha256": "0e0bc04a922d1ad0366855c0b3f25c1d9de8f4fc293ae218a148cf7b2f9cce02",
+      "events": 10000,
+      "dr_edges": [
+        0.0,
+        0.05,
+        0.1,
+        0.2,
+        0.45,
+        null
+      ],
+      "hard_photon_top_ancestors": {
+        "0,6": 5013,
+        "-6,0": 4987
+      },
+      "unique_hard_collisions_checked": 10000,
+      "window_by_nearest_hard_muon": {
+        "no hard muon": {
+          "rate_fb": 0.028696979006570835,
+          "mc_error_fb": 0.02029081510782941
+        },
+        "dR >= 0.05": {
+          "rate_fb": 0.025738103305681433,
+          "mc_error_fb": 0.01819867728919591
+        },
+        "dR < 0.05": {
+          "rate_fb": 0.0,
+          "mc_error_fb": 0.0
+        }
+      },
+      "accepted_rates_fb": {
+        "scan": [
+          0.0,
+          0.012878515622499228,
+          0.014343215464466435,
+          0.025757031244998455,
+          1.0836463481864456
+        ],
+        "window": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.05443508231225227
+        ]
+      },
+      "window_mc_error_fb": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.02725364740508641
+      ]
+    },
+    "tt_1a_1dec/round-001": {
+      "integration_id": "tt_1a_1dec-751101-be5207a14df80c16",
+      "source_lhe_sha256": "be5207a14df80c16d3347249c7d3bbcb6730ea411c27a512ecdcec182d8c274f",
+      "events": 53000,
+      "dr_edges": [
+        0.0,
+        0.05,
+        0.1,
+        0.2,
+        0.45,
+        null
+      ],
+      "hard_photon_top_ancestors": {
+        "-6,0": 26475,
+        "0,6": 26525
+      },
+      "unique_hard_collisions_checked": 53000,
+      "window_by_nearest_hard_muon": {
+        "no hard muon": {
+          "rate_fb": 0.03461027822047794,
+          "mc_error_fb": 0.009616265986918194
+        },
+        "dR >= 0.05": {
+          "rate_fb": 0.028118503343743686,
+          "mc_error_fb": 0.00849438651872569
+        },
+        "dR < 0.05": {
+          "rate_fb": 0.010026396587863067,
+          "mc_error_fb": 0.005018721541992107
+        }
+      },
+      "accepted_rates_fb": {
+        "scan": [
+          0.0,
+          0.015465765933952309,
+          0.012927675284032426,
+          0.02737523185145802,
+          0.9776810617642168
+        ],
+        "window": [
+          0.0,
+          0.0,
+          0.0,
+          0.0027180338498728105,
+          0.0700371443022119
+        ]
+      },
+      "window_mc_error_fb": [
+        0.0,
+        0.0,
+        0.0,
+        0.0027180338498728105,
+        0.013504582794012874
+      ]
+    },
+    "tt_1a_1dec/round-020": {
+      "integration_id": "tt_1a_1dec-751001-0e0bc04a922d1ad0",
+      "source_lhe_sha256": "1959a6f3360df0584d46f53d7cada899105abc6f5ac0716cfb4c2ed6780075c9",
+      "events": 30000,
+      "dr_edges": [
+        0.0,
+        0.05,
+        0.1,
+        0.2,
+        0.45,
+        null
+      ],
+      "hard_photon_top_ancestors": {
+        "0,6": 15035,
+        "-6,0": 14965
+      },
+      "unique_hard_collisions_checked": 30000,
+      "window_by_nearest_hard_muon": {
+        "no hard muon": {
+          "rate_fb": 0.03729320539228883,
+          "mc_error_fb": 0.013197351221040054
+        },
+        "dR >= 0.05": {
+          "rate_fb": 0.012873782768007961,
+          "mc_error_fb": 0.0074324341781447836
+        },
+        "dR < 0.05": {
+          "rate_fb": 0.0,
+          "mc_error_fb": 0.0
+        }
+      },
+      "accepted_rates_fb": {
+        "scan": [
+          0.0,
+          0.03298296492113843,
+          0.03195093279657782,
+          0.044703518509389154,
+          0.9262057943980209
+        ],
+        "window": [
+          0.0,
+          0.0,
+          0.00429126092266932,
+          0.004786346829828096,
+          0.04108938040779937
+        ]
+      },
+      "window_mc_error_fb": [
+        0.0,
+        0.0,
+        0.00429126092266932,
+        0.004786346829828096,
+        0.013714275377532949
+      ]
+    }
+  },
+  "frozen_top_window": {
+    "spectrum_sha256": "cfe27901de0aa2ed566f6cca30c53aa9de45544eda5448f312f39285dc39c395",
+    "selected_shards": 1641,
+    "sources": {
+      "tt_0a": {
+        "attempted_events": 1015000,
+        "rate_fb": 0.015231037628670204,
+        "mc_error_fb": 0.0006338791797299617,
+        "integration_error_fb": 1.1487501426626405e-06,
+        "error_fb": 0.0006338802206426852,
+        "contributing_events": 8384,
+        "effective_events": 577.3590897750668
+      },
+      "tt_0a_1dec": {
+        "attempted_events": 10000,
+        "rate_fb": 0.022293732502442612,
+        "mc_error_fb": 0.007888343499505294,
+        "integration_error_fb": 5.874361392818058e-05,
+        "error_fb": 0.007888562225042329,
+        "contributing_events": 8,
+        "effective_events": 7.9871886846186015
+      },
+      "tt_0a_1dec_ll": {
+        "attempted_events": 65500,
+        "rate_fb": 0.037064720003205105,
+        "mc_error_fb": 0.011190986800846046,
+        "integration_error_fb": 4.91422831672558e-05,
+        "error_fb": 0.011191094698049218,
+        "contributing_events": 11,
+        "effective_events": 10.969445641437547
+      },
+      "tt_0a_2dec_same": {
+        "attempted_events": 40000,
+        "rate_fb": 0.002921970250142459,
+        "mc_error_fb": 0.0014625967586799605,
+        "integration_error_fb": 8.019652935682417e-06,
+        "error_fb": 0.0014626187450372484,
+        "contributing_events": 4,
+        "effective_events": 3.99118966634868
+      },
+      "tt_0a_2dec_split": {
+        "attempted_events": 70000,
+        "rate_fb": 0.01962381999333425,
+        "mc_error_fb": 0.008022958452623923,
+        "integration_error_fb": 3.9786675040721015e-05,
+        "error_fb": 0.008023057105121491,
+        "contributing_events": 6,
+        "effective_events": 5.982710892919766
+      },
+      "tt_1a": {
+        "attempted_events": 150000,
+        "rate_fb": 0.0571598828839602,
+        "mc_error_fb": 0.009237727362643017,
+        "integration_error_fb": 5.7986713754881604e-05,
+        "error_fb": 0.009237909356856432,
+        "contributing_events": 645,
+        "effective_events": 38.28709178748745
+      },
+      "tt_1a_1dec": {
+        "attempted_events": 93000,
+        "rate_fb": 0.06349876247303135,
+        "mc_error_fb": 0.0096996756256615,
+        "integration_error_fb": 7.980963469161276e-05,
+        "error_fb": 0.009700003959836377,
+        "contributing_events": 43,
+        "effective_events": 42.85644086271089
+      },
+      "tt_2a": {
+        "attempted_events": 40000,
+        "rate_fb": 0.028623251107188503,
+        "mc_error_fb": 0.0037963740309403804,
+        "integration_error_fb": 5.569047236455503e-05,
+        "error_fb": 0.0037967824814585703,
+        "contributing_events": 57,
+        "effective_events": 56.846002949962475
+      }
+    },
+    "top_window_rate_fb": 0.24641717684197467,
+    "top_window_error_fb": 0.02117132780144917
+  },
+  "direct_electron_pair_control": {
+    "attempted": 15000,
+    "saved": 14995,
+    "eligible_pair_multiplicities": {
+      "all_masses": {
+        "0": 14994,
+        "1": 1
+      },
+      "higgs_window": {
+        "0": 14995
+      }
+    },
+    "hard_integrations": {
+      "tt_0a-752941-e2461b91009acab2": {
+        "cross_section_pb": 47.0352,
+        "integration_error_pb": 0.08713539,
+        "hard_seed": 752941,
+        "source_lhe_sha256": "e2461b91009acab2faf76b0be4230db69dc113e7e2ff7cfbc02d1446f30866f1"
+      }
+    },
+    "zero_count_95_upper_fb_by_maximum_pairs": {
+      "1": 0.00690248467251067,
+      "3": 0.020707454017532007,
+      "6": 0.041414908035064014
+    },
+    "zero_count_95_upper_fb_arbitrary_multiplicity": 9.2800071708199,
+    "specified_electron_pair_95_upper_fb": 0.006902484672510668,
+    "window_events_with_any_electron_pair_and_distinct_tag": 0
+  },
+  "single_radiative_quark_collar": {
+    "tt_0a_1dec/round-003": {
+      "integration_id": "tt_0a_1dec-751300-57c4a0a053618ead",
+      "source_lhe_sha256": "57c4a0a053618ead1a1003a26e1f96a31d4b290251f1ab9657078bf99302a4d7",
+      "events": 10000,
+      "dr_edges": [
+        0.0,
+        0.05,
+        0.1,
+        0.2,
+        0.45,
+        null
+      ],
+      "hard_photon_top_ancestors": {
+        "6": 4953,
+        "-6": 5047
+      },
+      "unique_hard_collisions_checked": 10000,
+      "window_by_nearest_hard_muon": {
+        "no hard muon": {
+          "rate_fb": 0.0011333625480732116,
+          "mc_error_fb": 0.0006551634178263232
+        },
+        "dR >= 0.05": {
+          "rate_fb": 0.0,
+          "mc_error_fb": 0.0
+        },
+        "dR < 0.05": {
+          "rate_fb": 0.0,
+          "mc_error_fb": 0.0
+        }
+      },
+      "accepted_rates_fb": {
+        "scan": [
+          0.04120229750685969,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ],
+        "window": [
+          0.0011333625480732116,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "window_mc_error_fb": [
+        0.0006551634178263232,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "hard_geometry_check": {
+        "events": 10000,
+        "minimum": 0.02000293517126666,
+        "maximum": 0.049992095908086495
+      },
+      "cross_section_pb": 14.373775,
+      "cross_section_error_pb": 0.04779701957001503,
+      "hard_seed": 751300
+    }
+  }
+}

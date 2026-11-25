@@ -1,0 +1,33 @@
+{
+  "primary_confirmation": {
+    "attempted": 288000,
+    "selected": 6,
+    "rate_fb": 0.04476208306581817,
+    "mc_error_fb": 0.019183611925571102,
+    "integration_error_fb": 4.0079859840078634e-05,
+    "unweighted_upper_fb_95": 3.616593941183485,
+    "detector_upper_fb_95": 0.1515554338516531
+  },
+  "pilot_events": 96000,
+  "pilot_selected": 1,
+  "descriptive_full_sample": {
+    "attempted": 384000,
+    "selected": 7,
+    "rate_fb": 0.038372511134454536,
+    "mc_error_fb": 0.015167573252816344,
+    "integration_error_fb": 3.07689817760926e-05
+  },
+  "max_response": 0.04190557090909092,
+  "alpha": 0.05,
+  "hard_seeds": [
+    7713502,
+    7713503,
+    7713504
+  ],
+  "hard_cross_sections_pb": [
+    87.7763,
+    87.8946,
+    87.9543
+  ],
+  "n_shards": 256
+}

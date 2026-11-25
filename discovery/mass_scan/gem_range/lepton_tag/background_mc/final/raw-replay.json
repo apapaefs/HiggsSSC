@@ -1,0 +1,33 @@
+{
+  "core": {
+    "archive_bytes": 1125583263,
+    "archive_members": 7221,
+    "archive_sha256": "69ce61b20ab9ef3b08eed7c1239642dde65443a89c89af79ae5dcf7fee9589ec",
+    "hard_integrations": 36,
+    "reproduced_bins": 72,
+    "shower_shards": 2324,
+    "software_sha256": [
+      "3a71ca0c34ab33e1d98e9377303e4abc1a79250e25154514d7dbebc823923165",
+      "4f7a193335e68374dfeb6322f4d51d77cbd4630b3828fab5c32e3bceb8b44f29",
+      "545cabb5661ec907c9bc66e1b903536bd2531dcabee94d65a948d632a1ccc1d4",
+      "94f7b191523cba59d774bf8711afdc3caec32afa2d023f5a52a4a2819134417a",
+      "ceedd5e123d92c0cefc07b36e2c943dcb52b806c3dab42bd16115fe1064272d4"
+    ],
+    "spectrum_sha256": "06f748c3d505d1180b0810eef762adbd6ec38d7e0487e878cec55a0c6c2cd46b",
+    "window_fb": 0.7015158893695465
+  },
+  "guard": {
+    "archive_bytes": 48340604,
+    "archive_members": 600,
+    "archive_sha256": "f6161d9aaeb839839d33c738464cc1d4f1f3703ea898e654eae719c878dc0055",
+    "hard_integrations": 3,
+    "reproduced_bins": 72,
+    "shower_shards": 192,
+    "software_sha256": [
+      "4f7a193335e68374dfeb6322f4d51d77cbd4630b3828fab5c32e3bceb8b44f29",
+      "94f7b191523cba59d774bf8711afdc3caec32afa2d023f5a52a4a2819134417a"
+    ],
+    "spectrum_sha256": "23c38fa8f5710793f9bb477f27df4e904cd932dba9ffa4eeb0adc222ae5a6b65",
+    "window_fb": 0.04476208306581817
+  }
+}

@@ -1,0 +1,113 @@
+{
+  "core_attempts": {
+    "tt_0a": 1015000,
+    "tt_0a_1dec": 10000,
+    "tt_0a_1dec_ll": 65500,
+    "tt_0a_2dec_same": 40000,
+    "tt_0a_2dec_split": 70000,
+    "tt_1a": 150000,
+    "tt_1a_1dec": 93000,
+    "tt_2a": 40000,
+    "w_lnu_aa": 112000,
+    "z_ee_a": 352000,
+    "z_ll_aa": 304000
+  },
+  "core_compressed_sha256": "06f748c3d505d1180b0810eef762adbd6ec38d7e0487e878cec55a0c6c2cd46b",
+  "core_uncompressed_sha256": "cfe27901de0aa2ed566f6cca30c53aa9de45544eda5448f312f39285dc39c395",
+  "cross_platform_max_absolute_difference": 9.307470349995128e-09,
+  "cross_platform_max_relative_difference": 2.3953965363127305e-09,
+  "crossings": [
+    {
+      "bonferroni_sufficient_fb_inverse": 4.604595597956843,
+      "design_months": 5.330468422707126,
+      "effective_trials": 133.09568125,
+      "exposure_mc_se_from_power": 0.0029735759584056435,
+      "fixed_125_local_luminosity_fb_inverse": 3.095482827821538,
+      "independent_global_p": 2.8718108774506133e-07,
+      "independent_global_p_mc_se": 4.2210354725025443e-10,
+      "local_z_for_global_five": 5.871932124005198,
+      "luminosity_fb_inverse": 4.442057018922605,
+      "power": 0.49968597276716264,
+      "power_mc_se": 0.0006268263887744694,
+      "target_power": 0.5,
+      "trials_mc_se": 0.19681749460659922,
+      "true_mass_power_analytic": 0.47862308827908584,
+      "true_mass_power_toys": 0.4783798024281139
+    },
+    {
+      "bonferroni_sufficient_fb_inverse": 7.712106217527326,
+      "design_months": 8.98146150379696,
+      "effective_trials": 133.35864791666668,
+      "exposure_mc_se_from_power": 0.00440165863507159,
+      "fixed_125_local_luminosity_fb_inverse": 5.403001417902125,
+      "independent_global_p": 2.857960677173993e-07,
+      "independent_global_p_mc_se": 4.2332427832751497e-10,
+      "local_z_for_global_five": 5.872259256761665,
+      "luminosity_fb_inverse": 7.484551253164133,
+      "power": 0.899730866915172,
+      "power_mc_se": 0.0002810813909718393,
+      "target_power": 0.9,
+      "trials_mc_se": 0.19615895885730583,
+      "true_mass_power_analytic": 0.8916498590467528,
+      "true_mass_power_toys": 0.8911720822907279
+    }
+  ],
+  "energy_TeV": 40,
+  "fit_sha256": "4bb38753dc5f33527abb6a0366f7a962c8202ead9d5d3fd883dc30507bfb0e88",
+  "guard_attempts": 288000,
+  "hard_sources": [
+    "tt_0a",
+    "tt_0a_1dec",
+    "tt_0a_1dec_ll",
+    "tt_0a_2dec_same",
+    "tt_0a_2dec_split",
+    "tt_1a",
+    "tt_1a_1dec",
+    "tt_2a",
+    "w_lnu_aa",
+    "z_ee_a",
+    "z_ll_aa"
+  ],
+  "mass_GeV": 125,
+  "original_timur_fit_sha256": "284d1381665ff2d24c7663810c6f13bec4b40ee39fbbe39c6c49e5d927eefdd9",
+  "raw_archive_audit": {
+    "core": {
+      "archive_bytes": 1125583263,
+      "archive_members": 7221,
+      "archive_sha256": "69ce61b20ab9ef3b08eed7c1239642dde65443a89c89af79ae5dcf7fee9589ec",
+      "hard_integrations": 36,
+      "reproduced_bins": 72,
+      "shower_shards": 2324,
+      "software_sha256": [
+        "3a71ca0c34ab33e1d98e9377303e4abc1a79250e25154514d7dbebc823923165",
+        "4f7a193335e68374dfeb6322f4d51d77cbd4630b3828fab5c32e3bceb8b44f29",
+        "545cabb5661ec907c9bc66e1b903536bd2531dcabee94d65a948d632a1ccc1d4",
+        "94f7b191523cba59d774bf8711afdc3caec32afa2d023f5a52a4a2819134417a",
+        "ceedd5e123d92c0cefc07b36e2c943dcb52b806c3dab42bd16115fe1064272d4"
+      ],
+      "spectrum_sha256": "06f748c3d505d1180b0810eef762adbd6ec38d7e0487e878cec55a0c6c2cd46b",
+      "window_fb": 0.7015158893695465
+    },
+    "guard": {
+      "archive_bytes": 48340604,
+      "archive_members": 600,
+      "archive_sha256": "f6161d9aaeb839839d33c738464cc1d4f1f3703ea898e654eae719c878dc0055",
+      "hard_integrations": 3,
+      "reproduced_bins": 72,
+      "shower_shards": 192,
+      "software_sha256": [
+        "4f7a193335e68374dfeb6322f4d51d77cbd4630b3828fab5c32e3bceb8b44f29",
+        "94f7b191523cba59d774bf8711afdc3caec32afa2d023f5a52a4a2819134417a"
+      ],
+      "spectrum_sha256": "23c38fa8f5710793f9bb477f27df4e904cd932dba9ffa4eeb0adc222ae5a6b65",
+      "window_fb": 0.04476208306581817
+    }
+  },
+  "release": "ssc40-tag-background-20261125",
+  "schema": 1,
+  "split_top_attempts": 70000,
+  "split_top_se_fb": 0.008023057105121491,
+  "wider_window_error_fb": 0.03862364416848107,
+  "wider_window_fb": 0.7462779724353645,
+  "zero_source_upper_fb_95": 0.0
+}

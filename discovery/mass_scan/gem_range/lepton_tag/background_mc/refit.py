@@ -18,11 +18,19 @@ TAG_DIR = HERE.parent
 sys.path.insert(0, str(TAG_DIR))
 from tagged_scan import ANCHOR, TAG, Inputs, TaggedExperiment, histogram_at_edges, plot, search
 from gem_rates import DATA, TAG_MASSES, background_density
+from tagged_spectrum import draw_spectrum
 from plots import BLUE, ORANGE, save, style
 
 WINDOW = (123.3, 126.7)
 GEM_WINDOW_FB = 0.408
 PRECISION_FB = 0.0408
+
+PLOT_GROUPS = {
+    "charged_current": (r"$\ell\nu\gamma\gamma$", "#9dc8d2"),
+    "neutral_current_two_real_photons": (r"$\ell^+\ell^-\gamma\gamma$", "#b8d4c2"),
+    "neutral_current_electron_fake": (r"$ee\gamma$, electron fake", "#e5c783"),
+    "all_top": ("All top backgrounds", "#c2abc9"),
+}
 
 
 def bin_fractions(edges, lower, upper):
@@ -62,14 +70,10 @@ def spectrum_plot(edges, rate, covariance, sources, groups, output):
     fig, ax = plt.subplots(figsize=(8.3, 4.7), layout="constrained")
     style(ax)
     bottom = np.zeros(len(bins)-1)
-    labels = {"charged_current": (r"$\ell\nu\gamma\gamma$", "#9dc8d2"),
-              "neutral_current_two_real_photons": (r"$\ell^+\ell^-\gamma\gamma$", "#b8d4c2"),
-              "neutral_current_electron_fake": (r"$ee\gamma$, electron fake", "#e5c783"),
-              "all_top": ("All top backgrounds", "#c2abc9")}
     for key, group in groups.items():
         contribution = sum(np.asarray(sources[name]["rates_fb"]) for name in group["samples"])
         height = bottom + transform @ contribution
-        label, color = labels[key]
+        label, color = PLOT_GROUPS[key]
         ax.stairs(height, bins, baseline=bottom, fill=True, color=color, label=label)
         bottom = height
     ax.axvspan(*WINDOW, color="#444444", alpha=.09, label="125 GeV window")
@@ -95,16 +99,60 @@ def component_comparison(sources):
         reference = (WINDOW[1]-WINDOW[0]) * sum(np.interp(125., TAG_MASSES, gem[name]) for name in historical_rows)
         windows = [sources[name]["window_125"] for name in samples]
         result[key] = dict(samples=samples, selected_fb=sum(w["rate_fb"] for w in windows),
-                           mc_se_fb=np.linalg.norm([w["error_fb"] for w in windows]), gem_fb=reference)
+                           mc_se_fb=np.linalg.norm([w["error_fb"] for w in windows]), gem_fb=reference,
+                           attempted_events=sum(sources[name]["attempted_events"] for name in samples),
+                           contributing_window_events=sum(w["contributing_events"] for w in windows))
     return result
 
 
-def run(path, output, toys, seed, pilot=False):
+def load_spectrum(path):
     opener = gzip.open if path.suffix == ".gz" else open
     with opener(path, "rt") as stream:
-        summary = json.load(stream)
+        return json.load(stream)
+
+
+def discovery_model():
+    signal = json.loads((TAG_DIR / "signal/direct.json").read_text())
+    edges = np.asarray(signal["mass_edges_gev"])
+    model = Inputs(ggf_veto="pt20_eta2p5", associated=(edges, signal["untagged_associated_spectrum_fb_per_bin"]))
+    return signal, model.measured_tag(edges, signal["tagged_spectrum_fb_per_bin"], signal["selected_fb"])
+
+
+def add_zee_complement(summary, guard):
+    """Add independently normalized, disjoint eeγ events to the fit histograms and covariance."""
+    if guard["generation_region"] != "outside_nominal" or set(guard["sources"]) != {"z_ee_a"}:
+        raise ValueError("The acceptance control must contain only the complementary eeγ phase space")
+    np.testing.assert_allclose(guard["edges_gev"], summary["edges_gev"])
+    if {s["source_lhe_sha256"] for s in guard["shards"]} & {s["source_lhe_sha256"] for s in summary["shards"]}:
+        raise ValueError("An eeγ control integration also appears in the nominal inputs")
+    for base, extra in ((summary, guard), (summary["sources"]["z_ee_a"], guard["sources"]["z_ee_a"])):
+        for key in ("rates_fb", "gluon_jet_rates_fb", "covariance_fb2", "mc_covariance_fb2",
+                    "integration_covariance_fb2"):
+            base[key] = np.asarray(base[key])+np.asarray(extra[key])
+        window, more = base["window_125"], extra["window_125"]
+        for key in ("rate_fb", "contributing_events"):
+            window[key] += more[key]
+        for key in ("error_fb", "mc_error_fb", "integration_error_fb"):
+            window[key] = float(np.hypot(window[key], more[key]))
+        window["effective_events"] = (window["rate_fb"]/window["mc_error_fb"])**2
+    for key in ("attempted_events", "saved_events", "shards"):
+        summary["sources"]["z_ee_a"][key] += guard["sources"]["z_ee_a"][key]
+
+
+def run(path, output, toys, seed, pilot=False, migration_path=None):
+    summary = load_spectrum(path)
     if not summary["complete_sources"]:
         raise ValueError("Incomplete background campaign")
+    migration = None
+    if migration_path is not None:
+        guard = load_spectrum(migration_path)
+        restricted_rates = np.asarray(summary["rates_fb"])
+        migration = dict(spectrum_sha256=hashlib.sha256(migration_path.read_bytes()).hexdigest(),
+                         restricted_window_fb=summary["window_125"]["rate_fb"],
+                         restricted_window_mc_se_fb=summary["window_125"]["error_fb"],
+                         additional_window_fb=guard["window_125"]["rate_fb"],
+                         additional_window_mc_se_fb=guard["window_125"]["error_fb"])
+        add_zee_complement(summary, guard)
     edges = np.asarray(summary["edges_gev"], dtype=float)
     rates = np.asarray(summary["rates_fb"], dtype=float)
     cov = np.asarray(summary["covariance_fb2"], dtype=float)
@@ -122,10 +170,8 @@ def run(path, output, toys, seed, pilot=False):
                                [summary["window_125"]["rate_fb"], summary["window_125"]["error_fb"]])
     if error <= 0. or measured <= 0. or (error + unseen > PRECISION_FB and not pilot):
         raise ValueError(f"Window {measured:.5g} ± {error:.5g} fb, upper limit for empty sources {unseen:.5g} fb")
-    signal = json.loads((TAG_DIR / "signal/direct.json").read_text())
+    signal, model = discovery_model()
     se = np.asarray(signal["mass_edges_gev"])
-    model = Inputs(ggf_veto="pt20_eta2p5", associated=(se, signal["untagged_associated_spectrum_fb_per_bin"]))
-    model = model.measured_tag(se, signal["tagged_spectrum_fb_per_bin"], signal["selected_fb"])
     model.tag_background = project_background(model, edges, rates)
     # Each variant uses its own coherent background for both null calibration
     # and signal-injected experiments. This measures sensitivity to MC normalization.
@@ -146,6 +192,18 @@ def run(path, output, toys, seed, pilot=False):
     results["gem_z_enhancement"] = search(model, signal["selected_fb"], 1., toys, seed, max_iterations=12)
     model.tag_background = project_background(model, edges, np.asarray(summary["gluon_jet_rates_fb"]))
     results["unmatched_jets_gluon_response"] = search(model, signal["selected_fb"], 1., toys, seed, max_iterations=12)
+    if migration_path is not None:
+        model.tag_background = project_background(model, edges, restricted_rates)
+        results["restricted_zee_acceptance"] = search(model, signal["selected_fb"], 1., toys, seed, max_iterations=12)
+        # Change only the electron-fake normalization to GEM's Table 19
+        # value at 125 GeV. Other sources and the simulated shape stay fixed.
+        electron_rates = np.asarray(summary["sources"]["z_ee_a"]["rates_fb"])
+        historical = DATA["background_components_fb_per_gev"]["Z_gamma_electron_fake"]
+        gem_electron = (WINDOW[1]-WINDOW[0]) * np.interp(125., TAG_MASSES, historical)
+        ratio = gem_electron / (fraction @ electron_rates)
+        model.tag_background = project_background(model, edges, rates + (ratio-1.)*electron_rates)
+        results["gem_electron_fake_normalization"] = search(
+            model, signal["selected_fb"], 1., toys, seed, max_iterations=12)
     model.tag_background = nominal_cells
     median = results["nominal"]["crossings"][0]
     exp = TaggedExperiment(model, median["luminosity_fb_inverse"], signal["selected_fb"], 1.)
@@ -166,6 +224,7 @@ def run(path, output, toys, seed, pilot=False):
                   historical_scan_sha256=hashlib.sha256((TAG_DIR / "combined.json").read_bytes()).hexdigest(),
                   design_fb_inverse_per_year=10., inclusive_mass_range_gev=[80,160], tagged_mass_range_gev=[80,140],
                   mass_step_gev=.5, true_mass_gev=125., scenarios=results, window_components=groups,
+                  wider_zee_acceptance=migration,
                   comparison={name:history["scenarios"][name]["crossings"]
                               for name in ("nominal", "same_production_inclusive_only")},
                   global_tail_control=dict(local_alpha=alpha, direct_probability=ordinary,
@@ -173,6 +232,15 @@ def run(path, output, toys, seed, pilot=False):
     output.mkdir(parents=True, exist_ok=True)
     plot(model, results["nominal"], output)
     spectrum_plot(edges, rates, cov, summary["sources"], groups, output)
+    event_edges = np.arange(80., 141.)
+    signal_bins = histogram_at_edges(se, np.asarray(signal["tagged_spectrum_fb_per_bin"]), event_edges)
+    names = list(groups)
+    component_bins = []
+    for name in names:
+        spectrum = sum(np.asarray(summary["sources"][k]["rates_fb"]) for k in groups[name]["samples"])
+        component_bins.append(histogram_at_edges(edges, spectrum, event_edges))
+    labels, colors = zip(*(PLOT_GROUPS[name] for name in names))
+    draw_spectrum(results["nominal"], event_edges, signal_bins, component_bins, names, colors, labels, output)
     (output / "combined-mc.json").write_text(json.dumps(report, indent=2, allow_nan=False)+"\n")
     for row in results["nominal"]["crossings"]:
         print(f"{row['target_power']:.0%} global discovery power at {row['luminosity_fb_inverse']:.3f} fb^-1 "
@@ -187,9 +255,11 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=725081)
     parser.add_argument("--pilot", action="store_true",
                         help="Refit an interim spectrum and record its preliminary status")
+    parser.add_argument("--zee-complement", type=Path,
+                        help="Include disjoint eeγ acceptance migrations in the nominal fit and compare restricted cuts")
     args = parser.parse_args()
     if args.toys < 4000:
         parser.error("Use at least 4,000 experiments")
     if args.pilot and args.output.resolve() == HERE:
         parser.error("Choose a separate --output directory for an interim fit")
-    run(args.spectrum, args.output, args.toys, args.seed, args.pilot)
+    run(args.spectrum, args.output, args.toys, args.seed, args.pilot, args.zee_complement)

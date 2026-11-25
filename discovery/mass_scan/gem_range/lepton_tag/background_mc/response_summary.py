@@ -138,7 +138,12 @@ def read_campaign(root, expected, radiative, region, dileptonic):
     provenance, hashes, seeds = [], set(), set()
     intervals = defaultdict(list)
     event_hashes = set()
-    for path in sorted(root.rglob("receipt.json")):
+    # A full Timur campaign also contains millions of temporary hard-generator
+    # files. Restrict the production walk to the two audited shower directories.
+    # Independent controls and released packet views have other layouts.
+    packet_dirs = [p for p in (root/"ew/showers",root/"top/packets") if p.is_dir()]
+    paths = (p for parent in packet_dirs or [root] for p in parent.rglob("receipt.json"))
+    for path in sorted(paths):
         receipt = json.loads(path.read_text())
         if "sample" not in receipt or receipt["sample"] not in expected:
             continue

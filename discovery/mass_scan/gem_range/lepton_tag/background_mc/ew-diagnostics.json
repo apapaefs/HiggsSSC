@@ -1,0 +1,100 @@
+{
+  "w_lnu_aa": {
+    "mapped_attempts": 105250,
+    "attempts_excluded_due_to_lost_showers": 6750,
+    "selected_window_fb": {
+      "all": 0.08083759061160561,
+      "ckm_light_shift": -0.00024495454177245467,
+      "bottom_shift": 1.7119507604968678e-05,
+      "gen_photon_pt_below_16": 0.001809251957741028,
+      "gen_photon_abseta_above_2p8": 0.0,
+      "hard_tau": 0.0068912381111149645,
+      "gen_pair_mass_outside_65_165": 0.0,
+      "gen_lepton_pt_below_15": 0.0,
+      "gen_lepton_abseta_above_3p3": 0.0,
+      "any_generator_edge": 0.001809251957741028
+    },
+    "fraction_of_window": {
+      "all": 1.0,
+      "ckm_light_shift": -0.003030205872282484,
+      "bottom_shift": 0.00021177656923523994,
+      "gen_photon_pt_below_16": 0.022381319681258276,
+      "gen_photon_abseta_above_2p8": 0.0,
+      "hard_tau": 0.0852479404566223,
+      "gen_pair_mass_outside_65_165": 0.0,
+      "gen_lepton_pt_below_15": 0.0,
+      "gen_lepton_abseta_above_3p3": 0.0,
+      "any_generator_edge": 0.022381319681258276
+    }
+  },
+  "z_ee_a": {
+    "mapped_attempts": 324000,
+    "attempts_excluded_due_to_lost_showers": 28000,
+    "selected_window_fb": {
+      "all": 0.21491602435112706,
+      "ckm_light_shift": 0.0,
+      "bottom_shift": 0.004963462928734813,
+      "gen_photon_pt_below_16": 0.0016150652770909094,
+      "gen_photon_abseta_above_2p8": 0.004846299732654546,
+      "hard_tau": 0.0,
+      "near_z_ll": 0.15350253262429078,
+      "below_z_ll": 0.006467689000145455,
+      "above_z_ll": 0.05494580272669091,
+      "near_z_all": 0.0,
+      "gen_lepton_pt_below_16": 0.001616667777163636,
+      "gen_lepton_abseta_above_2p8": 0.0016160172061090907,
+      "gen_lepton_photon_dr_below_0p3": 0.0,
+      "any_generator_edge": 0.009694049993018181
+    },
+    "fraction_of_window": {
+      "all": 1.0,
+      "ckm_light_shift": 0.0,
+      "bottom_shift": 0.02309489459299494,
+      "gen_photon_pt_below_16": 0.007514866711158942,
+      "gen_photon_abseta_above_2p8": 0.022549736564718523,
+      "hard_tau": 0.0,
+      "near_z_ll": 0.7142442406877036,
+      "below_z_ll": 0.030094028677818026,
+      "above_z_ll": 0.25566173063447867,
+      "near_z_all": 0.0,
+      "gen_lepton_pt_below_16": 0.007522323112223335,
+      "gen_lepton_abseta_above_2p8": 0.007519296018005909,
+      "gen_lepton_photon_dr_below_0p3": 0.0,
+      "any_generator_edge": 0.045106222406106705
+    }
+  },
+  "z_ll_aa": {
+    "mapped_attempts": 266000,
+    "attempts_excluded_due_to_lost_showers": 38000,
+    "selected_window_fb": {
+      "all": 0.1551659715760955,
+      "ckm_light_shift": 0.0,
+      "bottom_shift": 0.0024858848153323523,
+      "gen_photon_pt_below_16": 0.0014894337083524165,
+      "gen_photon_abseta_above_2p8": 0.0,
+      "hard_tau": 0.011399735982334519,
+      "gen_pair_mass_outside_65_165": 0.0,
+      "near_z_ll": 0.028542728481725687,
+      "below_z_ll": 0.0897452745813343,
+      "above_z_ll": 0.03687796851303539,
+      "near_z_all": 0.0,
+      "gen_leading_lepton_pt_below_15": 0.0,
+      "any_generator_edge": 0.0014894337083524165
+    },
+    "fraction_of_window": {
+      "all": 1.0,
+      "ckm_light_shift": 0.0,
+      "bottom_shift": 0.016020811715880892,
+      "gen_photon_pt_below_16": 0.009598971302944332,
+      "gen_photon_abseta_above_2p8": 0.0,
+      "hard_tau": 0.07346801535505441,
+      "gen_pair_mass_outside_65_165": 0.0,
+      "near_z_ll": 0.18394966494137505,
+      "below_z_ll": 0.5783824486113053,
+      "above_z_ll": 0.237667886447319,
+      "near_z_all": 0.0,
+      "gen_leading_lepton_pt_below_15": 0.0,
+      "any_generator_edge": 0.009598971302944332
+    }
+  }
+}

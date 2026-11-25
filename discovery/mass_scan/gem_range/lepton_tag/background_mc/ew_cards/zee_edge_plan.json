@@ -1,0 +1,17 @@
+{
+  "process": "z_ee_a",
+  "generation_region": "outside_nominal",
+  "primary_reconstructed_mass_window_GeV": [123.3, 126.7],
+  "pilot": {"round": 1, "hard_seed": 7713501, "events": 96000},
+  "confirmation": {"rounds": [2, 3, 4], "hard_seeds": [7713502, 7713503, 7713504], "events_per_round": 96000, "events": 288000},
+  "total_generated_target": 384000,
+  "inference": "Use rounds 2 through 4 for the fixed-exposure confidence limit. The pilot informed the exposure and is excluded from confirmation. All four independent rounds may also be summarized descriptively.",
+  "alpha_one_sided": 0.05,
+  "trigger_efficiency": 0.988,
+  "genuine_photon_efficiency": 0.864,
+  "electron_to_photon_probability": 0.02727272727272727,
+  "distinct_electron_tag_efficiency": 0.90,
+  "maximum_assignments": 2,
+  "maximum_response_per_collision": 0.04190557090909092,
+  "confidence_limit": "Upper limit on any nonzero-weight candidate probability from the exact one-sided binomial interval, multiplied by the maximum response per collision and largest hard cross section among confirmation integrations. Conditional on integrated cross sections."
+}

@@ -19,7 +19,6 @@ import matplotlib.pyplot as plt
 def run():
     report = json.loads((HERE / "combined.json").read_text())
     result = report["scenarios"]["nominal"]
-    lumi = result["crossings"][0]["luminosity_fb_inverse"]
     edges = np.arange(80., 141.)
     centers = .5 * (edges[1:] + edges[:-1])
     # Every kink in the linearly interpolated rates is at an integer bin edge.
@@ -35,19 +34,25 @@ def run():
         signal = np.diff(np.interp(edges, direct["mass_edges_gev"], cdf))
     else:
         signal = result["accepted_tagged_signal_fb"] * np.diff(ndtr((edges - 125.)/resolution(125.)))
-    with (HERE / "tagged-spectrum.csv").open("w", newline="") as stream:
-        writer = csv.writer(stream, lineterminator="\n")
-        writer.writerow(["low_gev", "high_gev", "signal_fb", *rows, "background_fb"])
-        writer.writerows(zip(edges[:-1], edges[1:], signal, *components, density))
-
     colors = ("#739ab7", "#a1c9c3", "#d4a466", "#a77895", "#9aab76", "#70808a")
     labels = [r"$t\bar t\gamma\gamma$", r"$W\gamma\gamma$", r"$W\gamma$ + lepton radiation",
               r"$Z\gamma$ + lepton radiation", r"$Z\gamma$ + electron fake", r"$t\bar t$ fakes"]
+    draw_spectrum(result, edges, signal, components, list(rows), colors, labels, HERE)
+
+
+def draw_spectrum(result, edges, signal, components, names, colors, labels, output):
+    lumi = result["crossings"][0]["luminosity_fb_inverse"]
+    density = np.sum(components, axis=0)
+    with (output / "tagged-spectrum.csv").open("w", newline="") as stream:
+        writer = csv.writer(stream, lineterminator="\n")
+        writer.writerow(["low_gev", "high_gev", "signal_fb", *names, "background_fb"])
+        writer.writerows(zip(edges[:-1], edges[1:], signal, *components, density))
+
     fig, (spec, count) = plt.subplots(1, 2, figsize=(11, 4.4), width_ratios=(1.55, 1),
                                       layout="constrained")
     for ax in (spec, count):
         style(ax)
-    bottom = np.zeros(len(centers))
+    bottom = np.zeros_like(density)
     for contribution, color, label in zip(components, colors, labels):
         upper = bottom + lumi * contribution
         spec.stairs(upper, edges, baseline=bottom, color=color, lw=0, fill=True, label=label)
@@ -69,7 +74,7 @@ def run():
     count.legend(loc="upper right", frameon=False, fontsize=8)
     fig.suptitle(rf"Lepton-tagged diphotons at the 40 TeV SSC, {lumi:.2f} fb$^{{-1}}$",
                  x=.015, ha="left", fontweight="bold", color=INK)
-    save(fig, HERE, "tagged-spectrum")
+    save(fig, output, "tagged-spectrum")
 
 
 if __name__ == "__main__":

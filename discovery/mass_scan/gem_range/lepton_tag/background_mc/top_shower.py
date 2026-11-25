@@ -1,8 +1,10 @@
 """Reduce disjoint blocks of the three top integrations, with bounded parallelism."""
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+import fcntl
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -12,11 +14,45 @@ from top_radiative import SAMPLES as RADIATIVE
 
 def shower(job):
     packet, command = job
-    if (packet / "receipt.json").exists():
-        return
     packet.mkdir(parents=True, exist_ok=True)
+    with (packet / "worker.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        reduce_interval(packet, command)
+
+
+def reduce_interval(packet, command):
+    receipt = packet / "receipt.json"
+    if receipt.exists():
+        old = json.loads(receipt.read_text())
+        hard = json.loads((Path(command[command.index("--hard")+1])/"hard.json").read_text())
+        start = int(command[command.index("--start")+1])
+        stop = start + int(command[command.index("--events")+1])
+        if ((old["integration_id"], old["source_lhe_sha256"], old["source_first_event"], old["source_stop_event"])
+                != (hard["integration_id"], hard["lhe_sha256"], start, stop)):
+            raise ValueError(f"existing packet has a different integration or event range in {packet}")
+        return
+    base_seed = int(command[command.index("--seed") + 1])
+    def is_spin_assertion():
+        log = packet / "run.log"
+        return log.is_file() and "RhoDMatrix::normalize()" in log.read_text(errors="replace")[-2500:]
     with (packet / "worker.log").open("a") as log:
-        subprocess.run(command, check=True, stdout=log, stderr=subprocess.STDOUT)
+        for attempt in range(3):
+            seed = base_seed + 100000000 * attempt
+            history = packet / f"failed-seed-{seed}"
+            if history.exists():
+                continue
+            if attempt or not is_spin_assertion():
+                command[command.index("--seed") + 1] = str(seed)
+                result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT)
+                if not result.returncode:
+                    return
+            if not is_spin_assertion():
+                raise RuntimeError(f"shower failed in {packet}, see worker.log")
+            history.mkdir()
+            for item in ("tagged.in", "run.log", "tagged.log", "read.log"):
+                if (packet / item).is_file():
+                    shutil.copy2(packet / item, history / item)
+        raise RuntimeError(f"spin-density assertion after three distinct shower seeds in {packet}")
 
 
 def main():

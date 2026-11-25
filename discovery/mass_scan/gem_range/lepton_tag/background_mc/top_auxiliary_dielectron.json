@@ -1,0 +1,47 @@
+{
+  "attempted": 1230000,
+  "saved": 1229874,
+  "eligible_pair_multiplicities": {
+    "all_masses": {
+      "0": 1229871,
+      "1": 3
+    },
+    "higgs_window": {
+      "0": 1229874
+    }
+  },
+  "hard_integrations": {
+    "tt_0a-721000-047b0df66ec40ea4": {
+      "cross_section_pb": 4083.59,
+      "integration_error_pb": 3.033376,
+      "hard_seed": 721000,
+      "source_lhe_sha256": "047b0df66ec40ea4bfea5c04cbb2ed49c58b883b26dab574aa1d799b49b5351f"
+    },
+    "tt_0a-721100-e8ad576c993c24e0": {
+      "cross_section_pb": 4085.19,
+      "integration_error_pb": 0.5795029,
+      "hard_seed": 721100,
+      "source_lhe_sha256": "e8ad576c993c24e0b1e49e713109b7969626eb2c796ce1ebdb22deff48efefd0"
+    },
+    "tt_0a-721200-1933c13c7a5f65ba": {
+      "cross_section_pb": 4083.94,
+      "integration_error_pb": 0.5905235,
+      "hard_seed": 721200,
+      "source_lhe_sha256": "1933c13c7a5f65baa84c71b24635cbcc219d9e75921dabc7cc47e7850702a234"
+    },
+    "tt_0a-721300-4e518261008643bd": {
+      "cross_section_pb": 4084.77,
+      "integration_error_pb": 0.3626016,
+      "hard_seed": 721300,
+      "source_lhe_sha256": "4e518261008643bd6dc369183a1c7b5a8b020de2e0f95fa4080d36660d8689eb"
+    }
+  },
+  "zero_count_95_upper_fb_by_maximum_pairs": {
+    "1": 0.007310807643435437,
+    "3": 0.021932422930306308,
+    "6": 0.043864845860612615
+  },
+  "zero_count_95_upper_fb_arbitrary_multiplicity": 9.828974720618753,
+  "specified_electron_pair_95_upper_fb": 0.007310807643435435,
+  "window_events_with_any_electron_pair_and_distinct_tag": 0
+}

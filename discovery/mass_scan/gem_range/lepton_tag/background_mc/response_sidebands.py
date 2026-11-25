@@ -1,5 +1,8 @@
 """Blinded smooth-continuum cross-check of the independent MC window rate at 125 GeV."""
 import argparse
+from copy import deepcopy
+import gzip
+import hashlib
 import json
 from pathlib import Path
 
@@ -88,11 +91,39 @@ def calculate(report):
                                         if s.get("zero_window_components")})
 
 
+def read_spectrum(path):
+    if path.suffix == ".gz":
+        with gzip.open(path,"rt") as stream:
+            return json.load(stream)
+    return json.loads(path.read_text())
+
+
+def run(core_path, guard_path=None):
+    report = read_spectrum(core_path)
+    core = calculate(report)
+    provenance = dict(core_sha256=hashlib.sha256(core_path.read_bytes()).hexdigest(),
+                      core_attempted=sum(s["attempted_events"] for s in report["sources"].values()),
+                      core_window=deepcopy(report["window_125"]))
+    if guard_path is None:
+        return dict(**core, inputs=provenance)
+    from refit import add_zee_complement
+    guard = read_spectrum(guard_path)
+    provenance.update(zee_complement_sha256=hashlib.sha256(guard_path.read_bytes()).hexdigest(),
+                      zee_complement_attempted=guard["sources"]["z_ee_a"]["attempted_events"],
+                      zee_complement_window=deepcopy(guard["window_125"]),
+                      zee_complement_integrations=sorted({s["integration_id"] for s in guard["shards"]}))
+    # The same independence, binning and cross-section checks apply to the
+    # discovery fit and the sideband cross-check.
+    add_zee_complement(report,guard)
+    return dict(**calculate(report), inputs=provenance, core_fit_rate_envelope_fb=core["fit_rate_envelope_fb"])
+
+
 if __name__=="__main__":
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("spectrum",type=Path)
     p.add_argument("output",type=Path)
+    p.add_argument("--zee-complement",type=Path,help="Independent eeγ confirmation spectrum outside nominal generation cuts")
     a=p.parse_args()
-    result=calculate(json.loads(a.spectrum.read_text()))
+    result=run(a.spectrum, a.zee_complement)
     a.output.write_text(json.dumps(result,indent=2,allow_nan=False)+"\n")
     print("Sideband fit range and basis envelope [fb]",result["fit_rate_envelope_fb"])
