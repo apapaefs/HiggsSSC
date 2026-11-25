@@ -18,6 +18,8 @@ Both mass spectra below show expected numbers of events in one detector at the *
 
 The figures use the expected bin means at the physical cross sections. A single experiment would record integer counts fluctuating about those means. To reproduce these figures from the student checkout, switch to `codex/ssc-single-experiment-discovery` and run `python3 student_events.py discovery`.
 
+Searching for a common mass anywhere in **110–135 GeV** gives a combined median **global** 5σ threshold of **2.30 fb⁻¹ (2.76 design months)** for a true 125 GeV Higgs and central background. The projected 90% exposure is **3.95 fb⁻¹ (4.74 months)**. [Mass-scan calculation and local probability plot](mass_scan/README.md)
+
 ## Discovery reach
 
 | Channel | Central background, fb⁻¹ | Design months | Upper heavy flavour, fb⁻¹ | Design months |

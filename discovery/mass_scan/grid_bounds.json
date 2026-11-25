@@ -1,0 +1,110 @@
+[
+  {
+    "scan_gev": [
+      125,
+      125
+    ],
+    "spacing_gev": 0.5,
+    "mass_hypotheses": 1,
+    "true_mass_gev": 125.0,
+    "local_critical_z": 5.000000000000001,
+    "power": 0.5,
+    "sufficient_luminosity_fb_inverse": {
+      "diphoton": 3.6100337850986164,
+      "fourlepton_central": 4.274396298100295,
+      "combined_central": 1.8297340980952546,
+      "fourlepton_upper": 10.11516234241323,
+      "combined_upper": 2.556599753435222
+    }
+  },
+  {
+    "scan_gev": [
+      125,
+      125
+    ],
+    "spacing_gev": 0.5,
+    "mass_hypotheses": 1,
+    "true_mass_gev": 125.0,
+    "local_critical_z": 5.000000000000001,
+    "power": 0.9,
+    "sufficient_luminosity_fb_inverse": {
+      "diphoton": 6.45117711476423,
+      "fourlepton_central": 7.91759777418667,
+      "combined_central": 3.255660577462253,
+      "fourlepton_upper": 17.32740629399841,
+      "combined_upper": 4.401458407536037
+    }
+  },
+  {
+    "scan_gev": [
+      115,
+      130
+    ],
+    "spacing_gev": 0.5,
+    "mass_hypotheses": 31,
+    "true_mass_gev": 125.0,
+    "local_critical_z": 5.625532578056271,
+    "power": 0.5,
+    "sufficient_luminosity_fb_inverse": {
+      "diphoton": 4.829572749255349,
+      "fourlepton_central": 5.388782600745087,
+      "combined_central": 2.3460187586643535,
+      "fourlepton_upper": 12.679406870647231,
+      "combined_upper": 3.3257389465580456
+    }
+  },
+  {
+    "scan_gev": [
+      115,
+      130
+    ],
+    "spacing_gev": 0.5,
+    "mass_hypotheses": 31,
+    "true_mass_gev": 125.0,
+    "local_critical_z": 5.625532578056271,
+    "power": 0.9,
+    "sufficient_luminosity_fb_inverse": {
+      "diphoton": 8.432991992777664,
+      "fourlepton_central": 9.250833785103506,
+      "combined_central": 3.9810697419775756,
+      "fourlepton_upper": 20.63809262478934,
+      "combined_upper": 5.50280015625661
+    }
+  },
+  {
+    "scan_gev": [
+      110,
+      135
+    ],
+    "spacing_gev": 0.5,
+    "mass_hypotheses": 51,
+    "true_mass_gev": 125.0,
+    "local_critical_z": 5.710851382588032,
+    "power": 0.5,
+    "sufficient_luminosity_fb_inverse": {
+      "diphoton": 5.018617242458148,
+      "fourlepton_central": 5.388782600745087,
+      "combined_central": 2.422306539951105,
+      "fourlepton_upper": 13.106783710598863,
+      "combined_upper": 3.441059161022081
+    }
+  },
+  {
+    "scan_gev": [
+      110,
+      135
+    ],
+    "spacing_gev": 0.5,
+    "mass_hypotheses": 51,
+    "true_mass_gev": 125.0,
+    "local_critical_z": 5.710851382588032,
+    "power": 0.9,
+    "sufficient_luminosity_fb_inverse": {
+      "diphoton": 8.744401360686654,
+      "fourlepton_central": 9.250833785103506,
+      "combined_central": 4.087125624473457,
+      "fourlepton_upper": 21.10867162270035,
+      "combined_upper": 5.666984797676825
+    }
+  }
+]

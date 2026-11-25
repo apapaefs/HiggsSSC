@@ -124,17 +124,21 @@ def crossing(difference):
     return float(brentq(difference, 1.e-8, upper, xtol=2.e-9))
 
 
-def fourlepton_median(signal, background):
-    """First non-randomized 50% crossing, including the jumps in the critical count."""
+def fourlepton_counting_reach(signal, background, power, alpha):
+    """First exposure at the requested size and power, including critical-count jumps."""
     for count in range(1, 10000):
-        luminosity = gammaincinv(count, .5) / (signal + background)
+        luminosity = gammaincinv(count, power) / (signal + background)
         tail = poisson.sf(count - 1, background * luminosity)
-        if tail <= ALPHA:
+        if tail <= alpha:
             return float(luminosity), count
-    raise ValueError("Four-lepton median exceeds count search range")
+    raise ValueError("Four-lepton crossing exceeds count search range")
 
 
-def joint_power(qgamma, luminosity, signal, background):
+def fourlepton_median(signal, background):
+    return fourlepton_counting_reach(signal, background, .5, ALPHA)
+
+
+def joint_power(qgamma, luminosity, signal, background, *, alpha=ALPHA):
     """Threshold the joint likelihood ratio under H0, then calculate its H1 power."""
     q = qgamma(luminosity)
     sd = math.sqrt(q)
@@ -142,6 +146,6 @@ def joint_power(qgamma, luminosity, signal, background):
     score = counts * math.log1p(signal / background)
     p0 = poisson.pmf(counts, background * luminosity)
     p1 = poisson.pmf(counts, (background + signal) * luminosity)
-    threshold = brentq(lambda c: p0 @ ndtr((score - c) / sd) - ALPHA,
+    threshold = brentq(lambda c: p0 @ ndtr((score - c) / sd) - alpha,
                        -10 * sd, 10 * sd + score[-1])
     return float(p1 @ ndtr((score + q - threshold) / sd))

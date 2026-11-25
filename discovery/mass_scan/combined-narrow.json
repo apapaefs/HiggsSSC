@@ -1,0 +1,135 @@
+{
+  "mass_range_gev": [
+    115.0,
+    130.0
+  ],
+  "spacing_gev": 0.5,
+  "true_mass_gev": 125.0,
+  "seed": 265125,
+  "toys": 40000,
+  "central_fourlepton": true,
+  "removed_negative_cell_mass_fb": {
+    "signal": 0.00197801232343248,
+    "background": 0.00045066171072697704
+  },
+  "crossings": [
+    {
+      "target_power": 0.5,
+      "exposure_fb_inverse": 2.217162815312623,
+      "design_months": 2.6605953783751475,
+      "power_slope_per_fb_inverse": 0.38240404642836273,
+      "exposure_mc_se_from_power": 0.004411038298761391,
+      "observations": [
+        {
+          "luminosity_fb_inverse": 1.95,
+          "local_alpha": 1.3698223537659965e-08,
+          "local_z": 5.557309663350866,
+          "local_trials_factor": 20.92618587301587,
+          "trials_factor_mc_se": 0.08790359604331104,
+          "null_validation_p": 2.881521187719327e-07,
+          "null_validation_mc_se": 1.2046646406858616e-09,
+          "power": 0.39194671646734447,
+          "power_mc_se": 0.003343195333858939,
+          "true_mass_power": 0.36757845079537127,
+          "true_mass_power_mc_se": 0.0032245260740083725,
+          "true_mass_power_analytic": 0.37023970114242183
+        },
+        {
+          "luminosity_fb_inverse": 2.45,
+          "local_alpha": 1.3443396700516868e-08,
+          "local_z": 5.560587548211663,
+          "local_trials_factor": 21.322853015873015,
+          "trials_factor_mc_se": 0.08741190979514073,
+          "null_validation_p": 2.880395652457532e-07,
+          "null_validation_mc_se": 1.1776909099303318e-09,
+          "power": 0.5831487396815259,
+          "power_mc_se": 0.003276242189404333,
+          "true_mass_power": 0.5588402643880931,
+          "true_mass_power_mc_se": 0.0032477065012989125,
+          "true_mass_power_analytic": 0.559104953587834
+        },
+        {
+          "luminosity_fb_inverse": 2.2259457762550614,
+          "local_alpha": 1.3508257849890464e-08,
+          "local_z": 5.559747543512297,
+          "local_trials_factor": 21.220469365079364,
+          "trials_factor_mc_se": 0.04383860722773414,
+          "null_validation_p": 2.8723039402753647e-07,
+          "null_validation_mc_se": 5.911070468158669e-10,
+          "power": 0.5033586398040109,
+          "power_mc_se": 0.0016867988943968374,
+          "true_mass_power": 0.478496286897744,
+          "true_mass_power_mc_se": 0.0016516601246432192,
+          "true_mass_power_analytic": 0.4764425142628815
+        }
+      ]
+    },
+    {
+      "target_power": 0.9,
+      "exposure_fb_inverse": 3.8279554211793902,
+      "design_months": 4.593546505415268,
+      "power_slope_per_fb_inverse": 0.13668276330403747,
+      "exposure_mc_se_from_power": 0.006068581043526672,
+      "observations": [
+        {
+          "luminosity_fb_inverse": 3.35,
+          "local_alpha": 1.3204463579438109e-08,
+          "local_z": 5.56371622756161,
+          "local_trials_factor": 21.708687380952384,
+          "trials_factor_mc_se": 0.08682351598129469,
+          "null_validation_p": 2.8652769829121874e-07,
+          "null_validation_mc_se": 1.1410880099078865e-09,
+          "power": 0.8245197835778785,
+          "power_mc_se": 0.002308603247718404,
+          "true_mass_power": 0.8102748111518505,
+          "true_mass_power_mc_se": 0.0023511406261889473,
+          "true_mass_power_analytic": 0.812024093246532
+        },
+        {
+          "luminosity_fb_inverse": 4.15,
+          "local_alpha": 1.2988677267588744e-08,
+          "local_z": 5.5665893916884315,
+          "local_trials_factor": 22.069342857142857,
+          "trials_factor_mc_se": 0.08650138140233926,
+          "null_validation_p": 2.8546404494949764e-07,
+          "null_validation_mc_se": 1.122010237743614e-09,
+          "power": 0.9338659942211085,
+          "power_mc_se": 0.0013049597990182648,
+          "true_mass_power": 0.9267133193721107,
+          "true_mass_power_mc_se": 0.0013590776327228923,
+          "true_mass_power_analytic": 0.9253973330656696
+        },
+        {
+          "luminosity_fb_inverse": 3.840968316946409,
+          "local_alpha": 1.3134065918172897e-08,
+          "local_z": 5.5646485229312255,
+          "local_trials_factor": 21.825044404761908,
+          "trials_factor_mc_se": 0.04323830486927527,
+          "null_validation_p": 2.881597941944799e-07,
+          "null_validation_mc_se": 5.678899540362856e-10,
+          "power": 0.9017786385520236,
+          "power_mc_se": 0.0008294704263637248,
+          "true_mass_power": 0.8920856866663538,
+          "true_mass_power_mc_se": 0.000858626782440212,
+          "true_mass_power_analytic": 0.8919156359906353
+        }
+      ]
+    }
+  ],
+  "global_at_local_five": {
+    "luminosity_fb_inverse": 2.217162815312623,
+    "trials_factor": 20.183694047619046,
+    "trials_factor_mc_se": 0.04417857689447006,
+    "global_p": 5.78568762507872e-06,
+    "global_z": 4.38551110824183
+  },
+  "checks": {
+    "single_mass_power_at_original_median": 0.4989376154861873,
+    "single_mass_power_mc_se": 0.0016364571871116645,
+    "local_alpha_for_direct_comparison": 0.002,
+    "direct_global_p": 0.028525,
+    "direct_mc_se": 0.0008323359354100963,
+    "importance_global_p": 0.028891273507395388,
+    "importance_mc_se": 8.232819662754593e-05
+  }
+}

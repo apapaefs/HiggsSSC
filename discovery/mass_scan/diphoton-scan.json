@@ -1,0 +1,56 @@
+{
+  "generator_mass_gev": 125.0,
+  "template_mean_core_tail_fraction": [
+    124.99515234976938,
+    0.7950510540970434,
+    1.2045727487635003,
+    0.14953561577749058
+  ],
+  "template_L1_fraction": 0.007722094177375747,
+  "linear_mc_spurious_sigma": 0.08110241132378643,
+  "calibrated_mc_spurious_sigma": 0.08112409583051845,
+  "fixed_median_fb_inverse": 3.6100337850931767,
+  "fixed_90pct_fb_inverse": 6.451177114764227,
+  "null_importance_toys": 40000,
+  "signal_toys": 100000,
+  "null_seed": 67125,
+  "signal_seed": 51625,
+  "grid_step_gev": 0.05,
+  "covariance_reference_fb_inverse": 5.0,
+  "scans": [
+    {
+      "mass_range_gev": [
+        115,
+        130
+      ],
+      "local_z_for_global_five": 5.621109721028565,
+      "trials_factor": 30.216038141074524,
+      "importance_trials_factor": 30.203415527196682,
+      "importance_mc_sigma": 0.11338835386585279,
+      "global_z_at_local_five": 4.320336081653057,
+      "cdf_template_local_z": 5.618727044782477,
+      "local_z_without_mc": 5.622743478271927,
+      "local_z_at_90pct_lumi": 5.620387612950966,
+      "median_fb_inverse": 4.6466126068489775,
+      "power90_fb_inverse": 8.165961289776568,
+      "true_mass_threshold_only_median_fb_inverse": 4.8199343113354916
+    },
+    {
+      "mass_range_gev": [
+        110,
+        135
+      ],
+      "local_z_for_global_five": 5.710429588920994,
+      "trials_factor": 50.873747187890054,
+      "importance_trials_factor": 50.83903298377692,
+      "importance_mc_sigma": 0.1889057855218005,
+      "global_z_at_local_five": 4.207595123663068,
+      "cdf_template_local_z": 5.708083493199473,
+      "local_z_without_mc": 5.711533852285907,
+      "local_z_at_90pct_lumi": 5.709898790741487,
+      "median_fb_inverse": 4.841863063197719,
+      "power90_fb_inverse": 8.485401756597561,
+      "true_mass_threshold_only_median_fb_inverse": 5.01766790296667
+    }
+  ]
+}
