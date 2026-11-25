@@ -1,0 +1,154 @@
+{
+  "sha256": {
+    "background.json.gz": "06f748c3d505d1180b0810eef762adbd6ec38d7e0487e878cec55a0c6c2cd46b",
+    "zee-confirmation-spectrum.json.gz": "23c38fa8f5710793f9bb477f27df4e904cd932dba9ffa4eeb0adc222ae5a6b65",
+    "gem_inputs.json": "0dbe9d90c1837a9944a3fc584deb5d150f0b52300eab432dc4abeee14afde435"
+  },
+  "gem_1993": {
+    "source": "https://lss.fnal.gov/archive/other/ssc/ssc-gem-tn-93-373.pdf#page=61",
+    "table": 19,
+    "masses_gev": [
+      80,
+      90,
+      100,
+      120,
+      140
+    ],
+    "selected_density_fb_per_gev": [
+      0.031,
+      0.024,
+      0.019,
+      0.012,
+      0.008
+    ],
+    "interpolation": "Piecewise linear in reconstructed diphoton mass",
+    "pdf_source": "https://lss.fnal.gov/archive/other/ssc/ssc-gem-tn-93-373.pdf#page=31",
+    "pdf": "EHLQ-1",
+    "generator_source": "https://lss.fnal.gov/archive/other/ssc/ssc-gem-tn-93-373.pdf#page=60",
+    "enhancement_on_qq_to_z_gamma": 1.2,
+    "electron_fake_probability_in_tag": 0.03,
+    "photon_track_acceptance_at_working_point": 0.96,
+    "isolation_definition": "https://lss.fnal.gov/archive/other/ssc/ssc-gem-tn-93-373.pdf#page=17",
+    "historical_component_mc_error": "Unreported in Table 19",
+    "historical_preselection": "Table 19 provides intermediate rates for the Higgs signal and post-selection rates for the backgrounds."
+  },
+  "broad": {
+    "interval_gev": [
+      80.0,
+      140.0
+    ],
+    "simulated_fb": 6.130418247210228,
+    "simulated_mc_se_fb": 0.11801677868174462,
+    "gem_interpolated_fb": 1.0,
+    "ratio": 6.130418247210228,
+    "ratio_mc_se": 0.11801677868174462
+  },
+  "window": {
+    "interval_gev": [
+      123.3,
+      126.7
+    ],
+    "simulated_fb": 0.2574567749388496,
+    "simulated_mc_se_fb": 0.026158516853214003,
+    "gem_interpolated_fb": 0.03740000000000006,
+    "ratio": 6.883870987669765,
+    "ratio_mc_se": 0.6994255843105337
+  },
+  "shape": {
+    "simulated_window_fraction": 0.041996608478713594,
+    "simulated_fraction_mc_se": 0.004134992837394388,
+    "gem_window_fraction": 0.03740000000000006,
+    "ratio": 1.1229039700190784,
+    "ratio_mc_se": 0.110561305812684,
+    "relation": "window ratio = broad selected-rate ratio times window-fraction ratio"
+  },
+  "gem_rounding_only": {
+    "broad_fb": [
+      0.97,
+      1.03
+    ],
+    "window_fb": [
+      0.03570000000000006,
+      0.039100000000000065
+    ],
+    "window_fraction": [
+      0.03570000000000006,
+      0.039100000000000065
+    ],
+    "assumption": "The five published densities are rounded to the nearest 0.001 fb/GeV. The bounds exclude modelling and historical MC uncertainty."
+  },
+  "adjoining_mass_intervals": [
+    {
+      "interval_gev": [
+        80.0,
+        90.0
+      ],
+      "simulated_fb": 1.630533984414099,
+      "simulated_mc_se_fb": 0.05659009370741996,
+      "gem_interpolated_fb": 0.275,
+      "ratio": 5.929214488778541,
+      "ratio_mc_se": 0.20578215893607255
+    },
+    {
+      "interval_gev": [
+        90.0,
+        100.0
+      ],
+      "simulated_fb": 1.3793410593697089,
+      "simulated_mc_se_fb": 0.05188666199287874,
+      "gem_interpolated_fb": 0.21499999999999997,
+      "ratio": 6.415539811021903,
+      "ratio_mc_se": 0.24133331159478486
+    },
+    {
+      "interval_gev": [
+        100.0,
+        120.0
+      ],
+      "simulated_fb": 1.8832765335545159,
+      "simulated_mc_se_fb": 0.06102541159988956,
+      "gem_interpolated_fb": 0.31,
+      "ratio": 6.075085592111342,
+      "ratio_mc_se": 0.19685616645125667
+    },
+    {
+      "interval_gev": [
+        120.0,
+        140.0
+      ],
+      "simulated_fb": 1.2372666698719041,
+      "simulated_mc_se_fb": 0.05228079051314104,
+      "gem_interpolated_fb": 0.2,
+      "ratio": 6.18633334935952,
+      "ratio_mc_se": 0.26140395256570514
+    }
+  ],
+  "gem_1992": {
+    "generator_source": "https://lss.fnal.gov/archive/other/ssc/ssc-gem-tn-92-126.pdf#page=31",
+    "tabulated_hard_rate_pb": 14.4,
+    "process": "qqbar/gg -> Z gamma -> l+ l- gamma",
+    "lepton_definition": "https://lss.fnal.gov/archive/other/ssc/ssc-gem-tn-92-126.pdf#page=2",
+    "flavour_caveat": "The report defines l as e or mu and labels the total llgamma. An electron-only weight is unspecified for this entry. Halving the quoted rate assumes it includes both flavors with equal rates.",
+    "hard_cut": "pT(hard photon), pT(Z) >= 10 GeV",
+    "qqbar_enhancement": 1.2,
+    "electron_fake_probability": 0.03,
+    "fake_source": "https://lss.fnal.gov/archive/other/ssc/ssc-gem-tn-92-126.pdf#page=33",
+    "cut_comparison_source": "https://lss.fnal.gov/archive/other/ssc/ssc-gem-tn-92-126.pdf#page=34",
+    "table": 15,
+    "interval_gev": [
+      75.0,
+      165.0
+    ],
+    "photon_isolation_radius": 0.45,
+    "lepton_isolation_radius": 0.3,
+    "lumi_fb_inverse": 10.0,
+    "fake_events_before_pair_pt_40": 51,
+    "fake_events_after_pair_pt_40": 32,
+    "pair_pt_efficiency": 0.6274509803921569,
+    "ideal_calo_selected_fb": 3.2,
+    "approximate_lar_acceptance": 0.56,
+    "lar_corrected_selected_fb": 1.7920000000000003,
+    "geometry": "Table 15 gives the ideal calorimeter yields and the preceding paragraph gives an overall LAr acceptance.",
+    "comparison": "The earlier study used a wider counting interval and a different detector simulation. Its numbers are a separate historical cross-check."
+  }
+}

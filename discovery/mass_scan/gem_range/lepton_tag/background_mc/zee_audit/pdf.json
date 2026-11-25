@@ -1,0 +1,188 @@
+{
+  "core": {
+    "spectrum_sha256": "06f748c3d505d1180b0810eef762adbd6ec38d7e0487e878cec55a0c6c2cd46b",
+    "attempted": 352000,
+    "window_events": 143,
+    "window_events_in_lossy_blocks_matched_by_incoming_flavour_and_momentum": 10,
+    "generated_x_below_ehlq_fit": 20,
+    "selected_x_below_ehlq_fit": 0,
+    "generated_q2_outside_ehlq_fit": 0,
+    "hard_nnpdf_fb": {
+      "rate_fb": 24987.198181818185,
+      "se_fb": 18.361337008622776
+    },
+    "hard_ehlq_fb": {
+      "rate_fb": 12419.938201010214,
+      "se_fb": 9.508861549460995
+    },
+    "window_nnpdf_fb": {
+      "rate_fb": 0.21269469187303142,
+      "se_fb": 0.017783571943054705
+    },
+    "window_ehlq_fb": {
+      "rate_fb": 0.1260458478842525,
+      "se_fb": 0.010588732576235318
+    },
+    "hard_ehlq_over_nnpdf": {
+      "value": 0.4970520548417278,
+      "paired_se": 0.00010679188941561647
+    },
+    "window_ehlq_over_nnpdf": {
+      "value": 0.5926139800399713,
+      "paired_se": 0.004830474800759114
+    },
+    "nnpdf_window_over_hard": {
+      "value": 8.512146513001114e-06,
+      "paired_se": 7.11679394809512e-07
+    },
+    "ehlq_window_over_hard": {
+      "value": 1.0148669489675895e-05,
+      "paired_se": 8.524589353496142e-07
+    },
+    "ehlq_minus_nnpdf_window_fb": {
+      "value": -0.08664884398877892,
+      "paired_se": 0.007317290446409753
+    },
+    "ehlq_over_nnpdf_window_acceptance": {
+      "value": 1.1922573788145236,
+      "paired_se": 0.00971691560082452
+    },
+    "ehlq_plus_gem_gg_prescription_window_fb": 0.15125501746110298,
+    "ehlq_plus_gem_gg_prescription_window_se_fb": 0.012706479091482382
+  },
+  "complement": {
+    "spectrum_sha256": "23c38fa8f5710793f9bb477f27df4e904cd932dba9ffa4eeb0adc222ae5a6b65",
+    "attempted": 288000,
+    "window_events": 6,
+    "window_events_in_lossy_blocks_matched_by_incoming_flavour_and_momentum": 0,
+    "generated_x_below_ehlq_fit": 25951,
+    "selected_x_below_ehlq_fit": 0,
+    "generated_q2_outside_ehlq_fit": 0,
+    "hard_nnpdf_fb": {
+      "rate_fb": 87875.06666666665,
+      "se_fb": 68.59210452936013
+    },
+    "hard_ehlq_fb": {
+      "rate_fb": 43359.045258201535,
+      "se_fb": 35.3421264605597
+    },
+    "window_nnpdf_fb": {
+      "rate_fb": 0.04476208306581818,
+      "se_fb": 0.01918365379446991
+    },
+    "window_ehlq_fb": {
+      "rate_fb": 0.02574165414432479,
+      "se_fb": 0.011050720928512793
+    },
+    "hard_ehlq_over_nnpdf": {
+      "value": 0.4934169259031558,
+      "paired_se": 0.00011583391139890008
+    },
+    "window_ehlq_over_nnpdf": {
+      "value": 0.5750772167254651,
+      "paired_se": 0.009583992631959965
+    },
+    "nnpdf_window_over_hard": {
+      "value": 5.09383204630872e-07,
+      "paired_se": 2.183056297473483e-07
+    },
+    "ehlq_window_over_hard": {
+      "value": 5.936859077738953e-07,
+      "paired_se": 2.548642203725188e-07
+    },
+    "ehlq_minus_nnpdf_window_fb": {
+      "value": -0.019020428921493387,
+      "paired_se": 0.008152546868982778
+    },
+    "ehlq_over_nnpdf_window_acceptance": {
+      "value": 1.1654995735560496,
+      "paired_se": 0.019425098879209172
+    },
+    "ehlq_plus_gem_gg_prescription_window_fb": 0.030889984973189746,
+    "ehlq_plus_gem_gg_prescription_window_se_fb": 0.013260865114215351
+  },
+  "wider": {
+    "hard_nnpdf_fb": {
+      "rate_fb": 112862.26484848483,
+      "se_fb": 71.00715105192495
+    },
+    "hard_ehlq_fb": {
+      "rate_fb": 55778.98345921175,
+      "se_fb": 36.59896652531341
+    },
+    "window_nnpdf_fb": {
+      "rate_fb": 0.2574567749388496,
+      "se_fb": 0.026158516853214023
+    },
+    "window_ehlq_fb": {
+      "rate_fb": 0.15178750202857727,
+      "se_fb": 0.015304891068246703
+    },
+    "hard_ehlq_over_nnpdf": {
+      "value": 0.4942217271121914,
+      "paired_se": 9.323881089122414e-05
+    },
+    "window_ehlq_over_nnpdf": {
+      "value": 0.5895649942194351,
+      "paired_se": 0.004452516871517566
+    },
+    "nnpdf_window_over_hard": {
+      "value": 2.281159032954724e-06,
+      "paired_se": 2.3177415799951675e-07
+    },
+    "ehlq_window_over_hard": {
+      "value": 2.72123105541304e-06,
+      "paired_se": 2.743805046756439e-07
+    },
+    "ehlq_minus_nnpdf_window_fb": {
+      "value": -0.10566927291027234,
+      "paired_se": 0.01095475969284951
+    },
+    "ehlq_over_nnpdf_window_acceptance": {
+      "value": 1.192915976528082,
+      "paired_se": 0.009011073974781765
+    },
+    "ehlq_plus_gem_gg_prescription_window_fb": 0.1821450024342927,
+    "ehlq_plus_gem_gg_prescription_window_se_fb": 0.01836586928189604
+  },
+  "observable_order": [
+    "hard_nnpdf_fb",
+    "hard_ehlq_fb",
+    "window_nnpdf_fb",
+    "window_ehlq_fb"
+  ],
+  "wider_covariance_fb2": [
+    [
+      5042.015500510886,
+      2489.05071152377,
+      0.005297268826848689,
+      0.0030980153360405287
+    ],
+    [
+      2489.05071152377,
+      1339.4843507210114,
+      0.005182413085807637,
+      0.003090425224150677
+    ],
+    [
+      0.005297268826848689,
+      0.005182413085807637,
+      0.0006842680039598821,
+      0.0003992504673213498
+    ],
+    [
+      0.0030980153360405287,
+      0.003090425224150677,
+      0.0003992504673213498,
+      0.0002342396906108977
+    ]
+  ],
+  "modern_pdf": "NNPDF40_nlo_as_01180_qed",
+  "historical_source_sha256": {
+    "pythia56.f": "0470ac77f0cf53ae30bd02a8fcff76156096d6057e5b61562dc3b501275c82b4",
+    "jetset73.f": "d33a6c72fcb1bf5797828a34cfa76169119078419ebf9899e0a0378f69c1bf6f"
+  },
+  "historical_pdf": "EHLQ set 1, internal PYTHIA 5.6 proton PYSTFU at the same factorization scale",
+  "weight": "Product of the two EHLQ1 incoming x*f values divided by the two NNPDF x*f values",
+  "caveat": "Changes the luminosity in the Born matrix element at fixed shower, detector response and coupling choices. Quoted errors describe MC and numerical integration."
+}

@@ -1,0 +1,1231 @@
+{
+  "process": "PYTHIA 5.6 subprocess 19, Z decays to ee or ee + mumu",
+  "pp_tev": 40,
+  "pdf": "EHLQ1",
+  "partonic_pt_min_gev": 10,
+  "official_fortran_sha256": {
+    "pythia56.f": "0470ac77f0cf53ae30bd02a8fcff76156096d6057e5b61562dc3b501275c82b4",
+    "jetset73.f": "d33a6c72fcb1bf5797828a34cfa76169119078419ebf9899e0a0378f69c1bf6f"
+  },
+  "reported_qq_only": true,
+  "historical_multiplier": 1.2,
+  "uncertainties": "Standard error across the independent generator seeds, including integration and selection",
+  "sigma_ee_pb": {
+    "mean": 5.98577036085,
+    "se": 0.003220914435993235
+  },
+  "sigma_ee_mumu_pb": {
+    "mean": 11.9674576175,
+    "se": 0.01912945802921361
+  },
+  "rates_with_object_probabilities_fb": {
+    "75_165": {
+      "kinematics": {
+        "mean": 14.592005193056425,
+        "se": 0.055200410159366095
+      },
+      "fiducial": {
+        "mean": 9.990216629419999,
+        "se": 0.03434660583328289
+      },
+      "isolated": {
+        "mean": 8.664145947373976,
+        "se": 0.0377000235837382
+      },
+      "pair_pt": {
+        "mean": 4.614268207822136,
+        "se": 0.024635026619039827
+      },
+      "ideal92_iso": {
+        "mean": 13.317786693237665,
+        "se": 0.05095797748421526
+      },
+      "ideal92_pair_pt": {
+        "mean": 7.085255014851748,
+        "se": 0.03395519620005193
+      }
+    },
+    "80_140": {
+      "kinematics": {
+        "mean": 11.115996281549245,
+        "se": 0.04784451293757825
+      },
+      "fiducial": {
+        "mean": 7.60964540831594,
+        "se": 0.037430143960767756
+      },
+      "isolated": {
+        "mean": 6.591265836532337,
+        "se": 0.03432928876581422
+      },
+      "pair_pt": {
+        "mean": 3.4886665600459876,
+        "se": 0.020262114285803094
+      },
+      "ideal92_iso": {
+        "mean": 10.127922848689341,
+        "se": 0.04410168607398496
+      },
+      "ideal92_pair_pt": {
+        "mean": 5.348005308733114,
+        "se": 0.02655228377874401
+      }
+    },
+    "123p3_126p7": {
+      "kinematics": {
+        "mean": 0.40157471301458647,
+        "se": 0.008301452314518653
+      },
+      "fiducial": {
+        "mean": 0.28139198255705256,
+        "se": 0.007219887945152917
+      },
+      "isolated": {
+        "mean": 0.2462480315011584,
+        "se": 0.006723846911089204
+      },
+      "pair_pt": {
+        "mean": 0.12905619989151773,
+        "se": 0.005295222960886623
+      },
+      "ideal92_iso": {
+        "mean": 0.37166036107113326,
+        "se": 0.007945884951772174
+      },
+      "ideal92_pair_pt": {
+        "mean": 0.19672656431856753,
+        "se": 0.006543428007104992
+      }
+    }
+  },
+  "runs": [
+    {
+      "seed": 827101,
+      "events": 80000,
+      "flavours": 1,
+      "sigma_pb": 5.9910432171,
+      "matched": 80000,
+      "probability": 0.020952785454545,
+      "counts": {
+        "75_165": {
+          "kinematics": [
+            9395,
+            12815
+          ],
+          "fiducial": [
+            6481,
+            8851
+          ],
+          "isolated": [
+            5624,
+            7692
+          ],
+          "pair_pt": [
+            2954,
+            3748
+          ],
+          "ideal92_iso": [
+            8574,
+            11746
+          ],
+          "ideal92_pair_pt": [
+            4520,
+            5770
+          ]
+        },
+        "80_140": {
+          "kinematics": [
+            7254,
+            9290
+          ],
+          "fiducial": [
+            5032,
+            6474
+          ],
+          "isolated": [
+            4366,
+            5626
+          ],
+          "pair_pt": [
+            2263,
+            2733
+          ],
+          "ideal92_iso": [
+            6619,
+            8499
+          ],
+          "ideal92_pair_pt": [
+            3476,
+            4184
+          ]
+        },
+        "123p3_126p7": {
+          "kinematics": [
+            272,
+            274
+          ],
+          "fiducial": [
+            192,
+            194
+          ],
+          "isolated": [
+            170,
+            172
+          ],
+          "pair_pt": [
+            78,
+            80
+          ],
+          "ideal92_iso": [
+            256,
+            258
+          ],
+          "ideal92_pair_pt": [
+            121,
+            123
+          ]
+        }
+      }
+    },
+    {
+      "seed": 827102,
+      "events": 80000,
+      "flavours": 1,
+      "sigma_pb": 5.9857372392,
+      "matched": 80000,
+      "probability": 0.020952785454545,
+      "counts": {
+        "75_165": {
+          "kinematics": [
+            9195,
+            12537
+          ],
+          "fiducial": [
+            6300,
+            8582
+          ],
+          "isolated": [
+            5463,
+            7461
+          ],
+          "pair_pt": [
+            2952,
+            3814
+          ],
+          "ideal92_iso": [
+            8373,
+            11493
+          ],
+          "ideal92_pair_pt": [
+            4470,
+            5768
+          ]
+        },
+        "80_140": {
+          "kinematics": [
+            6967,
+            8847
+          ],
+          "fiducial": [
+            4777,
+            6077
+          ],
+          "isolated": [
+            4149,
+            5293
+          ],
+          "pair_pt": [
+            2226,
+            2736
+          ],
+          "ideal92_iso": [
+            6337,
+            8097
+          ],
+          "ideal92_pair_pt": [
+            3350,
+            4090
+          ]
+        },
+        "123p3_126p7": {
+          "kinematics": [
+            243,
+            247
+          ],
+          "fiducial": [
+            172,
+            176
+          ],
+          "isolated": [
+            146,
+            150
+          ],
+          "pair_pt": [
+            81,
+            83
+          ],
+          "ideal92_iso": [
+            227,
+            231
+          ],
+          "ideal92_pair_pt": [
+            121,
+            123
+          ]
+        }
+      }
+    },
+    {
+      "seed": 827103,
+      "events": 80000,
+      "flavours": 1,
+      "sigma_pb": 5.9718829881,
+      "matched": 80000,
+      "probability": 0.020952785454545,
+      "counts": {
+        "75_165": {
+          "kinematics": [
+            9317,
+            12849
+          ],
+          "fiducial": [
+            6373,
+            8831
+          ],
+          "isolated": [
+            5593,
+            7789
+          ],
+          "pair_pt": [
+            3020,
+            3984
+          ],
+          "ideal92_iso": [
+            8561,
+            11913
+          ],
+          "ideal92_pair_pt": [
+            4552,
+            5958
+          ]
+        },
+        "80_140": {
+          "kinematics": [
+            7108,
+            9140
+          ],
+          "fiducial": [
+            4841,
+            6253
+          ],
+          "isolated": [
+            4236,
+            5504
+          ],
+          "pair_pt": [
+            2272,
+            2824
+          ],
+          "ideal92_iso": [
+            6526,
+            8462
+          ],
+          "ideal92_pair_pt": [
+            3424,
+            4220
+          ]
+        },
+        "123p3_126p7": {
+          "kinematics": [
+            278,
+            284
+          ],
+          "fiducial": [
+            199,
+            203
+          ],
+          "isolated": [
+            173,
+            177
+          ],
+          "pair_pt": [
+            100,
+            102
+          ],
+          "ideal92_iso": [
+            256,
+            262
+          ],
+          "ideal92_pair_pt": [
+            146,
+            148
+          ]
+        }
+      }
+    },
+    {
+      "seed": 827104,
+      "events": 80000,
+      "flavours": 1,
+      "sigma_pb": 5.981928286,
+      "matched": 80000,
+      "probability": 0.020952785454545,
+      "counts": {
+        "75_165": {
+          "kinematics": [
+            9315,
+            12849
+          ],
+          "fiducial": [
+            6332,
+            8692
+          ],
+          "isolated": [
+            5430,
+            7512
+          ],
+          "pair_pt": [
+            2876,
+            3740
+          ],
+          "ideal92_iso": [
+            8467,
+            11777
+          ],
+          "ideal92_pair_pt": [
+            4505,
+            5869
+          ]
+        },
+        "80_140": {
+          "kinematics": [
+            7132,
+            9180
+          ],
+          "fiducial": [
+            4834,
+            6184
+          ],
+          "isolated": [
+            4136,
+            5322
+          ],
+          "pair_pt": [
+            2175,
+            2653
+          ],
+          "ideal92_iso": [
+            6470,
+            8388
+          ],
+          "ideal92_pair_pt": [
+            3428,
+            4216
+          ]
+        },
+        "123p3_126p7": {
+          "kinematics": [
+            276,
+            280
+          ],
+          "fiducial": [
+            198,
+            200
+          ],
+          "isolated": [
+            181,
+            183
+          ],
+          "pair_pt": [
+            96,
+            98
+          ],
+          "ideal92_iso": [
+            258,
+            262
+          ],
+          "ideal92_pair_pt": [
+            139,
+            143
+          ]
+        }
+      }
+    },
+    {
+      "seed": 827105,
+      "events": 80000,
+      "flavours": 1,
+      "sigma_pb": 5.9731330992,
+      "matched": 80000,
+      "probability": 0.020952785454545,
+      "counts": {
+        "75_165": {
+          "kinematics": [
+            9183,
+            12661
+          ],
+          "fiducial": [
+            6359,
+            8783
+          ],
+          "isolated": [
+            5550,
+            7680
+          ],
+          "pair_pt": [
+            2970,
+            3854
+          ],
+          "ideal92_iso": [
+            8433,
+            11691
+          ],
+          "ideal92_pair_pt": [
+            4490,
+            5830
+          ]
+        },
+        "80_140": {
+          "kinematics": [
+            6978,
+            8962
+          ],
+          "fiducial": [
+            4816,
+            6224
+          ],
+          "isolated": [
+            4197,
+            5447
+          ],
+          "pair_pt": [
+            2250,
+            2788
+          ],
+          "ideal92_iso": [
+            6387,
+            8247
+          ],
+          "ideal92_pair_pt": [
+            3365,
+            4129
+          ]
+        },
+        "123p3_126p7": {
+          "kinematics": [
+            245,
+            249
+          ],
+          "fiducial": [
+            162,
+            164
+          ],
+          "isolated": [
+            147,
+            147
+          ],
+          "pair_pt": [
+            81,
+            81
+          ],
+          "ideal92_iso": [
+            227,
+            229
+          ],
+          "ideal92_pair_pt": [
+            118,
+            118
+          ]
+        }
+      }
+    },
+    {
+      "seed": 827106,
+      "events": 80000,
+      "flavours": 1,
+      "sigma_pb": 5.9726850132,
+      "matched": 80000,
+      "probability": 0.020952785454545,
+      "counts": {
+        "75_165": {
+          "kinematics": [
+            9564,
+            13104
+          ],
+          "fiducial": [
+            6540,
+            8958
+          ],
+          "isolated": [
+            5694,
+            7844
+          ],
+          "pair_pt": [
+            3009,
+            3889
+          ],
+          "ideal92_iso": [
+            8757,
+            12115
+          ],
+          "ideal92_pair_pt": [
+            4664,
+            6064
+          ]
+        },
+        "80_140": {
+          "kinematics": [
+            7261,
+            9271
+          ],
+          "fiducial": [
+            4972,
+            6354
+          ],
+          "isolated": [
+            4284,
+            5494
+          ],
+          "pair_pt": [
+            2247,
+            2739
+          ],
+          "ideal92_iso": [
+            6607,
+            8505
+          ],
+          "ideal92_pair_pt": [
+            3497,
+            4297
+          ]
+        },
+        "123p3_126p7": {
+          "kinematics": [
+            278,
+            282
+          ],
+          "fiducial": [
+            197,
+            201
+          ],
+          "isolated": [
+            172,
+            176
+          ],
+          "pair_pt": [
+            91,
+            93
+          ],
+          "ideal92_iso": [
+            251,
+            255
+          ],
+          "ideal92_pair_pt": [
+            133,
+            135
+          ]
+        }
+      }
+    },
+    {
+      "seed": 827107,
+      "events": 80000,
+      "flavours": 1,
+      "sigma_pb": 6.0054574647,
+      "matched": 80000,
+      "probability": 0.020952785454545,
+      "counts": {
+        "75_165": {
+          "kinematics": [
+            9213,
+            12553
+          ],
+          "fiducial": [
+            6321,
+            8637
+          ],
+          "isolated": [
+            5466,
+            7488
+          ],
+          "pair_pt": [
+            2811,
+            3645
+          ],
+          "ideal92_iso": [
+            8386,
+            11492
+          ],
+          "ideal92_pair_pt": [
+            4355,
+            5631
+          ]
+        },
+        "80_140": {
+          "kinematics": [
+            7032,
+            8930
+          ],
+          "fiducial": [
+            4818,
+            6126
+          ],
+          "isolated": [
+            4166,
+            5302
+          ],
+          "pair_pt": [
+            2107,
+            2569
+          ],
+          "ideal92_iso": [
+            6412,
+            8176
+          ],
+          "ideal92_pair_pt": [
+            3280,
+            4010
+          ]
+        },
+        "123p3_126p7": {
+          "kinematics": [
+            252,
+            256
+          ],
+          "fiducial": [
+            173,
+            175
+          ],
+          "isolated": [
+            149,
+            149
+          ],
+          "pair_pt": [
+            74,
+            74
+          ],
+          "ideal92_iso": [
+            231,
+            233
+          ],
+          "ideal92_pair_pt": [
+            117,
+            117
+          ]
+        }
+      }
+    },
+    {
+      "seed": 827108,
+      "events": 80000,
+      "flavours": 1,
+      "sigma_pb": 6.0046589923,
+      "matched": 80000,
+      "probability": 0.020952785454545,
+      "counts": {
+        "75_165": {
+          "kinematics": [
+            9323,
+            12801
+          ],
+          "fiducial": [
+            6395,
+            8779
+          ],
+          "isolated": [
+            5541,
+            7611
+          ],
+          "pair_pt": [
+            2962,
+            3804
+          ],
+          "ideal92_iso": [
+            8495,
+            11699
+          ],
+          "ideal92_pair_pt": [
+            4526,
+            5816
+          ]
+        },
+        "80_140": {
+          "kinematics": [
+            7092,
+            9068
+          ],
+          "fiducial": [
+            4844,
+            6212
+          ],
+          "isolated": [
+            4200,
+            5388
+          ],
+          "pair_pt": [
+            2238,
+            2740
+          ],
+          "ideal92_iso": [
+            6464,
+            8288
+          ],
+          "ideal92_pair_pt": [
+            3439,
+            4201
+          ]
+        },
+        "123p3_126p7": {
+          "kinematics": [
+            217,
+            221
+          ],
+          "fiducial": [
+            158,
+            160
+          ],
+          "isolated": [
+            137,
+            139
+          ],
+          "pair_pt": [
+            63,
+            65
+          ],
+          "ideal92_iso": [
+            199,
+            203
+          ],
+          "ideal92_pair_pt": [
+            95,
+            97
+          ]
+        }
+      }
+    },
+    {
+      "seed": 827109,
+      "events": 80000,
+      "flavours": 1,
+      "sigma_pb": 5.9899369909,
+      "matched": 80000,
+      "probability": 0.020952785454545,
+      "counts": {
+        "75_165": {
+          "kinematics": [
+            9436,
+            13018
+          ],
+          "fiducial": [
+            6387,
+            8809
+          ],
+          "isolated": [
+            5534,
+            7636
+          ],
+          "pair_pt": [
+            2939,
+            3821
+          ],
+          "ideal92_iso": [
+            8590,
+            11928
+          ],
+          "ideal92_pair_pt": [
+            4583,
+            5981
+          ]
+        },
+        "80_140": {
+          "kinematics": [
+            7196,
+            9278
+          ],
+          "fiducial": [
+            4898,
+            6308
+          ],
+          "isolated": [
+            4238,
+            5474
+          ],
+          "pair_pt": [
+            2238,
+            2738
+          ],
+          "ideal92_iso": [
+            6531,
+            8465
+          ],
+          "ideal92_pair_pt": [
+            3448,
+            4218
+          ]
+        },
+        "123p3_126p7": {
+          "kinematics": [
+            266,
+            270
+          ],
+          "fiducial": [
+            198,
+            202
+          ],
+          "isolated": [
+            170,
+            172
+          ],
+          "pair_pt": [
+            88,
+            88
+          ],
+          "ideal92_iso": [
+            249,
+            253
+          ],
+          "ideal92_pair_pt": [
+            131,
+            133
+          ]
+        }
+      }
+    },
+    {
+      "seed": 827110,
+      "events": 80000,
+      "flavours": 1,
+      "sigma_pb": 5.9879439185,
+      "matched": 80000,
+      "probability": 0.020952785454545,
+      "counts": {
+        "75_165": {
+          "kinematics": [
+            9325,
+            12877
+          ],
+          "fiducial": [
+            6397,
+            8865
+          ],
+          "isolated": [
+            5557,
+            7703
+          ],
+          "pair_pt": [
+            2979,
+            3825
+          ],
+          "ideal92_iso": [
+            8514,
+            11826
+          ],
+          "ideal92_pair_pt": [
+            4548,
+            5890
+          ]
+        },
+        "80_140": {
+          "kinematics": [
+            7093,
+            9129
+          ],
+          "fiducial": [
+            4858,
+            6276
+          ],
+          "isolated": [
+            4228,
+            5468
+          ],
+          "pair_pt": [
+            2267,
+            2793
+          ],
+          "ideal92_iso": [
+            6473,
+            8375
+          ],
+          "ideal92_pair_pt": [
+            3436,
+            4236
+          ]
+        },
+        "123p3_126p7": {
+          "kinematics": [
+            254,
+            258
+          ],
+          "fiducial": [
+            167,
+            171
+          ],
+          "isolated": [
+            150,
+            154
+          ],
+          "pair_pt": [
+            86,
+            86
+          ],
+          "ideal92_iso": [
+            238,
+            242
+          ],
+          "ideal92_pair_pt": [
+            141,
+            141
+          ]
+        }
+      }
+    },
+    {
+      "seed": 827111,
+      "events": 80000,
+      "flavours": 1,
+      "sigma_pb": 5.9797597984,
+      "matched": 80000,
+      "probability": 0.020952785454545,
+      "counts": {
+        "75_165": {
+          "kinematics": [
+            9320,
+            12950
+          ],
+          "fiducial": [
+            6276,
+            8694
+          ],
+          "isolated": [
+            5402,
+            7508
+          ],
+          "pair_pt": [
+            2943,
+            3863
+          ],
+          "ideal92_iso": [
+            8464,
+            11818
+          ],
+          "ideal92_pair_pt": [
+            4585,
+            5991
+          ]
+        },
+        "80_140": {
+          "kinematics": [
+            6991,
+            9015
+          ],
+          "fiducial": [
+            4725,
+            6077
+          ],
+          "isolated": [
+            4071,
+            5271
+          ],
+          "pair_pt": [
+            2218,
+            2742
+          ],
+          "ideal92_iso": [
+            6332,
+            8214
+          ],
+          "ideal92_pair_pt": [
+            3426,
+            4206
+          ]
+        },
+        "123p3_126p7": {
+          "kinematics": [
+            252,
+            256
+          ],
+          "fiducial": [
+            175,
+            179
+          ],
+          "isolated": [
+            150,
+            154
+          ],
+          "pair_pt": [
+            88,
+            90
+          ],
+          "ideal92_iso": [
+            232,
+            236
+          ],
+          "ideal92_pair_pt": [
+            134,
+            136
+          ]
+        }
+      }
+    },
+    {
+      "seed": 827112,
+      "events": 80000,
+      "flavours": 1,
+      "sigma_pb": 5.9850773226,
+      "matched": 80000,
+      "probability": 0.020952785454545,
+      "counts": {
+        "75_165": {
+          "kinematics": [
+            9107,
+            12431
+          ],
+          "fiducial": [
+            6308,
+            8612
+          ],
+          "isolated": [
+            5465,
+            7483
+          ],
+          "pair_pt": [
+            2905,
+            3759
+          ],
+          "ideal92_iso": [
+            8326,
+            11438
+          ],
+          "ideal92_pair_pt": [
+            4436,
+            5736
+          ]
+        },
+        "80_140": {
+          "kinematics": [
+            6982,
+            8868
+          ],
+          "fiducial": [
+            4832,
+            6116
+          ],
+          "isolated": [
+            4181,
+            5299
+          ],
+          "pair_pt": [
+            2203,
+            2689
+          ],
+          "ideal92_iso": [
+            6365,
+            8125
+          ],
+          "ideal92_pair_pt": [
+            3367,
+            4111
+          ]
+        },
+        "123p3_126p7": {
+          "kinematics": [
+            241,
+            243
+          ],
+          "fiducial": [
+            163,
+            165
+          ],
+          "isolated": [
+            140,
+            140
+          ],
+          "pair_pt": [
+            62,
+            62
+          ],
+          "ideal92_iso": [
+            221,
+            221
+          ],
+          "ideal92_pair_pt": [
+            110,
+            110
+          ]
+        }
+      }
+    },
+    {
+      "seed": 827201,
+      "events": 10000,
+      "flavours": 2,
+      "sigma_pb": 11.918901421
+    },
+    {
+      "seed": 827202,
+      "events": 10000,
+      "flavours": 2,
+      "sigma_pb": 11.890039175
+    },
+    {
+      "seed": 827203,
+      "events": 10000,
+      "flavours": 2,
+      "sigma_pb": 11.985317627
+    },
+    {
+      "seed": 827204,
+      "events": 10000,
+      "flavours": 2,
+      "sigma_pb": 11.93523147
+    },
+    {
+      "seed": 827205,
+      "events": 10000,
+      "flavours": 2,
+      "sigma_pb": 12.096289304
+    },
+    {
+      "seed": 827206,
+      "events": 10000,
+      "flavours": 2,
+      "sigma_pb": 12.013072315
+    },
+    {
+      "seed": 827207,
+      "events": 10000,
+      "flavours": 2,
+      "sigma_pb": 11.898452001
+    },
+    {
+      "seed": 827208,
+      "events": 10000,
+      "flavours": 2,
+      "sigma_pb": 11.982602466
+    },
+    {
+      "seed": 827209,
+      "events": 10000,
+      "flavours": 2,
+      "sigma_pb": 11.915897602
+    },
+    {
+      "seed": 827210,
+      "events": 10000,
+      "flavours": 2,
+      "sigma_pb": 11.918124265
+    },
+    {
+      "seed": 827211,
+      "events": 10000,
+      "flavours": 2,
+      "sigma_pb": 11.992039362
+    },
+    {
+      "seed": 827212,
+      "events": 10000,
+      "flavours": 2,
+      "sigma_pb": 12.063524402
+    }
+  ]
+}

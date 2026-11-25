@@ -1,0 +1,22 @@
+{
+  "events": 4000,
+  "max_relative_difference": 4.988825033080957e-07,
+  "hard_lhe_sha256": "0bd7d9b13726e3bcd5affe99478d29c971410c8002071e9b3314ee5abc2c3af4",
+  "settings": {
+    "nevents": 4000,
+    "iseed": 7342853,
+    "ebeam1": 20000.0,
+    "ebeam2": 20000.0,
+    "pdlabel": "lhapdf",
+    "lhaid": 335900,
+    "use_syst": "True",
+    "systematics_program": "none",
+    "pta": 14.0,
+    "etaa": 3.0,
+    "dral": 0.2,
+    "ptl": 14.0,
+    "etal": 3.0,
+    "drll": 0.0,
+    "mmll": 0.0
+  }
+}

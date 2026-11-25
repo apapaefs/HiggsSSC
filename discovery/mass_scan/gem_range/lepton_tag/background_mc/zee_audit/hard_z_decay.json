@@ -1,0 +1,41 @@
+{
+  "cross_section_pb": 12.4256,
+  "cross_section_error_pb": 0.01696178,
+  "lhe_init": [
+    "2212",
+    "2212",
+    "2.000000e+04",
+    "2.000000e+04",
+    "0",
+    "0",
+    "335900",
+    "335900",
+    "-4",
+    "1"
+  ],
+  "generated_events": 60000,
+  "sample": "z_decay",
+  "hard_seed": 7342852,
+  "run_settings": {
+    "nevents": 60000,
+    "iseed": 7342852,
+    "ebeam1": 20000.0,
+    "ebeam2": 20000.0,
+    "pdlabel": "lhapdf",
+    "lhaid": 335900,
+    "use_syst": "False",
+    "systematics_program": "none",
+    "pta": "10",
+    "etaa": "-1",
+    "ptl": "0",
+    "etal": "-1",
+    "dral": "0",
+    "drll": "0",
+    "mmll": "0"
+  },
+  "lhe_sha256": "fd3cadf4fc31c506115cc3003ca82e11292891ee96cbea30561874dfe20eb433",
+  "run_card_sha256": "38141d505cd286eda27c2bf13652257bd14759a947beae7824b7ec2881c02358",
+  "proc_card_sha256": "702f30dfa048af43224f6ac27640a9a2940be996f1bf3773f76a90894ea8727a",
+  "mg5_version": "version = 3.5.15\ndate = 2026-04-17",
+  "integration_id": "z_decay-7342852-fd3cadf4fc31c506"
+}

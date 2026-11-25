@@ -1,0 +1,73 @@
+{
+  "mass_window_gev": [
+    123.3,
+    126.7
+  ],
+  "direct_gem_fb": 0.03740000000000006,
+  "full_over_gem": 6.883870987669775,
+  "total_excess_fb": 0.22005677493884995,
+  "same_events": [
+    {
+      "name": "Published simulation",
+      "fb": 0.25745677493885,
+      "mc_se_fb": 0.026158516853214003
+    },
+    {
+      "name": "Production Z\u03b3, hard pT > 10 GeV",
+      "fb": 0.19447559792834393,
+      "mc_se_fb": 0.02306593278482796,
+      "change_from_previous_fb": -0.06298117701050607,
+      "change_paired_mc_se_fb": 0.011476501676713576
+    },
+    {
+      "name": "Also use EHLQ1",
+      "fb": 0.1128517520326907,
+      "mc_se_fb": 0.013298377890228554,
+      "change_from_previous_fb": -0.08162384589565323,
+      "change_paired_mc_se_fb": 0.009836967041654345
+    },
+    {
+      "name": "Also apply GEM\u2019s 20% increase",
+      "fb": 0.13542210243922884,
+      "mc_se_fb": 0.015958053468274263,
+      "change_from_previous_fb": 0.022570350406538136,
+      "change_paired_mc_se_fb": 0.00265967557804571
+    },
+    {
+      "name": "Also use GEM\u2019s 3% tracker fake",
+      "fb": 0.13406788141483655,
+      "mc_se_fb": 0.01579847293359152,
+      "change_from_previous_fb": -0.0013542210243922895,
+      "change_paired_mc_se_fb": 0.00015958053468274278
+    }
+  ],
+  "ordered_factors": {
+    "full_over_resonant_pt10": {
+      "value": 1.323851309271778,
+      "paired_se": 0.06915305319126704
+    },
+    "nnpdf_over_ehlq_at_resonant_pt10": {
+      "value": 1.7232838163824749,
+      "paired_se": 0.013633694027231807
+    },
+    "nominal_qq_over_gem_qq_plus_gg_prescription": 0.8333333333333334,
+    "nominal_tracker_over_gem_tracker": 1.0101010101010102,
+    "historical_like_rate_over_table19": 3.5847027116266403
+  },
+  "pdf_change_alone": {
+    "fb": 0.1517875020285773,
+    "mc_se_fb": 0.015304891068246703,
+    "fraction_of_excess_removed_if_changed_first": 0.48019095499166703
+  },
+  "fraction_of_excess_removed_in_order": 0.5607139046652898,
+  "fraction_of_excess_removed_paired_mc_se": 0.03384484506701037,
+  "residual_over_gem_mc_se": 0.42241906239549454,
+  "native_vintage_qq_fb": 0.12905619989151773,
+  "native_vintage_with_gem_conventions_fb": 0.15331876547112305,
+  "native_vintage_with_gem_conventions_mc_se_fb": 0.006290724877533308,
+  "tracker_probability_needed_with_full_modern_sample": 0.0044020334427109925,
+  "pre_tracker_rate_fb": {
+    "modern": 8.49607357298205,
+    "gem_implied": 1.2466666666666686
+  }
+}

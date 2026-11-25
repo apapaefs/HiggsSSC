@@ -1,0 +1,3 @@
+import model sm-lepton_masses
+define q = u d s c u~ d~ s~ c~
+generate q q > z a QCD=0, z > e+ e-

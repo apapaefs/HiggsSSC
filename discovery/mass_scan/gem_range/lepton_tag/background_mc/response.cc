@@ -121,6 +121,7 @@ double event_probability(const std::vector<Object>& objects, const std::vector<T
 }
 }
 
+#ifndef TAGGED_BACKGROUND_HELPERS_ONLY
 int main(int argc, char** argv) {
   if(argc!=5 && argc!=6) throw std::runtime_error("Use response sample shower.root packet.csv seed [hard-photons.csv]");
   const std::string sample=argv[1];
@@ -272,3 +273,4 @@ int main(int argc, char** argv) {
     throw std::runtime_error("LHE dilepton sample disagrees with signed top truth classification");
   return 0;
 }
+#endif

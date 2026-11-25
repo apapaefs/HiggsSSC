@@ -14,6 +14,8 @@ The simulated background in the 123.3–126.7 GeV window is **0.746 ± 0.039 fb*
 | All top sources | 0.246 ± 0.021 | 0.145 |
 | **Total** | **0.746 ± 0.039** | **0.408** |
 
+For the eeγ row, substituting the historical Zγ hard process, EHLQ1 parton densities, gluon-fusion prescription and 3% tracker fake probability gives **0.1341 ± 0.0158 fb** with our shower and detector response. These substitutions explain **56 ± 3%** of the absolute difference from GEM. The fake probability itself changes the rate by just 1%. The 1992 GEM data also localize a discrepancy before the diphoton transverse-momentum cut. [Hard cross sections, lepton and photon cuts, and electron fake probabilities](zee_audit/README.md)
+
 For one 40 TeV experiment, the joint search over the GEM ranges reaches a **50% probability of global 5σ at 4.44 fb⁻¹ (5.33 design months)**. The 90% exposure is **7.48 fb⁻¹ (8.98 months)**. At the median the tagged window contains 3.15 expected Higgs events and 3.32 background events. The median rises by 4.9% relative to the same search with GEM's tagged continuum. Categorizing the same signal with the lepton tag saves 7.5% of the median exposure relative to the inclusive-only search. The times assume 10 fb⁻¹ recorded each year.
 
 | Background or analysis choice | Median [fb⁻¹] | Design months | 90% [fb⁻¹] | Design months |
@@ -32,7 +34,7 @@ The 125 GeV mass fixed in advance gives a median local 5σ at 3.10 fb⁻¹. The 
 
 ## Definition of the calculation
 
-The proton beam energy is 20 TeV per beam. The background calculation uses leading-order MadGraph5_aMC@NLO matrix elements and the NNPDF4.0 NLO QED set (LHAPDF 335900). Herwig 7.3 supplies the parton shower, decays and hadronization. The production cross section in each LHE file supplies the absolute normalization. Each hard collision contributes detector outcomes whose probabilities include object identification and the 98.8% event trigger. The central value uses the project's isolated-photon response and the GEM electron rejection of 33. The jet-to-photon response includes isolation and photon identification. These detector efficiencies enter the estimate of the fake background. The generated collision samples provide an independent check of the corresponding selected cross sections conditional on those efficiencies. [GEM electron identification and jet response](https://lss.fnal.gov/archive/other/ssc/ssc-gem-tn-93-373.pdf#page=43)
+The proton beam energy is 20 TeV per beam. The background calculation uses leading-order MadGraph5_aMC@NLO matrix elements and the NNPDF4.0 NLO QED set (LHAPDF 335900). Herwig 7.3 supplies the parton shower, decays and hadronization. The production cross section in each LHE file supplies the absolute normalization. Each hard collision contributes detector outcomes whose probabilities include object identification and the 98.8% event trigger. The central value uses the project's isolated-photon response and a tracker misidentification probability of 1/33 for electrons. GEM quotes 3% at 96% photon acceptance. The jet-to-photon response includes isolation and photon identification. These detector efficiencies enter the estimate of the fake background. The generated collision samples provide an independent check of the corresponding selected cross sections conditional on those efficiencies. [GEM electron identification and jet response](https://lss.fnal.gov/archive/other/ssc/ssc-gem-tn-93-373.pdf#page=43)
 
 | Generated process | Contribution to GEM Table 19 |
 | --- | --- |
