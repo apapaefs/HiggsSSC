@@ -25,6 +25,27 @@ program vintage
   ckin(3)=10.
   mstp(51)=1
   mstj(41)=2
+  if (command_argument_count()>3) then
+    call get_command_argument(4,argument)
+    select case (trim(argument))
+    case ('nominal')
+      continue
+    case ('no_isr')
+      mstp(61)=0
+    case ('no_timelike_qed')
+      mstj(41)=1
+    case ('no_mpi')
+      mstp(81)=0
+    case ('isr_half_scale')
+      parp(64)=0.25
+    case ('isr_double_scale')
+      parp(64)=4.
+    case default
+      error stop 'Unknown PYTHIA radiation or MPI setting'
+    end select
+    write(*,'(A,3I4)') 'SWITCHES ',mstp(61),mstj(41),mstp(81)
+    write(*,'(A,I4,F8.2)') 'ISR_SCALE ',mstp(64),parp(64)
+  end if
   do i=mdcy(23,2),mdcy(23,2)+mdcy(23,3)-1
     mdme(i,1)=0
     if(abs(kfdp(i,1))==11.and.abs(kfdp(i,2))==11) mdme(i,1)=1

@@ -1,0 +1,37 @@
+{
+  "herwig_fake_calo_given_other_cuts": {
+    "before_fake_calo": {
+      "rate_fb": 0.1392952312868314,
+      "mc_se_fb": 0.0147272143743574,
+      "relative_to_baseline": 1.0,
+      "ratio_paired_se": 0.0
+    },
+    "surrounding_deposits": {
+      "rate_fb": 0.13922860694976227,
+      "mc_se_fb": 0.01472710360361617,
+      "relative_to_baseline": 0.9995217041067834,
+      "ratio_paired_se": 0.00041503465573023806
+    },
+    "including_clean_shower_efficiency": {
+      "rate_fb": 0.12530574625478605,
+      "mc_se_fb": 0.013254393243254553,
+      "relative_to_baseline": 0.8995695336961052,
+      "ratio_paired_se": 0.0003735311901533204
+    }
+  },
+  "native_effective_clean_shower_efficiency_at_zero_leakage": {
+    "80_100": {
+      "value": 0.25742275873308423,
+      "seed_mc_se": 0.0021964389189967105
+    },
+    "higgs_window": {
+      "value": 0.2564847169133401,
+      "seed_mc_se": 0.010422314266838954
+    },
+    "difference_high_minus_low": {
+      "value": -0.0009380418197441065,
+      "seed_mc_se": 0.010927612095576555
+    }
+  },
+  "assumptions": "The Herwig denominator includes the 3% tracking weight and every other event cut. The native inversion assigns the full residual to the fake electron's 90% clean-shower probability. The uncertainties include only simulation statistics with GEM fixed."
+}
