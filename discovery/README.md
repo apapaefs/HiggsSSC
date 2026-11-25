@@ -4,6 +4,20 @@ At a 40 TeV proton–proton SSC, the median local 5σ threshold for the Standard
 
 These are expected first crossings at a fixed Higgs mass. At the quoted luminosity, the modeled signal has a 50% chance of passing a one-sided local 5σ test. Months assume design delivery from the start. A search across unknown masses, detector commissioning or a different luminosity history would change the interpretation.
 
+## What one experiment would see
+
+Both mass spectra below show expected numbers of events in one detector at the **same 1.83 fb⁻¹**. The diphoton peak and the handful of clean four-lepton candidates together give a 50% probability of local 5σ at 125 GeV. With **3.26 fb⁻¹ (3.91 design months)** the probability rises to 90%. Using the four-lepton heavy-flavour upper bound gives 90% at **4.40 fb⁻¹ (5.28 months)**. Each probability refers to a test at a specified exposure. [Probability versus luminosity (PDF)](published/discovery-probability.pdf) · [Numerical curve](published/discovery_probability.csv)
+
+![Projected diphoton event spectrum and background-subtracted Higgs peak at the combined median discovery exposure.](published/discovery-diphoton.png)
+
+**Diphotons.** The upper panel shows the five simulated background components, the calibrated background used in the likelihood, and the signal plus background. The lower panel subtracts the calibrated background from the expected total, exposing the 125 GeV peak. The band shows one standard deviation of Poisson counting fluctuations about a fixed background in each bin. The finite-MC background uncertainty enters the discovery fit separately. Between 120 and 130 GeV the model predicts **309 signal events over 16,737 background events**. The discovery fit uses the full 105–160 GeV spectrum. [Diphoton figure (PDF)](published/discovery-diphoton.pdf) · [ATLAS discovery paper, Fig. 4](https://arxiv.org/html/1207.7214#S5.F4)
+
+![Projected four-lepton mass spectra before the classifier selection and in the final discovery sample, at the same integrated luminosity.](published/discovery-fourlepton.png)
+
+**Four leptons.** The wider spectrum shows the 4e, 4μ and 2e2μ candidates passing the SSC lepton, isolation, pairing and trigger requirements. The continuum samples were generated over 90–180 GeV in hard four-lepton mass, so migration at the ends of the displayed range depends on this generation cut. The second panel shows the independent test sample after the final classifier selection in 120–130 GeV. It contributes **3.05 signal events over 0.23 continuum events** to the combined likelihood. Three million heavy-flavour source events gave zero selected candidates. Their joint upper bound constrains the total yield and supplies no measured mass distribution. [Four-lepton figure (PDF)](published/discovery-fourlepton.pdf) · [CMS discovery paper, Figs. 3–4](https://cms-results.web.cern.ch/cms-results/public-results/publications/HIG-12-028/index.html)
+
+The figures use the expected bin means at the physical cross sections. A single experiment would record integer counts fluctuating about those means. To reproduce these figures from the student checkout, switch to `codex/ssc-single-experiment-discovery` and run `python3 student_events.py discovery`.
+
 ## Discovery reach
 
 | Channel | Central background, fb⁻¹ | Design months | Upper heavy flavour, fb⁻¹ | Design months |

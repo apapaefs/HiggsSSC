@@ -17,6 +17,7 @@ On Linux, `sha256sum -c SHA256SUMS` also works. The published inputs and fit are
 | `records/` inside the spectrum archive | Original final fit and reach, extended four-lepton test, zero-count heavy-flavour input record and the iHixs normalization. Some historical records identify generator paths in the production account. The portable refit reads the archive members directly. |
 | [production-sources.tar.gz](data/production-sources.tar.gz) | Frozen site-specific production and extraction scripts, detector source, example cards, seed settings, the fit used during the campaign, and the earlier baseline and four-lepton analysis recipes. Use the student command for the portable calculation. |
 | [Four-lepton mass inputs](data/fourlepton-spectrum.json) | Per-process bins and source covariances projected from the frozen original and extended scores. The output CSV includes the three heavy-flavour processes with zero central rate. |
+| [Fiducial four-lepton spectrum](data/fourlepton-fiducial.csv) | Two-GeV bins before the classifier and Higgs mass cut, in fb per bin. The projection sums 30 samples from the standard student report with the SSC detector response. |
 | [GEM table excerpt](data/gem-table18.csv) | The two neighboring mass points from Table 18. The plotting code converts each quoted significance to a 5σ luminosity at its own mass. |
 | [Published outputs](published/) | PNG and PDF figures, CSV tables and the JSON result. The CSV mass-spectrum entries are fb per one-GeV bin. `background_mc_sigma_fb` describes the total simulated background per bin. `residual_mc_sigma_fb` includes its correlation with the fitted sidebands. Full covariance matrices are in the input packets. |
 
@@ -61,6 +62,15 @@ The selected four-lepton mass histogram can also be rebuilt from the original an
 python discovery/prepare_fourlepton.py /home/shared/HiggsSSC/fourlepton/ssc40-20261112/reference \
   > results/discovery-rebuild/fourlepton-spectrum.json
 ```
+
+The wider four-lepton panel uses the standard two-profile student report for the 18 November four-lepton release. Its `observables/data/m4l.csv` has SHA-256 `442699d08186445988f0ac78cb2f0d64c246d7e29cb7346368f0e99a96fa0df9`. The following command reads the SSC profile, keeps the inclusive flavour sum, checks each sample against the fiducial cut flow including underflow and overflow, and exports the bins. The broad panel and selected panel correspond to different cuts and sample exposures in simulation. Both use the same projected collision luminosity. [Student report instructions](../README.md#workspaces-and-results)
+
+```bash
+python discovery/prepare_fiducial_spectrum.py hfourlepton/student_runs/ssc40-20261118/results/baseline/report_both results/discovery-rebuild/fourlepton-fiducial.csv
+cmp discovery/data/fourlepton-fiducial.csv results/discovery-rebuild/fourlepton-fiducial.csv
+```
+
+The portable replay also regenerates `discovery-diphoton`, `discovery-fourlepton` and `discovery-probability` as PDF and PNG figures. The nominal background under the diphoton peak is the fitted continuum plus the calibrated signal-shaped component. The probability plot evaluates the profiled diphoton score and sums over the four-lepton counts at each exposure. The sampled probabilities are in `discovery_probability.csv`. The window yields and the two combined 90% exposures are under `single_experiment` in `results.json`.
 
 The clean HTTPS checkout was tested with Python 3.14.7, NumPy 2.5.5, SciPy 1.18.1 and Matplotlib 3.11.2. The independent Timur replay used Python 3.9.25, NumPy 2.0.2, SciPy 1.13.1 and Matplotlib 3.9.4.
 

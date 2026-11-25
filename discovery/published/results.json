@@ -273,5 +273,18 @@
       "estimated_five_sigma_fb_inverse": 3.08641975308642,
       "design_months": 3.703703703703704
     }
-  ]
+  ],
+  "single_experiment": {
+    "combined_90pct_fb_inverse": {
+      "central": 3.255660577462253,
+      "upper": 4.401458407536037
+    },
+    "combined_median_fb_inverse": 1.8297340980952546,
+    "yields_120_130_gev_at_combined_median": {
+      "diphoton_signal": 308.8267090150927,
+      "diphoton_calibrated_background": 16737.032223030266,
+      "fourlepton_signal": 3.0529797500300404,
+      "fourlepton_central_background": 0.22998379220828846
+    }
+  }
 }

@@ -109,6 +109,18 @@ def analyze():
                            background_fb=background, background_mc_sigma_fb=np.sqrt(background_cov.diagonal()),
                            sideband_fit_fb=continuum, residual_fb=difference,
                            residual_mc_sigma_fb=np.sqrt(residual_cov.diagonal()))
+            nominal_lumi = next(r["luminosity_fb_inverse"] for r in rows
+                                if (r["model"], r["treatment"], r["channel"], r["heavy_flavour"])
+                                == (name, "calibrated", "combined", "central"))
+            fixed_exposure = dict(
+                combined_90pct_fb_inverse={scenario: crossing(
+                    lambda l: joint_power(calibration.q, l, s4, rate) - .9) for scenario, rate in b4.items()},
+                combined_median_fb_inverse=nominal_lumi,
+                yields_120_130_gev_at_combined_median={
+                    "diphoton_signal": nominal_lumi * signal[BLIND].sum(),
+                    "diphoton_calibrated_background": nominal_lumi * (continuum + center * signal)[BLIND].sum(),
+                    "fourlepton_signal": nominal_lumi * s4,
+                    "fourlepton_central_background": nominal_lumi * b4["central"]})
     with (DATA / "gem-table18.csv").open() as file:
         gem = [{k: float(v) for k, v in row.items()} for row in csv.DictReader(file)]
     for row in gem:
@@ -120,7 +132,7 @@ def analyze():
                   prior_packets=reference["precampaign_receipts"], final_packets=reference["extra_receipts"],
                   total_generated_by_stratum=total, final_campaign_generated_by_stratum=added,
                   closure=closure, models=models, fourlepton=four, reach=rows,
-                  signal_normalization_check=signal_check, gem_table18=gem)
+                  signal_normalization_check=signal_check, gem_table18=gem, single_experiment=fixed_exposure)
     if result["target_met"] != reference["precision_target"]["achieved"]:
         raise ValueError("Campaign precision decision changed")
     four_spectrum = fourlepton_spectrum(records["records/extended_fourlepton.json"], records["records/reducible_bound.json"])
@@ -139,7 +151,10 @@ def main():
     parser.add_argument("--output", type=Path, default=Path("results/discovery-ssc40"))
     out = parser.parse_args().output
     from plots import plot_fourlepton, plot_reach, plot_spectrum
+    from discovery_spectra import plot_discovery_spectra
+    from discovery_power import plot_discovery_power
     results, spectra, four_spectrum = analyze()
+    fiducial = np.genfromtxt(DATA / "fourlepton-fiducial.csv", delimiter=",", names=True)
     out.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=out) as directory:
         temp = Path(directory)
@@ -150,6 +165,10 @@ def main():
         plot_fourlepton(four_spectrum, temp)
         plot_spectrum(spectra, temp)
         plot_reach(results["reach"], results["gem_table18"], temp)
+        plot_discovery_spectra(spectra, four_spectrum, results["single_experiment"]["combined_median_fb_inverse"],
+                               temp, spurious_mu=results["models"]["exponential2"]["spurious_mu"],
+                               fiducial_fourlepton=fiducial)
+        plot_discovery_power(spectra, results, temp)
         for path in temp.iterdir():
             path.replace(out / path.name)
     for row in results["reach"]:
