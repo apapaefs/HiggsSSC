@@ -4,6 +4,8 @@ At a 40 TeV proton–proton SSC, the median local 5σ threshold for the Standard
 
 These are expected first crossings at a fixed Higgs mass. At the quoted luminosity, the modeled signal has a 50% chance of passing a one-sided local 5σ test. Months assume design delivery from the start. A search across unknown masses, detector commissioning or a different luminosity history would change the interpretation.
 
+The **global three-channel search** combines untagged diphotons over 80–160 GeV, lepton-tagged diphotons over 80–140 GeV and four leptons over 110–135 GeV. For a true 125 GeV Higgs it reaches global 5σ with **50% probability at 2.30 fb⁻¹ (2.77 design months)** and **90% probability at 3.86 fb⁻¹ (4.64 months)**. GEM’s 1993 luminosity curves at 125 GeV give about 2.7 and 1.5 fb⁻¹ under its two bottom-quark mass assumptions and its historical peak significance criterion. [Three-channel calculation, plot and comparison with GEM](mass_scan/gem_range/three_channel/README.md)
+
 ## What one experiment would see
 
 Both mass spectra below show expected numbers of events in one detector at the **same 1.83 fb⁻¹**. The diphoton peak and the handful of clean four-lepton candidates together give a 50% probability of local 5σ at 125 GeV. With **3.26 fb⁻¹ (3.91 design months)** the probability rises to 90%. Using the four-lepton heavy-flavour upper bound gives 90% at **4.40 fb⁻¹ (5.28 months)**. Each probability refers to a test at a specified exposure. [Probability versus luminosity (PDF)](published/discovery-probability.pdf) · [Numerical curve](published/discovery_probability.csv)

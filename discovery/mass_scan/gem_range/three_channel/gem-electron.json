@@ -1,0 +1,70 @@
+{
+  "toys": 40000,
+  "seed": 923125,
+  "tag_background": "gem-electron",
+  "true_mass_gev": 125.0,
+  "inclusive_range_gev": [
+    80,
+    160
+  ],
+  "tagged_range_gev": [
+    80,
+    140
+  ],
+  "fourlepton_range_gev": [
+    110,
+    135
+  ],
+  "step_gev": 0.5,
+  "design_fb_inverse_per_year": 10,
+  "fourlepton_background": "central qq+gg",
+  "tagged_signal_fb": 0.7087852863847444,
+  "tagged_background_fb": 0.5262211974965147,
+  "four_signal_fb": 1.6685373865023223,
+  "four_background_fb": 0.12569246670743064,
+  "crossings": [
+    {
+      "target_power": 0.5,
+      "luminosity_fb_inverse": 2.281575124749148,
+      "design_months": 2.7378901496989774,
+      "power": 0.5003821712869707,
+      "power_mc_se": 0.0016851364453527385,
+      "exposure_mc_se_from_power": 0.004269398361184015,
+      "local_z": 5.867159827487051,
+      "effective_trials": 129.31942625,
+      "effective_trials_mc_se": 0.20753715829071326,
+      "independent_global_p": 2.8622798431968864e-07,
+      "independent_global_p_mc_se": 4.598560221147513e-10,
+      "true_mass_power_toys": 0.4748049837957892,
+      "true_mass_power_mc_se": 0.0016519923463277236,
+      "true_mass_power_analytic": 0.4735583742121301,
+      "fixed_mass_local_luminosity_fb_inverse": 1.6781371583788787,
+      "bonferroni_sufficient_fb_inverse": 2.379941168620099
+    },
+    {
+      "target_power": 0.9,
+      "luminosity_fb_inverse": 3.8268021632063736,
+      "design_months": 4.592162595847648,
+      "power": 0.8999097800795478,
+      "power_mc_se": 0.0008463634163077921,
+      "exposure_mc_se_from_power": 0.006264597643929543,
+      "local_z": 5.8680169059609915,
+      "effective_trials": 129.98942583333334,
+      "effective_trials_mc_se": 0.20522278733505533,
+      "independent_global_p": 2.8675903361558145e-07,
+      "independent_global_p_mc_se": 4.517287748420178e-10,
+      "true_mass_power_toys": 0.8896696332108064,
+      "true_mass_power_mc_se": 0.0008775685670336093,
+      "true_mass_power_analytic": 0.8915673615502169,
+      "fixed_mass_local_luminosity_fb_inverse": 2.9612718752698997,
+      "bonferroni_sufficient_fb_inverse": 3.9326737199012163
+    }
+  ],
+  "moderate_null_check": {
+    "local_alpha": 0.002,
+    "direct_p": 0.1599,
+    "direct_mc_se": 0.0018325893455962083,
+    "importance_p": 0.15617198589452216,
+    "importance_mc_se": 0.00043398734207160996
+  }
+}

@@ -13,6 +13,8 @@ The April 1993 GEM Technical Design Report tabulated the expected significance f
 
 **At 125 GeV** the original programme had two photon channels. Its nearest benchmark, 120 GeV, gave 7.8σ for inclusive γγ, 2.7σ for lepton-tagged γγ and 8.5σ for GEM's combination at 10 fb⁻¹. The four-lepton entries start at 140 GeV. Our modern γγ + 4ℓ sensitivity at 125 GeV answers a different question about the same machine. The inclusive photon and four-lepton benchmark ranges overlap from 140 to 160 GeV. [Benchmark data](benchmarks.csv) · [Vector figure](coverage.pdf)
 
+Our three-channel search adds the modern four-lepton selection at 110–135 GeV to the two photon searches over their GEM ranges. The combined median global 5σ exposure is **2.30 fb⁻¹ (2.77 design months)**. [Three-channel scan and GEM’s luminosity curves at 125 GeV](three_channel/README.md)
+
 GEM discussed the chance of an upward fluctuation when many mass bins are examined and required a peak significance of at least 5σ for discovery. It published sensitivities for specified Higgs masses. The report gives neither a uniform hypothesis spacing nor a calibrated global 5σ threshold for the full 80–800 GeV programme. The seven inclusive photon benchmarks show the masses at which GEM quoted sensitivity. A separate detector study also gives photon mass resolutions at 110 and 130 GeV. [GEM's definition of statistical significance, §2.3.1.3](https://lss.fnal.gov/archive/other/ssc/ssc-gem-tn-93-262.pdf#page=55)
 
 ## A true 125 GeV Higgs in the historical search

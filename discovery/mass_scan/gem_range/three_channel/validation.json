@@ -1,0 +1,84 @@
+{
+  "mass_hypotheses": 161,
+  "bonferroni_local_z": 5.903398421061108,
+  "tagged_window_signal_fb": 0.7087852863847444,
+  "tagged_window_background_fb": 0.7462779724353634,
+  "fourlepton_signal_fb": 1.6685373865023225,
+  "fourlepton_background_fb": {
+    "central": 0.12569246670743067,
+    "upper": 0.6712671044239029
+  },
+  "results": [
+    {
+      "fourlepton_background": "central",
+      "power": 0.5,
+      "fixed_mass": {
+        "luminosity_fb_inverse": 1.6977543239848871,
+        "design_months": 2.0373051887818643
+      },
+      "bonferroni_sufficient": {
+        "luminosity_fb_inverse": 2.4087515315345356,
+        "design_months": 2.8905018378414424
+      }
+    },
+    {
+      "fourlepton_background": "central",
+      "power": 0.9,
+      "fixed_mass": {
+        "luminosity_fb_inverse": 2.997727933506254,
+        "design_months": 3.5972735202075046
+      },
+      "bonferroni_sufficient": {
+        "luminosity_fb_inverse": 3.983501976756884,
+        "design_months": 4.780202372108261
+      }
+    },
+    {
+      "fourlepton_background": "upper",
+      "power": 0.5,
+      "fixed_mass": {
+        "luminosity_fb_inverse": 2.2997225998795385,
+        "design_months": 2.7596671198554463
+      },
+      "bonferroni_sufficient": {
+        "luminosity_fb_inverse": 3.320848547997004,
+        "design_months": 3.985018257596405
+      }
+    },
+    {
+      "fourlepton_background": "upper",
+      "power": 0.9,
+      "fixed_mass": {
+        "luminosity_fb_inverse": 3.9259362029266374,
+        "design_months": 4.711123443511965
+      },
+      "bonferroni_sufficient": {
+        "luminosity_fb_inverse": 5.359242732780922,
+        "design_months": 6.431091279337107
+      }
+    }
+  ],
+  "interpretation": "Bonferroni limits the grid-wide false-positive rate if every local test has valid size. Power here uses the true mass alone. The upper four-lepton background is an integrated control bound and has no measured spectrum for the other masses.",
+  "independent_signal_toys": {
+    "toys": 60000,
+    "base_seed": 972413,
+    "crossings": [
+      {
+        "target_power": 0.5,
+        "luminosity_fb_inverse": 2.3048893626198237,
+        "scan_power": 0.4981333333333333,
+        "scan_power_mc_se": 0.0020412272270848714,
+        "true_mass_power": 0.4728333333333333,
+        "true_mass_power_mc_se": 0.00203822623957786
+      },
+      {
+        "target_power": 0.9,
+        "luminosity_fb_inverse": 3.864771093992127,
+        "scan_power": 0.90035,
+        "scan_power_mc_se": 0.0012228373937963571,
+        "true_mass_power": 0.8907,
+        "true_mass_power_mc_se": 0.0012737968833373707
+      }
+    ]
+  }
+}

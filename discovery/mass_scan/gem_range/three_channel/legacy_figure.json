@@ -1,0 +1,44 @@
+{
+  "source": "https://lss.fnal.gov/archive/other/ssc/ssc-gem-tn-93-373.pdf#page=13",
+  "figure": 1,
+  "mass_gev": 125,
+  "design_fb_inverse_per_year": 10,
+  "interpretation": "Graph reading of the historical sensitivity at the specified mass. GEM gives no calibrated global five-sigma threshold across masses or three-channel breakdown at 125 GeV.",
+  "x_100_gev_at_two_heights": [
+    476.0,
+    476.0
+  ],
+  "x_1000_gev_at_two_heights": [
+    1385.5,
+    1384.5
+  ],
+  "y_10_fb_inverse_at_two_abscissae": [
+    750.5,
+    746.0
+  ],
+  "y_1_fb_inverse_at_two_abscissae": [
+    1135.5,
+    1135.0
+  ],
+  "curves": {
+    "solid_default_bottom_mass": {
+      "luminosity_fb_inverse": 2.6781320398744173,
+      "design_months": 3.2137584478493006,
+      "fits_by_half_width_gev": {
+        "0.75": 2.6791291248523312,
+        "1.0": 2.6781320398744173,
+        "1.5": 2.6766873627001346
+      }
+    },
+    "dashed_alternative_running_bottom_mass": {
+      "luminosity_fb_inverse": 1.521188928024202,
+      "design_months": 1.8254267136290423,
+      "fits_by_half_width_gev": {
+        "0.75": 1.5259806901131932,
+        "1.0": 1.521188928024202,
+        "1.5": 1.516700389098878
+      }
+    }
+  },
+  "source_sha256": "44379230cc59668a415b7f15a6367449d4ad6c0f23dee3373b342b4da84573c8"
+}
