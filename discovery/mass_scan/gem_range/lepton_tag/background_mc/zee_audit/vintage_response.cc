@@ -1,7 +1,13 @@
 // Apply the same tagged EM smearing, cracks, 20 GeV threshold, and isolation
 // as the main analysis to a native PYTHIA 5.6 / JETSET 7.3 LUJETS record.
+#ifdef GEM_NATIVE_CALO_REPLAY
+#define GEM_SELECTION_HELPERS_ONLY
+#include "selection/herwig_cells.cc"
+extern "C" int luchge_(const int*);
+#else
 #define TAGGED_BACKGROUND_RESPONSE
 #include "../../signal/measure.cc"
+#endif
 #include <array>
 #include <iomanip>
 #include <iostream>
@@ -88,6 +94,17 @@ extern "C" void measure_(const int* seed, const int* event) {
   }
   double in_event[NWindows][NStages]{};
   const bool fiducial=std::all_of(reco.begin(),reco.end(),[](const FourVector& p){return in_em_fiducial(p,2.5);});
+#ifdef GEM_NATIVE_CALO_REPLAY
+  if (fiducial) {
+    std::vector<TaggedEM> em;
+    for (int a=0;a<3;++a) em.push_back({index[a],rec.k[1][record[a]],reco[a]});
+    std::vector<double> charges;
+    for (int i=0;i<rec.n;++i) {
+      if (rec.k[0][i]>0 && rec.k[0][i]<=10) charges.push_back(luchge_(&rec.k[1][i])/3.);
+    }
+    process(std::cout<<std::setprecision(16),*event,em,stable,charges);
+  }
+#endif
   for (int fake=1;fake<=2;++fake) {
     const auto pair=reco[0]+reco[fake];
     const bool iso=fiducial && isolated(stable,index[0],.45) && isolated(stable,index[fake],.45)

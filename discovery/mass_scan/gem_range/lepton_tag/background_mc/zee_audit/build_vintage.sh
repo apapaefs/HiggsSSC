@@ -3,7 +3,14 @@
 set -euo pipefail
 src="$(cd "$(dirname "$0")" && pwd)"
 project="$(cd "$src/../../../../../.." && pwd)"
-work="${1:?Usage: bash build_vintage.sh BUILD_DIRECTORY}"
+work="${1:?Usage: bash build_vintage.sh BUILD_DIRECTORY [--selection]}"
+flags=(-O2 -std=c++17)
+binary=vintage
+case "${2:-}" in
+    "") ;;
+    --selection) flags+=(-DGEM_NATIVE_CALO_REPLAY); binary=vintage-selection ;;
+    *) echo "Expected --selection as the optional second argument" >&2; exit 2 ;;
+esac
 mkdir -p "$work"
 cd "$work"
 for f in pythia56.f jetset73.f; do
@@ -25,6 +32,6 @@ for f in pythia56 jetset73; do
     "$fc" -O2 -std=legacy -fallow-argument-mismatch -fno-automatic -c "$f.f" -o "$f.o"
 done
 "$fc" -O2 -c "$src/vintage.f90" -o main.o
-"$cxx" -O2 -std=c++17 -I"$project" $(root-config --cflags) -c "$src/vintage_response.cc" -o response.o
-"$cxx" main.o pythia56.o jetset73.o response.o $(root-config --libs) \
-    -L"$(dirname "$("$fc" -print-file-name=libgfortran.a)")" -lgfortran -o vintage
+"$cxx" "${flags[@]}" -I"$project" $(root-config --cflags) -c "$src/vintage_response.cc" -o "$binary-response.o"
+"$cxx" main.o pythia56.o jetset73.o "$binary-response.o" $(root-config --libs) \
+    -L"$(dirname "$("$fc" -print-file-name=libgfortran.a)")" -lgfortran -o "$binary"

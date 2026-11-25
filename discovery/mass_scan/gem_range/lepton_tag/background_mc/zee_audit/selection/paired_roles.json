@@ -1,0 +1,72 @@
+{
+  "nominal_fb": 0.13406788141483655,
+  "with_cell_isolation_and_noise_fb": 0.1264729189037717,
+  "combined_change_fb": -0.00759496251106484,
+  "combined_change_paired_se_fb": 0.004794718467184004,
+  "roles": {
+    "real": {
+      "change_fb": -0.004986443822164411,
+      "paired_mc_se_fb": 0.0026402132774138278,
+      "fraction_of_original_residual_removed": 0.05158325339484572,
+      "residual_fraction_paired_se": 0.023850501479269173
+    },
+    "fake": {
+      "change_fb": -0.003932653076432661,
+      "paired_mc_se_fb": 0.002675373635154681,
+      "fraction_of_original_residual_removed": 0.04068210680604695,
+      "residual_fraction_paired_se": 0.02550010141864445
+    },
+    "tag": {
+      "change_fb": 0.0013241343875322672,
+      "paired_mc_se_fb": 0.0022000167578136486,
+      "fraction_of_original_residual_removed": -0.013697769808877176,
+      "residual_fraction_paired_se": 0.023334665467282023
+    }
+  },
+  "reference_fb": 0.0374,
+  "covariance_order": [
+    "nominal",
+    "noise",
+    "real",
+    "fake",
+    "tag"
+  ],
+  "covariance_fb2": [
+    [
+      0.00024959174703342396,
+      0.00020139743321446313,
+      -2.2479781138817684e-05,
+      -1.8365332316774425e-05,
+      -7.349200363368772e-06
+    ],
+    [
+      0.00020139743321446313,
+      0.00017619244457505763,
+      -1.4029811176662286e-05,
+      -9.596286518941986e-06,
+      -1.57889094380121e-06
+    ],
+    [
+      -2.2479781138817684e-05,
+      -1.4029811176662286e-05,
+      6.970726150232266e-06,
+      1.0802149185840578e-06,
+      3.9902889333907364e-07
+    ],
+    [
+      -1.8365332316774425e-05,
+      -9.596286518941986e-06,
+      1.0802149185840578e-06,
+      7.157624087680771e-06,
+      5.312067915676098e-07
+    ],
+    [
+      -7.349200363368772e-06,
+      -1.57889094380121e-06,
+      3.9902889333907364e-07,
+      5.312067915676098e-07,
+      4.840073734660878e-06
+    ]
+  ],
+  "assumption": "Isolations of the three candidates have independent noise given their individual in-cone activities. The attribution averages all six orders of substituting the three isolation decisions."
+}
