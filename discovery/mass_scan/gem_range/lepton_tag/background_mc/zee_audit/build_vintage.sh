@@ -3,13 +3,14 @@
 set -euo pipefail
 src="$(cd "$(dirname "$0")" && pwd)"
 project="$(cd "$src/../../../../../.." && pwd)"
-work="${1:?Usage: bash build_vintage.sh BUILD_DIRECTORY [--selection]}"
+work="${1:?Usage: bash build_vintage.sh BUILD_DIRECTORY [--selection|--mass-control]}"
 flags=(-O2 -std=c++17)
 binary=vintage
 case "${2:-}" in
     "") ;;
     --selection) flags+=(-DGEM_NATIVE_CALO_REPLAY); binary=vintage-selection ;;
-    *) echo "Expected --selection as the optional second argument" >&2; exit 2 ;;
+    --mass-control) flags+=(-DGEM_NATIVE_CALO_REPLAY -DGEM_NATIVE_MASS_CONTROL); binary=vintage-mass-control ;;
+    *) echo "Expected --selection or --mass-control as the optional second argument" >&2; exit 2 ;;
 esac
 mkdir -p "$work"
 cd "$work"

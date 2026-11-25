@@ -45,6 +45,8 @@ The bars and shaded band show one Monte Carlo standard error. The dashed line is
 
 ## Reproduction
 
+The [low-mass calibration test](mass_control/README.md) uses GEM's 80–100 GeV electron-fake rates to predict the 125 GeV window and tests the mass dependence of primary shower energy entering isolation.
+
 The Herwig sample comprises **640,000 hard collisions** from 498 original shower blocks. All 267 assignments passing the fixed kinematics and mass window before isolation were included, in 266 distinct collisions. The old selection accepts 150 assignments in 149 collisions. Event identities, masses and probabilities agree with the original detector packets. Each variant uses the same production-Zγ matrix element, 10 GeV hard photon cut, EHLQ1 partons, 1.20 gluon prescription and 3% tracker fake probability. The analysis adds exclusive assignments in each collision before computing the covariance. Fixed reconstructed energies, directions, mass and pair transverse momentum isolate the detector-selection response. A new reconstruction of the entire cluster energy could also migrate events across the mass window. [Hard-event matching](paired_weights.md) · [Full calorimeter replay](herwig_replay.md)
 
 An independent run on **960,000 PYTHIA 5.6 electron-channel collisions** with its native EHLQ1 hard process and shower gives **0.1533 ± 0.0063 fb** with the old selection and **0.1312 ± 0.0054 fb** with the new zero-added-leakage selection. This is **3.51 ± 0.14 times GEM**. Each of the twelve seeds independently reproduces its original accepted count. [Native results](native.json) · [Original generator setup](../README.md)

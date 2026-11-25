@@ -102,7 +102,11 @@ extern "C" void measure_(const int* seed, const int* event) {
     for (int i=0;i<rec.n;++i) {
       if (rec.k[0][i]>0 && rec.k[0][i]<=10) charges.push_back(luchge_(&rec.k[1][i])/3.);
     }
+#ifdef GEM_NATIVE_MASS_CONTROL
+    process(std::cout<<std::setprecision(16),*event,em,stable,charges,80.,140.);
+#else
     process(std::cout<<std::setprecision(16),*event,em,stable,charges);
+#endif
   }
 #endif
   for (int fake=1;fake<=2;++fake) {

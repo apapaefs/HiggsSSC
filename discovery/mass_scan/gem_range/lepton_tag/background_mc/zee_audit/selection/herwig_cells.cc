@@ -152,13 +152,14 @@ void emit_object(std::ostream& o,const char* role,const std::vector<RawParticle>
   o<<"}}";
 }
 void process(std::ostream& o,int ev,const std::vector<TaggedEM>& accepted,
-             const std::vector<RawParticle>& stable,const std::vector<double>& charge) {
+             const std::vector<RawParticle>& stable,const std::vector<double>& charge,
+             double mass_low=123.3,double mass_high=126.7) {
   std::vector<TaggedEM> photons,electrons;
   for(const auto& c:accepted) (c.pdg==22 ? photons : electrons).push_back(c);
   if(photons.empty() || electrons.size()<2) return;
   for(const auto& g:photons) for(const auto& e:electrons) {
     const auto pair=g.reco+e.reco;
-    if (pair.mass()<123.3 || pair.mass()>=126.7 || pair.pt()<=40.) continue;
+    if (pair.mass()<mass_low || pair.mass()>=mass_high || pair.pt()<=40.) continue;
     if (photons.size()!=1 || electrons.size()!=2) throw std::runtime_error("Ambiguous hard ee-gamma final state");
     const auto& t=electrons[electrons[0].index==e.index ? 1 : 0];
     // With precisely three EM objects, the identified tag and its fake-photon

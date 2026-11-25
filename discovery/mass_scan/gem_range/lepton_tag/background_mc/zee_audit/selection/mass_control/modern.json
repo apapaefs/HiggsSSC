@@ -1,0 +1,42 @@
+{
+  "calibration_interval_gev": [
+    80.0,
+    100.0
+  ],
+  "gem_calibration_fb": 0.49,
+  "mc_calibration_fb": 3.0098750437838078,
+  "scale": 0.16279745599804227,
+  "scale_mc_se": 0.004209993225375356,
+  "comparison": [
+    {
+      "interval_gev": [
+        100.0,
+        120.0
+      ],
+      "unscaled_fb": 1.8832765335545159,
+      "predicted_fb": 0.30659262860348685,
+      "predicted_mc_se_fb": 0.0122509766070725,
+      "gem_fb": 0.31
+    },
+    {
+      "interval_gev": [
+        120.0,
+        140.0
+      ],
+      "unscaled_fb": 1.2372666698719041,
+      "predicted_fb": 0.2014238662463156,
+      "predicted_mc_se_fb": 0.009747150610771324,
+      "gem_fb": 0.2
+    },
+    {
+      "interval_gev": [
+        123.3,
+        126.7
+      ],
+      "unscaled_fb": 0.2574567749388496,
+      "predicted_fb": 0.04191330798950524,
+      "predicted_mc_se_fb": 0.004365897000502454,
+      "gem_fb": 0.03740000000000006
+    }
+  ]
+}
