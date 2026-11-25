@@ -1,0 +1,36 @@
+{
+  "production_order": "MC@NLO",
+  "collider_energy_tev": 40,
+  "true_mass_gev": 125.0,
+  "production_manifest": "/home/shared/HiggsSSC/fourlepton/ssc40-20261118/manifest_ssc.json",
+  "production_manifest_sha256": "2e58f441ec25b5fb6f82dd83ff786d6e28337029215fd648a2128d55317465c6",
+  "by_mode": {
+    "wp_h": {
+      "production_pb": 3.2705023,
+      "w_decay_probability": 0.2172,
+      "leptonic_diphoton_fb": 1.6125015360012,
+      "selected_fb": 0.18132547392784576
+    },
+    "wm_h": {
+      "production_pb": 2.3891032,
+      "w_decay_probability": 0.2172,
+      "leptonic_diphoton_fb": 1.1779329981408,
+      "selected_fb": 0.13245832910820238
+    },
+    "tt_h": {
+      "production_pb": 5.4687732,
+      "w_decay_probability": 0.38722416000000004,
+      "leptonic_diphoton_fb": 4.807045316523163,
+      "selected_fb": 0.5405512805728857
+    }
+  },
+  "br_h_gamma_gamma": 0.00227,
+  "br_w_to_direct_e_or_mu": 0.2172,
+  "branching_source": "https://pdglive.lbl.gov/BranchingRatio.action?pdgid=S043.7",
+  "historical_conditional_acceptance": 0.11244979919678713,
+  "historical_selected_fb": 0.7,
+  "historical_generated_tagged_fb": 6.2250000000000005,
+  "generated_tagged_fb": 7.597479850665163,
+  "selected_fb": 0.8543350836089338,
+  "selected_pm2sigma_fb": 0.81546261184881
+}

@@ -111,6 +111,9 @@ class Experiment:
             for mass_index in np.unique(j):
                 group = rows[j == mass_index]
                 lo, hi = self.start[mass_index], self.stop[mass_index]
+                if lo == hi:
+                    # Some mass hypotheses use only the Gaussian channel.
+                    continue
                 cells[group, lo:hi] = 0
                 event_rows = np.repeat(group, k[group])
                 probabilities = np.cumsum(self.bkg[lo:hi]) / self.b_window[mass_index]

@@ -19,6 +19,7 @@ python3 student_events.py discovery
 
 [Results, plots and the comparison with GEM](discovery/README.md) ·
 [GEM search ranges and 80–160 GeV diphoton discovery reach](discovery/mass_scan/gem_range/README.md) ·
+[Inclusive and lepton-tagged diphoton combination](discovery/mass_scan/gem_range/lepton_tag/README.md) ·
 [Inputs, checksums and replication on Timur](discovery/REPLICATION.md)
 
 ## Analyze the prepared 40 TeV events on Timur

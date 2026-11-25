@@ -1,0 +1,22 @@
+{
+  "sample": "bkg_dijet_double_fake",
+  "table_sha256": "c1be857e4c01a7c94890f5c2b699f07f8b4e23cce9d06afd865fddddad6c7fa8",
+  "generated_events": 1320000,
+  "selected_pairs": 31,
+  "window_gev": [
+    123.3,
+    126.7
+  ],
+  "results": {
+    "pair_only": {
+      "source_count": 30,
+      "rate_fb": 285.68799429828675,
+      "mc_error_fb": 52.9305874764006
+    },
+    "unused_fiducial_jet_candidates": {
+      "source_count": 18,
+      "rate_fb": 340.6410701400666,
+      "mc_error_fb": 96.94324989378552
+    }
+  }
+}

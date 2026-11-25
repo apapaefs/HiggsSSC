@@ -1,0 +1,190 @@
+[
+  {
+    "sample": "bkg_prompt_aa",
+    "native_path": "/home/apapaefs/Projects/HiggsSSC/hgammagamma/HOAnalysis/runs/ho_bg_1m_01/Backgrounds/events/bkg_prompt_aa/herwig/events/bkg_prompt_aa.root",
+    "native_sha256": "c96b8e5f209d6673f03e0e8229cae8d910821b115a92aa675b925eb95fcd156a",
+    "detector_sha256": "fcd5b827ddecf3c319c233465f595ea45fffd4d8e8b407a42578946f6b73c767",
+    "maximum_abs_selected_source_weight_fb": 3.0753547529993575,
+    "native_entries": 999913.0,
+    "window_checks": [
+      {
+        "window_gev": [
+          100.0,
+          150.0
+        ],
+        "results": {
+          "pair_only": {
+            "source_count": 2000,
+            "rate_fb": 6059.06820568538,
+            "mc_error_fb": 136.5267295195016
+          },
+          "fiducial_lepton": {
+            "source_count": 8,
+            "rate_fb": 24.60283802399486,
+            "mc_error_fb": 8.698416801600501
+          },
+          "lepton_jet_isolation_proxy": {
+            "source_count": 0,
+            "rate_fb": 0.0,
+            "mc_error_fb": 0.0
+          },
+          "jet_candidates_sum_including_fake_photon_jet": {
+            "source_count": 1739,
+            "rate_fb": 7541.42790552336,
+            "mc_error_fb": 202.12490499017238
+          }
+        }
+      },
+      {
+        "window_gev": [
+          120.0,
+          130.0
+        ],
+        "results": {
+          "pair_only": {
+            "source_count": 395,
+            "rate_fb": 1214.7651274347463,
+            "mc_error_fb": 61.12146683804568
+          },
+          "fiducial_lepton": {
+            "source_count": 2,
+            "rate_fb": 6.150709505998715,
+            "mc_error_fb": 4.349208400800251
+          },
+          "lepton_jet_isolation_proxy": {
+            "source_count": 0,
+            "rate_fb": 0.0,
+            "mc_error_fb": 0.0
+          },
+          "jet_candidates_sum_including_fake_photon_jet": {
+            "source_count": 346,
+            "rate_fb": 1506.923828969685,
+            "mc_error_fb": 89.0260756519955
+          }
+        }
+      },
+      {
+        "window_gev": [
+          123.3,
+          126.7
+        ],
+        "results": {
+          "pair_only": {
+            "source_count": 130,
+            "rate_fb": 399.7961178899164,
+            "mc_error_fb": 35.06443912831697
+          },
+          "fiducial_lepton": {
+            "source_count": 1,
+            "rate_fb": 3.0753547529993575,
+            "mc_error_fb": 3.0753547529993575
+          },
+          "lepton_jet_isolation_proxy": {
+            "source_count": 0,
+            "rate_fb": 0.0,
+            "mc_error_fb": 0.0
+          },
+          "jet_candidates_sum_including_fake_photon_jet": {
+            "source_count": 116,
+            "rate_fb": 504.3581794918946,
+            "mc_error_fb": 50.720049931446646
+          }
+        }
+      }
+    ]
+  },
+  {
+    "sample": "bkg_gamma_j",
+    "native_path": "/home/apapaefs/Projects/HiggsSSC/hgammagamma/HOAnalysis/runs/ho_bg_1m_01/Backgrounds/events/bkg_gamma_j/herwig/events/bkg_gamma_j.root",
+    "native_sha256": "dcbf7402ccecd0ddc941b4fafdc1dbc03405db2bc8623d6a2592075c3c1ad4da",
+    "detector_sha256": "5c9883991ba2b0e0cfe0d6cdccc5ac0395cc7f0e9224e0507f0ce9b5ddbc6ae8",
+    "maximum_abs_selected_source_weight_fb": 3.4892618766496097,
+    "native_entries": 999903.0,
+    "window_checks": [
+      {
+        "window_gev": [
+          100.0,
+          150.0
+        ],
+        "results": {
+          "pair_only": {
+            "source_count": 972,
+            "rate_fb": 2084.868970347585,
+            "mc_error_fb": 92.59067818989944
+          },
+          "fiducial_lepton": {
+            "source_count": 5,
+            "rate_fb": 14.237713949900938,
+            "mc_error_fb": 6.749373638837989
+          },
+          "lepton_jet_isolation_proxy": {
+            "source_count": 0,
+            "rate_fb": 0.0,
+            "mc_error_fb": 0.0
+          },
+          "jet_candidates_sum_including_fake_photon_jet": {
+            "source_count": 968,
+            "rate_fb": 3979.6568738523174,
+            "mc_error_fb": 188.36573661966958
+          }
+        }
+      },
+      {
+        "window_gev": [
+          120.0,
+          130.0
+        ],
+        "results": {
+          "pair_only": {
+            "source_count": 188,
+            "rate_fb": 394.6661098245141,
+            "mc_error_fb": 40.26777582135168
+          },
+          "fiducial_lepton": {
+            "source_count": 1,
+            "rate_fb": 3.285347368145673,
+            "mc_error_fb": 3.285347368145673
+          },
+          "lepton_jet_isolation_proxy": {
+            "source_count": 0,
+            "rate_fb": 0.0,
+            "mc_error_fb": 0.0
+          },
+          "jet_candidates_sum_including_fake_photon_jet": {
+            "source_count": 187,
+            "rate_fb": 780.0292992327652,
+            "mc_error_fb": 84.82247052939427
+          }
+        }
+      },
+      {
+        "window_gev": [
+          123.3,
+          126.7
+        ],
+        "results": {
+          "pair_only": {
+            "source_count": 73,
+            "rate_fb": 158.96915111861102,
+            "mc_error_fb": 25.552865571925476
+          },
+          "fiducial_lepton": {
+            "source_count": 0,
+            "rate_fb": 0.0,
+            "mc_error_fb": 0.0
+          },
+          "lepton_jet_isolation_proxy": {
+            "source_count": 0,
+            "rate_fb": 0.0,
+            "mc_error_fb": 0.0
+          },
+          "jet_candidates_sum_including_fake_photon_jet": {
+            "source_count": 73,
+            "rate_fb": 288.2746431472469,
+            "mc_error_fb": 50.36616557808345
+          }
+        }
+      }
+    ]
+  }
+]

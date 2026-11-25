@@ -20,7 +20,7 @@ The figures use the expected bin means at the physical cross sections. A single 
 
 Searching for a common mass anywhere in **110–135 GeV** gives a combined median **global** 5σ threshold of **2.30 fb⁻¹ (2.76 design months)** for a true 125 GeV Higgs and central background. The projected 90% exposure is **3.95 fb⁻¹ (4.74 months)**. [Mass-scan calculation and local probability plot](mass_scan/README.md)
 
-GEM's original programme covered **80–800 GeV**, with inclusive diphotons at **80–160 GeV** and four leptons at **140–800 GeV**. Using our signal and background samples across GEM's inclusive diphoton range gives a median global 5σ exposure of **5.27 fb⁻¹ (6.33 design months)**. [Original benchmarks and the GEM-range diphoton search](mass_scan/gem_range/README.md)
+GEM's original programme covered **80–800 GeV**, with inclusive diphotons at **80–160 GeV** and four leptons at **140–800 GeV**. Using our signal and background samples across GEM's inclusive diphoton range gives a median global 5σ exposure of **5.27 fb⁻¹ (6.33 design months)**. Adding the lepton-tagged category and including ggF, WH and ttH gives **4.23 fb⁻¹ (5.08 design months)**, with GEM's tagged background. [Original benchmarks and the GEM-range diphoton search](mass_scan/gem_range/README.md) · [Tagged signal and joint scan](mass_scan/gem_range/lepton_tag/README.md)
 
 ## Discovery reach
 

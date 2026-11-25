@@ -1,0 +1,30 @@
+{
+  "shower_file_sha256": "3d15a88b49789587899aebb1c4aff978b2271fa4fb760a1d1f000279a9f6da7d",
+  "response_file_sha256": "cf352f9f53a3f7ab15f73321e846f51284d13fedc5a227e37dfa7ec5a2584f99",
+  "generated_events": 100000,
+  "shower_events": 99994,
+  "mass_window_gev": [
+    120,
+    130
+  ],
+  "inclusive_ggf_fb": 168.7822888235949,
+  "pair_pt_min_gev": 40,
+  "isolation_and_id_applied_to_leptons": false,
+  "measure": "Candidates with any shower electron or muon passing the stated kinematic cuts. The signed rates precede lepton isolation and identification.",
+  "results": {
+    "pt20_eta2p5": {
+      "eligible_sources": 66,
+      "signed_fb": 0.319616572003012,
+      "absolute_weight_fb": 0.37669009168298406,
+      "mc_error_fb": 0.04636734521812945,
+      "fraction": 0.0018936617949118085
+    },
+    "pt15_eta3": {
+      "eligible_sources": 125,
+      "signed_fb": 0.6449586449978506,
+      "absolute_weight_fb": 0.7134474223981779,
+      "mc_error_fb": 0.0638126789191814,
+      "fraction": 0.0038212459938372907
+    }
+  }
+}

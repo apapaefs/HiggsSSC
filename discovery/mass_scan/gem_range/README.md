@@ -47,7 +47,9 @@ For a conservative cross-check, requiring a one-sided local 5.9034σ at each of 
 
 ## What remains for the full 80–800 GeV programme
 
-A GEM-style low-mass combination needs a separate lepton-tagged photon selection, its backgrounds and its overlap with the inclusive photon selection. Extending four leptons to 800 GeV requires wider signal templates, continuum generation and mass-dependent selections. Our current four-lepton continuum was generated over 90–180 GeV in hard mass and our classifier was evaluated for the 125 GeV signal. The two additional ZZ channels enter GEM's table at 800 GeV. A global probability for the complete programme would require a joint calibration across the contributing channels and masses. [Four-lepton and diphoton inputs](../../REPLICATION.md)
+The low-mass combination now includes lepton-tagged photons through 140 GeV and the inclusive search through 160 GeV. With our directly simulated ggF, WH and ttH signals and GEM's tagged background, the median global 5σ exposure is **4.23 fb⁻¹ (5.08 design months)**. Applying GEM's tag efficiency to modern production instead and keeping the original ggF-only inclusive signal gives **4.37 fb⁻¹ (5.25 months)**. [Lepton-tagged signal, category overlap and combined reach](lepton_tag/README.md)
+
+Extending four leptons to 800 GeV requires wider signal templates, continuum generation and mass-dependent selections. Our current four-lepton continuum was generated over 90–180 GeV in hard mass and our classifier was evaluated for the 125 GeV signal. The two additional ZZ channels enter GEM's table at 800 GeV. A global probability for the complete programme would require a joint calibration across the contributing channels and masses. [Four-lepton and diphoton inputs](../../REPLICATION.md)
 
 ## Reproduce
 
