@@ -95,13 +95,13 @@ def critical_value(field):
     return brentq(lambda z: upper_tail(z) - ALPHA, 5., 7.), norm.isf(upper_tail(5.))
 
 
-def tail_check(field, z):
+def tail_check(field, z, *, seed=NULL_SEED, toys=NULL_TOYS):
     """Unbiased finite-grid trials factor at z using a conditional mixture."""
-    rng = np.random.default_rng(NULL_SEED)
+    rng = np.random.default_rng(seed)
     a = field.astype(np.float32)
     factors = []
-    for start in range(0, NULL_TOYS, 500):
-        size = min(500, NULL_TOYS - start)
+    for start in range(0, toys, 500):
+        size = min(500, toys - start)
         # Pick a mass uniformly; force this mass's score above threshold, with
         # the correct truncated-normal law. Count all excursions in the field.
         choice = rng.integers(len(a), size=size)

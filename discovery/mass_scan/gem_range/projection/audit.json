@@ -1,0 +1,145 @@
+{
+  "archive_packets": 747,
+  "archive_sha256": "08d120fa03420bf6aa04590f54a7e8ca72d730233db8352b581941115fc85c91",
+  "baseline_strata": 7,
+  "exposures_by_stratum_and_stage": {
+    "bkg_dijet_double_fake/full": {
+      "baseline": {
+        "generated_events": 1320000,
+        "inputs": 1
+      },
+      "final": {
+        "generated_events": 240000000,
+        "inputs": 192
+      },
+      "prior": {
+        "generated_events": 45600000,
+        "inputs": 1
+      }
+    },
+    "bkg_dy_ee/full": {
+      "baseline": {
+        "generated_events": 100000,
+        "inputs": 1
+      }
+    },
+    "bkg_gamma_j/full": {
+      "baseline": {
+        "generated_events": 1000000,
+        "inputs": 1
+      },
+      "final": {
+        "generated_events": 42585000,
+        "inputs": 172
+      },
+      "prior": {
+        "generated_events": 7350000,
+        "inputs": 10
+      }
+    },
+    "bkg_loop_gg_aa/broad_outside": {
+      "baseline": {
+        "generated_events": 20000,
+        "inputs": 1
+      },
+      "final": {
+        "generated_events": 104000,
+        "inputs": 13
+      }
+    },
+    "bkg_loop_gg_aa/focused_inside": {
+      "baseline": {
+        "generated_events": 5000,
+        "inputs": 1
+      },
+      "final": {
+        "generated_events": 352000,
+        "inputs": 44
+      },
+      "prior": {
+        "generated_events": 64000,
+        "inputs": 8
+      }
+    },
+    "bkg_prompt_aa/full": {
+      "baseline": {
+        "generated_events": 1000000,
+        "inputs": 1
+      },
+      "final": {
+        "generated_events": 68340000,
+        "inputs": 275
+      },
+      "prior": {
+        "generated_events": 12400000,
+        "inputs": 32
+      }
+    },
+    "signal_gg_h_aa/full": {
+      "baseline": {
+        "generated_events": 100000,
+        "inputs": 1
+      }
+    }
+  },
+  "generated_events": 420340000,
+  "pooled_overlap_by_sample": {
+    "bkg_dijet_double_fake": {
+      "max_covariance_difference_fb2": 3.552713678800501e-15,
+      "max_rate_difference_fb": 1.1368683772161603e-13
+    },
+    "bkg_dy_ee": {
+      "max_covariance_difference_fb2": 1.734723475976807e-18,
+      "max_rate_difference_fb": 2.220446049250313e-16
+    },
+    "bkg_gamma_j": {
+      "max_covariance_difference_fb2": 3.197442310920451e-14,
+      "max_rate_difference_fb": 2.8421709430404007e-13
+    },
+    "bkg_loop_gg_aa": {
+      "max_covariance_difference_fb2": 5.684341886080802e-14,
+      "max_rate_difference_fb": 1.0658141036401503e-14
+    },
+    "bkg_prompt_aa": {
+      "max_covariance_difference_fb2": 4.263256414560601e-14,
+      "max_rate_difference_fb": 9.094947017729282e-13
+    },
+    "signal_gg_h_aa": {
+      "max_covariance_difference_fb2": 2.220446049250313e-16,
+      "max_rate_difference_fb": 1.4210854715202004e-14
+    }
+  },
+  "reference_overlap_gev": [
+    105,
+    160
+  ],
+  "source_projections": {
+    "baseline.npz": {
+      "archive_inputs": 7,
+      "max_individual_overlap_covariance_difference_fb2": 1.3642420526593924e-12,
+      "max_individual_overlap_rate_difference_fb": 1.1368683772161603e-13,
+      "max_row_overlap_covariance_difference_fb2": 1.3642420526593924e-12,
+      "max_row_overlap_rate_difference_fb": 1.1368683772161603e-13,
+      "npz_rows": 7,
+      "sha256": "45d56f5ec12bf29d51ba661839cd105bbf2dad9909f0d4b25071b6e5a24cb63a"
+    },
+    "fake_box.npz": {
+      "archive_inputs": 258,
+      "max_individual_overlap_covariance_difference_fb2": 2.7284841053187847e-12,
+      "max_individual_overlap_rate_difference_fb": 2.2737367544323206e-13,
+      "max_row_overlap_covariance_difference_fb2": 2.7284841053187847e-12,
+      "max_row_overlap_rate_difference_fb": 2.2737367544323206e-13,
+      "npz_rows": 258,
+      "sha256": "5cc80557adb2686941a6df956fc7ffdec5ea1ee3d6c0731042e2883dc082e5c0"
+    },
+    "nlo_packets.npz": {
+      "archive_inputs": 489,
+      "max_individual_overlap_covariance_difference_fb2": 0.0,
+      "max_individual_overlap_rate_difference_fb": 0.0,
+      "max_row_overlap_covariance_difference_fb2": 0.0,
+      "max_row_overlap_rate_difference_fb": 0.0,
+      "npz_rows": 2,
+      "sha256": "f6df43af2d0598943abbd64f2ffc60bac86514d60d95536a197dc6e011a0a23a"
+    }
+  }
+}

@@ -1,0 +1,89 @@
+{
+  "channel": "inclusive diphoton",
+  "true_mass_gev": 125.0,
+  "scan_gev": [
+    80,
+    160
+  ],
+  "step_gev": 0.5,
+  "mass_hypotheses": 161,
+  "design_fb_inverse_per_year": 10.0,
+  "model": "Gaussian local scores centred on the pooled background, normalized to the calibrated 125 GeV likelihood",
+  "relative_resolution_source": "GEM-TN-93-373 Table 6",
+  "mean_core_tail_fraction_at_125": [
+    124.99515234971325,
+    0.7950511431371743,
+    1.2045731586475614,
+    0.14953529366513507
+  ],
+  "calibration_seed": 806125,
+  "calibration_experiments": 40000,
+  "independent_null_seed": 160625,
+  "independent_null_experiments": 80000,
+  "signal_seed": 51625,
+  "signal_experiments": 100000,
+  "constant_width_median_local_z_for_global_five": 5.868888091985407,
+  "fixed_median_fb_inverse": 3.6100337850931212,
+  "discoveries": [
+    {
+      "power": 0.5,
+      "luminosity_fb_inverse": 5.272683413352192,
+      "months": 6.32722009602263,
+      "local_z_for_global_five": 5.870943535211596,
+      "effective_trials": 132.3042320833337,
+      "check_trials": 132.4752275,
+      "check_trials_standard_error": 0.13965975645463707,
+      "field_luminosity_fb_inverse": 5.272956441332755,
+      "raw_true_mass_score": 5.903531096514852,
+      "calibrated_true_mass_score": 5.821539509303037,
+      "largest_abs_poisson_skew": 0.00609808552664381,
+      "mass_of_largest_abs_skew_gev": 137.5,
+      "max_first_order_local_poisson_threshold_shift": 0.034015098701511155
+    },
+    {
+      "power": 0.9,
+      "luminosity_fb_inverse": 9.173529601545935,
+      "months": 11.008235521855122,
+      "local_z_for_global_five": 5.8706276185459165,
+      "effective_trials": 132.05233416666633,
+      "check_trials": 132.222055,
+      "check_trials_standard_error": 0.14011563414047842,
+      "field_luminosity_fb_inverse": 9.175257189046011,
+      "raw_true_mass_score": 7.202978051276615,
+      "calibrated_true_mass_score": 7.10563100608692,
+      "largest_abs_poisson_skew": 0.0036203130990805,
+      "mass_of_largest_abs_skew_gev": 137.5,
+      "max_first_order_local_poisson_threshold_shift": 0.02019185501545581
+    }
+  ],
+  "same_model_110_135_median": {
+    "power": 0.5,
+    "luminosity_fb_inverse": 4.816679911273009,
+    "months": 5.780015893527611,
+    "local_z_for_global_five": 5.672770329898405,
+    "effective_trials": 40.802592499999726,
+    "check_trials": 40.815990625,
+    "check_trials_standard_error": 0.04549950278381013,
+    "field_luminosity_fb_inverse": 4.816562054119674,
+    "raw_true_mass_score": 5.698817968288021,
+    "calibrated_true_mass_score": 5.619560564968852,
+    "largest_abs_poisson_skew": 0.0065014088242383375,
+    "mass_of_largest_abs_skew_gev": 134.5,
+    "max_first_order_local_poisson_threshold_shift": 0.033786004749607905
+  },
+  "quarter_gev_grid_80_160_median": {
+    "power": 0.5,
+    "luminosity_fb_inverse": 5.283278037617013,
+    "months": 6.339933645140415,
+    "local_z_for_global_five": 5.90552817371441,
+    "effective_trials": 163.09321187500126,
+    "check_trials": 163.19463895833334,
+    "check_trials_standard_error": 0.292608057314831,
+    "field_luminosity_fb_inverse": 5.283208815862542,
+    "raw_true_mass_score": 5.907957139774611,
+    "calibrated_true_mass_score": 5.825907106160939,
+    "largest_abs_poisson_skew": 0.00608791872786728,
+    "mass_of_largest_abs_skew_gev": 137.5,
+    "max_first_order_local_poisson_threshold_shift": 0.03437164134887728
+  }
+}

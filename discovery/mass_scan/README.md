@@ -1,5 +1,7 @@
 # When could one SSC experiment have discovered a Higgs of unknown mass?
 
+The historical reference for this study is GEM's **80–800 GeV** Higgs programme. Its inclusive diphoton benchmarks spanned **80–160 GeV** and its four-lepton benchmarks spanned **140–800 GeV**. In our inclusive diphoton projection, searching the full 80–160 GeV interval gives a median global 5σ exposure of **5.27 fb⁻¹ (6.33 design months)** for a true 125 GeV Higgs. We chose the narrower intervals below to match our frozen four-lepton selection around 125 GeV. [Original GEM benchmark table, search ranges and our wider diphoton calculation](gem_range/README.md)
+
 A 40 TeV SSC experiment searching **110–135 GeV** in diphotons and four leptons reaches a **50% probability of global 5σ at about 2.30 fb⁻¹**, or **2.76 design months**. Testing a known mass of 125 GeV requires **1.83 fb⁻¹ (2.20 months)** for local 5σ. The scan costs about **26% more luminosity**, or **17 days** at 10 fb⁻¹ per year. The injected Standard Model Higgs has a mass of 125 GeV in every row.
 
 | Mass hypotheses | Combined 50% [fb⁻¹] | Months | Combined 90% [fb⁻¹] | Months | Diphoton 50% [fb⁻¹] | Months |

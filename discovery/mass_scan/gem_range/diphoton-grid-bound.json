@@ -1,0 +1,29 @@
+{
+  "channel": "inclusive diphoton",
+  "scan_gev": [
+    80,
+    160
+  ],
+  "spacing_gev": 0.5,
+  "mass_hypotheses": 161,
+  "true_mass_gev": 125.0,
+  "grid_definition": "Inclusive endpoints span the original GEM Table 2-3 diphoton benchmarks. The 0.5 GeV spacing is a modern analysis choice.",
+  "global_one_sided_size_upper_bound": 2.8665157187919344e-07,
+  "local_one_sided_size": 1.7804445458334996e-09,
+  "local_critical_z": 5.903398421061108,
+  "size_condition": "Bonferroni bounds the false-positive probability at a fixed exposure provided each of the 161 local tests has valid size under the null. The off-mass tests have not been calibrated here.",
+  "power_condition": "Only the on-grid 125 GeV test contributes to this power calculation, using the published calibrated sideband likelihood and Gaussian score approximation. Under this model, the exposures suffice for the grid to reach at least the stated power.",
+  "design_fb_inverse_per_year": 10,
+  "results": [
+    {
+      "power": 0.5,
+      "sufficient_luminosity_fb_inverse": 5.467920473785578,
+      "design_months": 6.561504568542693
+    },
+    {
+      "power": 0.9,
+      "sufficient_luminosity_fb_inverse": 9.48965648543406,
+      "design_months": 11.387587782520871
+    }
+  ]
+}
